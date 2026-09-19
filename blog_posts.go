@@ -8,16 +8,13 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/gofiber/fiber/v3/middleware/adaptor"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/open-rails/authkit/authhttp"
-	"github.com/open-rails/authkit/verify"
+	authkitfiber "github.com/open-rails/authkit/adapters/fiber"
 )
 
 type blogAPI struct {
 	pool *pgxpool.Pool
-	auth *authhttp.Service
 }
 
 type blogPost struct {
@@ -38,10 +35,8 @@ type blogPostInput struct {
 }
 
 func (api *blogAPI) list(c fiber.Ctx) error {
-	ownerID, err := api.optionalUserID(c)
-	if err != nil {
-		return authError(c, err)
-	}
+	user, _ := authkitfiber.UserClaims(c)
+	ownerID := user.UserID
 
 	query := `
 		SELECT id, slug, title, body, visibility, created_at, updated_at
@@ -79,10 +74,8 @@ func (api *blogAPI) get(c fiber.Ctx) error {
 	if err != nil {
 		return clientError(c, http.StatusBadRequest, "invalid post id")
 	}
-	ownerID, err := api.optionalUserID(c)
-	if err != nil {
-		return authError(c, err)
-	}
+	user, _ := authkitfiber.UserClaims(c)
+	ownerID := user.UserID
 
 	var post blogPost
 	query := `
@@ -107,9 +100,9 @@ func (api *blogAPI) get(c fiber.Ctx) error {
 }
 
 func (api *blogAPI) create(c fiber.Ctx) error {
-	claims, err := api.requiredClaims(c)
-	if err != nil {
-		return authError(c, err)
+	user, ok := authkitfiber.UserClaims(c)
+	if !ok {
+		return clientError(c, http.StatusUnauthorized, "a user access token is required")
 	}
 
 	var input blogPostInput
@@ -128,11 +121,11 @@ func (api *blogAPI) create(c fiber.Ctx) error {
 	}
 
 	var post blogPost
-	err = api.pool.QueryRow(c.Context(), `
+	err := api.pool.QueryRow(c.Context(), `
 		INSERT INTO blog_posts (owner_id, slug, title, body, visibility)
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, slug, title, body, visibility, created_at, updated_at`,
-		claims.UserID, *input.Slug, *input.Title, *input.Body, visibility,
+		user.UserID, *input.Slug, *input.Title, *input.Body, visibility,
 	).Scan(&post.ID, &post.Slug, &post.Title, &post.Body, &post.Visibility, &post.CreatedAt, &post.UpdatedAt)
 	if err != nil {
 		return databaseError(c, err)
@@ -141,9 +134,9 @@ func (api *blogAPI) create(c fiber.Ctx) error {
 }
 
 func (api *blogAPI) update(c fiber.Ctx) error {
-	claims, err := api.requiredClaims(c)
-	if err != nil {
-		return authError(c, err)
+	user, ok := authkitfiber.UserClaims(c)
+	if !ok {
+		return clientError(c, http.StatusUnauthorized, "a user access token is required")
 	}
 	id, err := postID(c)
 	if err != nil {
@@ -158,7 +151,7 @@ func (api *blogAPI) update(c fiber.Ctx) error {
 	var post blogPost
 	err = api.pool.QueryRow(c.Context(), `
 		SELECT id, slug, title, body, visibility, created_at, updated_at
-		FROM blog_posts WHERE id = $1 AND owner_id = $2`, id, claims.UserID).
+		FROM blog_posts WHERE id = $1 AND owner_id = $2`, id, user.UserID).
 		Scan(&post.ID, &post.Slug, &post.Title, &post.Body, &post.Visibility, &post.CreatedAt, &post.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, http.StatusNotFound, "post not found")
@@ -188,7 +181,7 @@ func (api *blogAPI) update(c fiber.Ctx) error {
 		SET slug = $1, title = $2, body = $3, visibility = $4, updated_at = NOW()
 		WHERE id = $5 AND owner_id = $6
 		RETURNING id, slug, title, body, visibility, created_at, updated_at`,
-		post.Slug, post.Title, post.Body, post.Visibility, id, claims.UserID,
+		post.Slug, post.Title, post.Body, post.Visibility, id, user.UserID,
 	).Scan(&post.ID, &post.Slug, &post.Title, &post.Body, &post.Visibility, &post.CreatedAt, &post.UpdatedAt)
 	if err != nil {
 		return databaseError(c, err)
@@ -197,15 +190,15 @@ func (api *blogAPI) update(c fiber.Ctx) error {
 }
 
 func (api *blogAPI) delete(c fiber.Ctx) error {
-	claims, err := api.requiredClaims(c)
-	if err != nil {
-		return authError(c, err)
+	user, ok := authkitfiber.UserClaims(c)
+	if !ok {
+		return clientError(c, http.StatusUnauthorized, "a user access token is required")
 	}
 	id, err := postID(c)
 	if err != nil {
 		return clientError(c, http.StatusBadRequest, "invalid post id")
 	}
-	result, err := api.pool.Exec(c.Context(), "DELETE FROM blog_posts WHERE id = $1 AND owner_id = $2", id, claims.UserID)
+	result, err := api.pool.Exec(c.Context(), "DELETE FROM blog_posts WHERE id = $1 AND owner_id = $2", id, user.UserID)
 	if err != nil {
 		return databaseError(c, err)
 	}
@@ -213,32 +206,6 @@ func (api *blogAPI) delete(c fiber.Ctx) error {
 		return clientError(c, http.StatusNotFound, "post not found")
 	}
 	return c.SendStatus(http.StatusNoContent)
-}
-
-func (api *blogAPI) requiredClaims(c fiber.Ctx) (verify.Claims, error) {
-	req, err := adaptor.ConvertRequest(c, true)
-	if err != nil {
-		return verify.Claims{}, err
-	}
-	claims, err := api.auth.Verifier().VerifyRequest(req)
-	if err != nil {
-		return verify.Claims{}, err
-	}
-	if claims.UserID == "" {
-		return verify.Claims{}, errors.New("a user access token is required")
-	}
-	return claims, nil
-}
-
-func (api *blogAPI) optionalUserID(c fiber.Ctx) (string, error) {
-	if strings.TrimSpace(c.Get("Authorization")) == "" {
-		return "", nil
-	}
-	claims, err := api.requiredClaims(c)
-	if err != nil {
-		return "", err
-	}
-	return claims.UserID, nil
 }
 
 func scanBlogPost(row interface{ Scan(...any) error }) (blogPost, error) {
@@ -259,10 +226,6 @@ func validatePostFields(slug, title, body, visibility string) error {
 		return errors.New("visibility must be public or private")
 	}
 	return nil
-}
-
-func authError(c fiber.Ctx, err error) error {
-	return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
 }
 
 func clientError(c fiber.Ctx, status int, message string) error {
