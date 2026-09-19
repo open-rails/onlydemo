@@ -25,8 +25,18 @@ import (
 // in the connection string and its contents are never reset.
 func TestBlogPostsIntegration(t *testing.T) {
 	pool := newBlogTestDatabase(t)
-	if err := applyMigrations(t.Context(), pool); err != nil {
-		t.Fatalf("apply embedded migrations: %v", err)
+	for pass := 1; pass <= 2; pass++ {
+		if err := applyMigrations(t.Context(), pool); err != nil {
+			t.Fatalf("apply embedded migrations pass %d: %v", pass, err)
+		}
+	}
+	var placed bool
+	if err := pool.QueryRow(t.Context(), `SELECT to_regclass('profiles.users') IS NOT NULL AND to_regclass('public.users') IS NULL`).Scan(&placed); err != nil || !placed {
+		t.Fatalf("AuthKit namespace placement = %v, err=%v", placed, err)
+	}
+	var sequenceType string
+	if err := pool.QueryRow(t.Context(), `SELECT data_type FROM information_schema.columns WHERE table_schema='public' AND table_name='migrations' AND column_name='sequence'`).Scan(&sequenceType); err != nil || sequenceType != "bigint" {
+		t.Fatalf("ledger sequence type = %q, err=%v", sequenceType, err)
 	}
 	service, mount, err := newAuth(Config{
 		AuthIssuer:   "http://localhost:3000",
