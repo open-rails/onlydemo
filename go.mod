@@ -1,4 +1,4 @@
-module openrails-demo
+module github.com/open-rails/openrails-demo
 
 go 1.26.6
 
@@ -7,8 +7,9 @@ require (
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/knadh/koanf/providers/env/v2 v2.0.1
 	github.com/knadh/koanf/v2 v2.3.6
-	github.com/open-rails/authkit v0.105.2
-	github.com/open-rails/migratekit v1.0.3
+	github.com/open-rails/authkit v0.106.1
+	github.com/open-rails/authkit/adapters/fiber v0.0.0-20260919215438-27707151927c
+	github.com/open-rails/migratekit v1.1.1
 )
 
 require (

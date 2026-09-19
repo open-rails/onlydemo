@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/gofiber/fiber/v3/middleware/adaptor"
 	"github.com/jackc/pgx/v5/pgxpool"
+	authkitfiber "github.com/open-rails/authkit/adapters/fiber"
+	"github.com/open-rails/authkit/authhttp"
 )
 
 func main() {
@@ -44,8 +46,16 @@ func main() {
 	}
 	defer authService.Close()
 
+	app := newApp(pool, authService, authMount)
+	log.Printf("API listening on http://localhost:%d", config.Port)
+	if err := app.Listen(fmt.Sprintf(":%d", config.Port)); err != nil {
+		log.Printf("server stopped: %v", err)
+	}
+}
+
+func newApp(pool *pgxpool.Pool, authService *authhttp.Service, authMount http.Handler) *fiber.App {
 	app := fiber.New()
-	blogAPI := &blogAPI{pool: pool, auth: authService}
+	blogAPI := &blogAPI{pool: pool}
 
 	app.Get("/", func(c fiber.Ctx) error {
 		return c.JSON(fiber.Map{
@@ -69,21 +79,17 @@ func main() {
 		})
 	})
 
-	app.Get("/api/posts", blogAPI.list)
-	app.Post("/api/posts", blogAPI.create)
-	app.Get("/api/posts/:id", blogAPI.get)
-	app.Patch("/api/posts/:id", blogAPI.update)
-	app.Delete("/api/posts/:id", blogAPI.delete)
+	optional := authkitfiber.Optional(authService.Verifier())
+	required := authkitfiber.Required(authService.Verifier())
+	app.Get("/api/posts", optional, blogAPI.list)
+	app.Post("/api/posts", required, blogAPI.create)
+	app.Get("/api/posts/:id", optional, blogAPI.get)
+	app.Patch("/api/posts/:id", required, blogAPI.update)
+	app.Delete("/api/posts/:id", required, blogAPI.delete)
 
 	// AuthKit owns registration, password login, token refresh, logout, and
 	// account-management routes under /api/v1. Its JWKS and browser OIDC
 	// routes are mounted at their standard root paths as well.
-	app.Use("/api/v1", adaptor.HTTPHandler(authMount))
-	app.Use("/.well-known", adaptor.HTTPHandler(authMount))
-	app.Use("/oidc", adaptor.HTTPHandler(authMount))
-
-	log.Printf("API listening on http://localhost:%d", config.Port)
-	if err := app.Listen(fmt.Sprintf(":%d", config.Port)); err != nil {
-		log.Printf("server stopped: %v", err)
-	}
+	app.Use(authkitfiber.Fallback(authMount))
+	return app
 }

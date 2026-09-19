@@ -1,0 +1,6 @@
+.env
+.runtime/
+.reports/
+.worktree-owner.md
+openrails-demo
+*.test
