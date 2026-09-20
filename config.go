@@ -20,6 +20,8 @@ type Config struct {
 	AdminUserID          string
 	PublicURL            string
 	BillingDatabaseURL   string
+	BillingSchema        string
+	RiverSchema          string
 	StripeSecretKey      string
 	StripeAccountID      string
 	StripeWebhookSecret  string
@@ -35,7 +37,7 @@ func loadConfig() (Config, error) {
 				return strings.ToLower(key), value
 			case "DATABASE_URL":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
-			case "AUTH_ISSUER", "AUTH_AUDIENCE", "PUBLIC_URL", "BILLING_DATABASE_URL", "STRIPE_SECRET_KEY", "STRIPE_ACCOUNT_ID", "STRIPE_WEBHOOK_SECRET", "BILLING_ENCRYPTION_KEY", "ADMIN_USER_ID", "ADMIN_ONLY", "ADMIN_REVOKE":
+			case "AUTH_ISSUER", "AUTH_AUDIENCE", "PUBLIC_URL", "BILLING_DATABASE_URL", "BILLING_SCHEMA", "RIVER_SCHEMA", "STRIPE_SECRET_KEY", "STRIPE_ACCOUNT_ID", "STRIPE_WEBHOOK_SECRET", "BILLING_ENCRYPTION_KEY", "ADMIN_USER_ID", "ADMIN_ONLY", "ADMIN_REVOKE":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
 			case "MIGRATIONS_ONLY":
 				return "migrations.only", value
@@ -90,6 +92,8 @@ func loadConfig() (Config, error) {
 		AdminUserID:          k.String("admin.user.id"),
 		PublicURL:            publicURL,
 		BillingDatabaseURL:   billingURL,
+		BillingSchema:        k.String("billing.schema"),
+		RiverSchema:          k.String("river.schema"),
 		StripeSecretKey:      k.String("stripe.secret.key"),
 		StripeAccountID:      k.String("stripe.account.id"),
 		StripeWebhookSecret:  k.String("stripe.webhook.secret"),

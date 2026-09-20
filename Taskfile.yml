@@ -33,10 +33,13 @@ tasks:
   db:roles:
     desc: Configure the local unprivileged billing login after migrations
     cmds:
-      - docker exec -i {{.POSTGRES_CONTAINER}} psql -U postgres -d postgres -v ON_ERROR_STOP=1 < scripts/db-role.sql
+      - psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -v river_schema="$RIVER_SCHEMA" -f scripts/db-role.sql
+    env:
+      DATABASE_URL: '{{.DATABASE_URL | default "postgres://postgres:postgres@localhost:55433/openrails_demo?sslmode=disable"}}'
+      RIVER_SCHEMA: '{{.RIVER_SCHEMA | default "public"}}'
 
   migrate:
-    desc: Apply embedded PostgreSQL migrations with migratekit
+    desc: Initialize library storage and apply demo migrations
     env:
       MIGRATIONS_ONLY: 'true'
     cmds:

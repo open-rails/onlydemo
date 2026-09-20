@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails"
+	"github.com/riverqueue/river"
 )
 
 const blogTestStripeWebhookSecret = "whsec_demo_integration_only"
@@ -34,18 +35,28 @@ func TestPostPurchasesIntegration(t *testing.T) {
 	}
 	config := Config{
 		AuthIssuer: "http://localhost:3000", AuthAudience: "openrails-demo",
-		PublicURL: "http://localhost:3000", BillingDatabaseURL: blogTestBillingDSN(t, pool),
+		PublicURL:       "http://localhost:3000",
 		StripeSecretKey: "sk_test_demo_integration", StripeAccountID: "acct_demo_test",
 		StripeWebhookSecret:  blogTestStripeWebhookSecret,
 		BillingEncryptionKey: base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{42}, 32)),
 	}
-	service, err := newAuth(config, pool)
+	// Billing initialization is independent of AuthKit's schema and runs first.
+	jobs := newJobs(pool, config)
+	if err := jobs.initialize(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := initializeBilling(t.Context(), config, pool, jobs); err != nil {
+		t.Fatalf("initialize billing database: %v", err)
+	}
+	config.BillingDatabaseURL = blogTestBillingDSN(t, pool)
+	service, err := newAuth(t.Context(), config, pool)
 	if err != nil {
 		t.Fatalf("initialize AuthKit: %v", err)
 	}
 	t.Cleanup(func() { service.Close() })
+	jobs.auth = service
 	stripe := &blogTestStripe{}
-	billing, err := newBilling(t.Context(), config, stripe)
+	billing, err := newBilling(t.Context(), config, jobs, stripe)
 	if err != nil {
 		t.Fatalf("initialize OpenRails: %v", err)
 	}
@@ -54,16 +65,26 @@ func TestPostPurchasesIntegration(t *testing.T) {
 			t.Errorf("close OpenRails: %v", err)
 		}
 	})
+	t.Cleanup(func() {
+		if err := jobs.close(context.Background()); err != nil {
+			t.Errorf("stop host jobs: %v", err)
+		}
+	})
+	jobEvents, unsubscribe := jobs.client.Subscribe(river.EventKindJobCompleted)
+	defer unsubscribe()
+	if err := jobs.start(t.Context()); err != nil {
+		t.Fatalf("start host River: %v", err)
+	}
 	fiberApp, err := newApp(pool, service, billing)
 	if err != nil {
 		t.Fatalf("mount purchase API: %v", err)
 	}
 	app := newBlogTestServer(t, fiberApp)
-	alice := registerBlogTestUser(t, app, pool, "seller")
+	alice := registerBlogTestUser(t, app, service, "seller")
 	bobApp := &blogTestServer{url: app.url, client: newBlogTestHTTPClient(t, "127.0.0.3")}
-	bob := registerBlogTestUser(t, bobApp, pool, "buyer")
+	bob := registerBlogTestUser(t, bobApp, service, "buyer")
 	charlieApp := &blogTestServer{url: app.url, client: newBlogTestHTTPClient(t, "127.0.0.4")}
-	charlie := registerBlogTestUser(t, charlieApp, pool, "otherbuyer")
+	charlie := registerBlogTestUser(t, charlieApp, service, "otherbuyer")
 	for _, input := range []map[string]any{
 		{"slug": "below-minimum", "title": "Invalid", "body": "Invalid", "price_cents": 49},
 		{"slug": "above-maximum", "title": "Invalid", "body": "Invalid", "price_cents": 100_000_000},
@@ -115,7 +136,6 @@ func TestPostPurchasesIntegration(t *testing.T) {
 	blogTestStripeWebhook(t, app, settled, "whsec_wrong_signature", http.StatusUnauthorized)
 	assertBlogTestReadable(t, app, paid, bob.token, false)
 	blogTestStripeWebhook(t, app, first.event(t, "evt_demo_unpaid", "checkout.session.completed", "complete", "unpaid"), blogTestStripeWebhookSecret, http.StatusOK)
-	assertBlogTestWebhookRecorded(t, pool, "evt_demo_unpaid")
 	assertBlogTestReadable(t, app, paid, bob.token, false)
 
 	// A second customer's same retry key stays scoped to that customer. Expiry
@@ -126,11 +146,9 @@ func TestPostPurchasesIntegration(t *testing.T) {
 	}
 	otherSession := stripe.latestSession(t)
 	blogTestStripeWebhook(t, app, otherSession.event(t, "evt_demo_expired", "checkout.session.expired", "expired", "unpaid"), blogTestStripeWebhookSecret, http.StatusOK)
-	assertBlogTestWebhookRecorded(t, pool, "evt_demo_expired")
 	assertBlogTestReadable(t, app, paid, charlie.token, false)
 
 	blogTestStripeWebhook(t, app, settled, blogTestStripeWebhookSecret, http.StatusOK)
-	assertBlogTestWebhookRecorded(t, pool, "evt_demo_paid")
 	assertBlogTestReadable(t, app, paid, bob.token, true)
 	assertBlogTestReadable(t, app, paid, charlie.token, false)
 	assertBlogTestReadable(t, app, paid, "", false)
@@ -140,9 +158,13 @@ func TestPostPurchasesIntegration(t *testing.T) {
 
 	// Replayed Stripe delivery is idempotent. Grant terms remain permanent.
 	blogTestStripeWebhook(t, app, settled, blogTestStripeWebhookSecret, http.StatusOK)
-	var grantCount int
-	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM openrails.grants WHERE customer_id=$1 AND kind='ownership' AND event='grant' AND ends_at IS NULL`, bob.id).Scan(&grantCount); err != nil || grantCount != 1 {
-		t.Fatalf("permanent purchase grant count=%d, err=%v", grantCount, err)
+	buyerID, err := openrails.ParseCustomerID(bob.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grants, err := billing.client.ListProductAccess(t.Context(), buyerID)
+	if err != nil || len(grants) != 1 || grants[0].EndsAt != nil {
+		t.Fatalf("expected one permanent purchase grant: grants=%+v, err=%v", grants, err)
 	}
 	for _, price := range []int{799, 0} {
 		blogTestRequest(t, app, http.MethodPatch, blogTestPath(paid.ID), alice.token, map[string]any{"price_cents": price}, http.StatusOK)
@@ -161,6 +183,22 @@ func TestPostPurchasesIntegration(t *testing.T) {
 	assertBlogPostIDs(t, app, alice.token, paid.ID)
 	assertBlogPostIDs(t, app, charlie.token)
 	assertBlogPostIDs(t, app, "")
+	// The shared leader must schedule both libraries, using one complete config.
+	jobCtx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	var authJob, billingJob bool
+	for !authJob || !billingJob {
+		select {
+		case event := <-jobEvents:
+			if event == nil {
+				t.Fatal("host job subscription stopped")
+			}
+			authJob = authJob || event.Job.Kind == "authkit_cleanup_expired_auth_state"
+			billingJob = billingJob || strings.HasPrefix(event.Job.Kind, "openrails.")
+		case <-jobCtx.Done():
+			t.Fatalf("shared job fleet did not execute both libraries: authkit=%v, openrails=%v", authJob, billingJob)
+		}
+	}
 	stripe.mu.Lock()
 	defer stripe.mu.Unlock()
 	for _, version := range stripe.versions {
@@ -192,17 +230,6 @@ func assertBlogTestReadable(t *testing.T, app *blogTestServer, post blogPost, to
 		}
 	} else if _, present := result["body"]; present {
 		t.Fatalf("protected body was included in unpaid response: %s", body)
-	}
-}
-
-func assertBlogTestWebhookRecorded(t *testing.T, pool *pgxpool.Pool, eventID string) {
-	t.Helper()
-	var processed bool
-	if err := pool.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM openrails.webhook_events WHERE event_id=$1)`, eventID).Scan(&processed); err != nil {
-		t.Fatalf("check webhook completion: %v", err)
-	}
-	if !processed {
-		t.Fatalf("Stripe event %s was not durably processed", eventID)
 	}
 }
 
@@ -356,12 +383,20 @@ func blogTestBillingDSN(t *testing.T, pool *pgxpool.Pool) string {
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
+		if _, err := pool.Exec(ctx, "REVOKE SELECT, UPDATE(attempted_at) ON public.river_job FROM "+pgx.Identifier{role}.Sanitize()); err != nil {
+			t.Errorf("revoke isolated queue grants: %v", err)
+		}
 		if _, err := pool.Exec(ctx, "DROP ROLE "+pgx.Identifier{role}.Sanitize()); err != nil {
 			t.Errorf("drop isolated billing role: %v", err)
 		}
 	})
 	if _, err := pool.Exec(t.Context(), "GRANT openrails_app TO "+pgx.Identifier{role}.Sanitize()); err != nil {
 		t.Fatalf("grant billing RLS role: %v", err)
+	}
+	// The host lets billing observe/heartbeat its jobs; this grants no access
+	// to the application's content or AuthKit data.
+	if _, err := pool.Exec(t.Context(), "GRANT SELECT, UPDATE(attempted_at) ON public.river_job TO "+pgx.Identifier{role}.Sanitize()); err != nil {
+		t.Fatal(err)
 	}
 	config := pool.Config().ConnConfig
 	dsn := &url.URL{Scheme: "postgres", Host: net.JoinHostPort(config.Host, strconv.Itoa(int(config.Port))), Path: "/" + config.Database, User: url.UserPassword(role, password)}

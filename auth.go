@@ -19,11 +19,19 @@ const (
 
 type appAuth struct {
 	*authhttp.Service
-	client      *embedded.Client
-	rootGroupID string
+	client *embedded.Client
 }
 
-func newAuth(config Config, pool *pgxpool.Pool) (*appAuth, error) {
+func (a *appAuth) Close() {
+	a.Service.Close()
+	a.client.Close()
+}
+
+func newAuth(ctx context.Context, config Config, pool *pgxpool.Pool) (*appAuth, error) {
+	ownership := embedded.RiverFromHost()
+	if err := embedded.ApplyMigrations(ctx, pool, "", embedded.MigrationOptions{River: ownership}); err != nil {
+		return nil, err
+	}
 	client, err := embedded.New(embedded.Config{
 		RBAC: []embedded.PersonaDef{embedded.IntrinsicRootPersona(embedded.RoleDef{
 			Name:        "admin",
@@ -48,23 +56,16 @@ func newAuth(config Config, pool *pgxpool.Pool) (*appAuth, error) {
 		TwoFactor: embedded.TwoFactorConfig{
 			Mode: embedded.TwoFactorDisabled,
 		},
-	}, embedded.Deps{Postgres: pool})
+	}, embedded.Deps{Postgres: pool, River: ownership})
 	if err != nil {
 		return nil, err
 	}
-	rootGroupID, err := client.EnsureRootGroup(context.Background())
-	if err != nil {
-		client.Close()
-		return nil, err
-	}
-
 	service, err := authhttp.New(client, authhttp.Config{DirectPeerIP: true})
 	if err != nil {
 		client.Close()
 		return nil, err
 	}
-	service.Verifier().WithLiveness(client)
-	return &appAuth{Service: service, client: client, rootGroupID: rootGroupID}, nil
+	return &appAuth{Service: service, client: client}, nil
 }
 
 // grantAdmin is only called by the explicit, one-off admin:grant command.

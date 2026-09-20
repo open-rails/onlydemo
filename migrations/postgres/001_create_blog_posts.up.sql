@@ -2,7 +2,7 @@
 
 CREATE TABLE blog_posts (
     id BIGSERIAL PRIMARY KEY,
-    owner_id UUID NOT NULL REFERENCES profiles.users (id) ON DELETE CASCADE,
+    owner_id UUID NOT NULL,
     slug TEXT NOT NULL UNIQUE,
     title TEXT NOT NULL,
     body TEXT NOT NULL,

@@ -35,7 +35,7 @@ func (api *blogAPI) checkout(c fiber.Ctx) error {
 	// Checkout uses a server-selected price, held stable until OpenRails has
 	// stored the attempt. Request JSON never selects a customer or price.
 	post, err := scanBlogPost(tx.QueryRow(c.Context(), `SELECT `+postColumns+`
-		FROM blog_posts WHERE id=$1 AND visibility='private' AND price_cents IS NOT NULL FOR SHARE`, id))
+		FROM `+blogPostsTable+` WHERE id=$1 AND visibility='private' AND price_cents IS NOT NULL FOR SHARE`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, http.StatusNotFound, "post is not for sale")
 	}

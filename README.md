@@ -7,7 +7,7 @@ and access grants; the app owns posts and their catalog references.
 
 ## Run locally
 
-Install Go 1.26.6+, Docker, [Task](https://taskfile.dev) and the
+Install Go 1.26.6+, Docker, the PostgreSQL `psql` client, [Task](https://taskfile.dev) and the
 [Stripe CLI](https://docs.stripe.com/stripe-cli). Then:
 
 ```sh
@@ -53,29 +53,43 @@ PostgreSQL uses port `55433`; the API uses `3000`. Task loads `.env`; plain
 | `PORT`, `PUBLIC_URL` | Listening port and browser return origin; defaults to localhost |
 | `DATABASE_URL` | Migration/application connection, with permission to create roles/extensions |
 | `BILLING_DATABASE_URL` | Separate non-superuser, NOBYPASSRLS billing login |
+| `BILLING_SCHEMA`, `RIVER_SCHEMA` | Optional namespace overrides; defaults are `billing` and `public` |
 | `AUTH_ISSUER`, `AUTH_AUDIENCE` | AuthKit token identity |
 | `STRIPE_SECRET_KEY`, `STRIPE_ACCOUNT_ID`, `STRIPE_WEBHOOK_SECRET` | Test account and webhook credentials |
 | `BILLING_ENCRYPTION_KEY` | Base64 of 32 random bytes, retained across restarts |
 
 The default database URL is
 `postgres://postgres:postgres@localhost:55433/openrails_demo?sslmode=disable`.
-AuthKit uses `profiles`, River uses `public`, OpenRails uses `openrails`, and the
-blog uses `public`. Migrations run in that order using the published embedded
-sources and their migration runners (River uses its own migrator). Each
-`migratekit.WithSchema(...).ApplyMigrations(...)` call creates and migrates its
-target schema; the demo does not create AuthKit or OpenRails schemas directly.
-The local `db:roles` task
-creates the demo billing login with the password shown in `.env.example`.
+AuthKit defaults to `profiles`, OpenRails to `billing`, and River to `public`.
+The application owns `demo`. The app loads only its own migrations. AuthKit
+and OpenRails initialize their storage through public library calls; their SQL,
+ledger keys and migration runners are private implementation details.
 
-Existing posts are extended by migration `002`; they are not reset. Databases
-from before migratekit's numeric-ledger release need a fresh database under its
-published pre-v1 contract. Point both database URLs at a new database and keep
-the old one if you need its data. `task db:down` removes the entire disposable
-development container; it is not a backup workflow.
+This demo chooses one host-owned River fleet for both libraries. `jobs.go`
+initializes the host's River schema, collects OpenRails workers and AuthKit's
+cleanup worker/schedule, then constructs one client. The host starts and stops
+it, stopping workers before closing library services and database pools.
+Every replica must register the same complete schedules, since River's
+elected leader schedules periodic jobs. A consumer that wants a library-managed
+fleet can omit the host integration and let the library initialize its queue.
+
+The `db:roles` task grants billing access only to its own data and the specific
+shared River job read/heartbeat operations it needs. It grants no access to
+AuthKit's schema or blog content, and no future-table privileges in `public`.
+
+This schema-layout release targets fresh databases. Point both database URLs at
+a new database to retain an older demo database separately. It does not rename
+old schemas, move old blog tables, or restamp vendor ledgers. Post owners are
+opaque AuthKit IDs; there is no foreign key into AuthKit's private schema.
+`task db:down` removes the entire disposable development container; it is not a
+backup workflow.
 
 AuthKit uses development signing keys and memory-backed challenge/rate-limit
 storage. Email verification and MFA are disabled for this demo. Signing keys
 change on restart, so sign in again after restarting the app.
+AuthKit schedules PostgreSQL maintenance automatically through the shared River
+fleet. Its in-memory TTL caches retain local sweepers; account-erasure purge is
+separately opt-in and retains AuthKit's host-cleanup and retention requirements.
 
 ## Users and admins
 
@@ -105,9 +119,16 @@ there is no custom admin flag/table and no trust in token-carried role names.
 AuthKit's root owner also has these permissions through `root:*`.
 
 Admins may read, edit or delete any post through the same routes as authors.
-Ordinary users can edit/delete only their own posts. Writes use `RequiredLive`
-and require a local user; reads also check current account status when signed
-in. Bans and role revocations take effect without waiting for token expiration.
+Ordinary users can edit/delete only their own posts. Writes use `Required` and
+require a local user; reads use `Optional`. Access tokens are verified without
+a per-request account-status lookup. Bans prevent token refresh, while issued
+tokens remain usable until their 15-minute expiry. `RequiredLive` is available
+for routes that explicitly need immediate account-status checks. Moderation
+permissions are still checked through AuthKit, so admin role revocation takes
+effect immediately. Using those elevated permissions also requires a live
+account: a ban immediately removes moderation access without adding an account
+lookup for ordinary authors. This is based on permissions, not a special role
+name.
 
 ## Posts and purchases
 

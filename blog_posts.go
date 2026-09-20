@@ -20,6 +20,8 @@ type blogAPI struct {
 	billing postBilling
 }
 
+const blogPostsTable = "demo.blog_posts"
+
 type blogPost struct {
 	ID         int64     `json:"id"`
 	OwnerID    string    `json:"owner_id"`
@@ -67,7 +69,7 @@ func (api *blogAPI) list(c fiber.Ctx) error {
 			products = append(products, product)
 		}
 	}
-	rows, err := api.pool.Query(c.Context(), `SELECT `+postColumns+` FROM blog_posts
+	rows, err := api.pool.Query(c.Context(), `SELECT `+postColumns+` FROM `+blogPostsTable+`
 		WHERE visibility = 'public' OR owner_id::text = $1 OR price_cents IS NOT NULL
 			OR openrails_product_id = ANY($2::text[]) OR $3
 		ORDER BY created_at DESC`, userID, products, admin)
@@ -100,7 +102,7 @@ func (api *blogAPI) get(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	post, err := scanBlogPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM blog_posts WHERE id = $1`, id))
+	post, err := scanBlogPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+blogPostsTable+` WHERE id = $1`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, http.StatusNotFound, "post not found")
 	}
@@ -152,7 +154,7 @@ func (api *blogAPI) create(c fiber.Ctx) error {
 		return databaseError(c, err)
 	}
 	defer tx.Rollback(c.Context())
-	post, err = scanBlogPost(tx.QueryRow(c.Context(), `INSERT INTO blog_posts
+	post, err = scanBlogPost(tx.QueryRow(c.Context(), `INSERT INTO `+blogPostsTable+`
 		(owner_id, slug, title, body, visibility, price_cents) VALUES ($1,$2,$3,$4,$5,$6)
 		RETURNING `+postColumns, post.OwnerID, post.Slug, post.Title, post.Body, post.Visibility, post.PriceCents))
 	if err != nil {
@@ -163,7 +165,7 @@ func (api *blogAPI) create(c fiber.Ctx) error {
 		if err != nil {
 			return billingUnavailable(c)
 		}
-		if _, err := tx.Exec(c.Context(), `UPDATE blog_posts SET openrails_product_id=$1, openrails_price_id=$2 WHERE id=$3`, post.ProductID, post.PriceID, post.ID); err != nil {
+		if _, err := tx.Exec(c.Context(), `UPDATE `+blogPostsTable+` SET openrails_product_id=$1, openrails_price_id=$2 WHERE id=$3`, post.ProductID, post.PriceID, post.ID); err != nil {
 			return databaseError(c, err)
 		}
 	}
@@ -199,7 +201,7 @@ func (api *blogAPI) update(c fiber.Ctx) error {
 	// Serialize price changes and checkout creation for this post. The product
 	// remains stable when a new price is created, preserving earlier purchases.
 	post, err := scanBlogPost(tx.QueryRow(c.Context(), `SELECT `+postColumns+`
-		FROM blog_posts WHERE id=$1 AND (owner_id=$2 OR $3) FOR UPDATE`, id, user.UserID, admin))
+		FROM `+blogPostsTable+` WHERE id=$1 AND (owner_id=$2 OR $3) FOR UPDATE`, id, user.UserID, admin))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, http.StatusNotFound, "post not found")
 	}
@@ -234,7 +236,7 @@ func (api *blogAPI) update(c fiber.Ctx) error {
 			return billingUnavailable(c)
 		}
 	}
-	post, err = scanBlogPost(tx.QueryRow(c.Context(), `UPDATE blog_posts
+	post, err = scanBlogPost(tx.QueryRow(c.Context(), `UPDATE `+blogPostsTable+`
 		SET slug=$1, title=$2, body=$3, visibility=$4, price_cents=$5,
 			openrails_product_id=NULLIF($6,''), openrails_price_id=NULLIF($7,''), updated_at=NOW()
 		WHERE id=$8 AND (owner_id=$9 OR $10) RETURNING `+postColumns,
@@ -262,7 +264,7 @@ func (api *blogAPI) delete(c fiber.Ctx) error {
 	if err != nil {
 		return clientError(c, http.StatusServiceUnavailable, "permission service is unavailable")
 	}
-	result, err := api.pool.Exec(c.Context(), `DELETE FROM blog_posts WHERE id=$1 AND (owner_id=$2 OR $3)`, id, user.UserID, admin)
+	result, err := api.pool.Exec(c.Context(), `DELETE FROM `+blogPostsTable+` WHERE id=$1 AND (owner_id=$2 OR $3)`, id, user.UserID, admin)
 	if err != nil {
 		return databaseError(c, err)
 	}
@@ -272,24 +274,25 @@ func (api *blogAPI) delete(c fiber.Ctx) error {
 	return c.SendStatus(http.StatusNoContent)
 }
 
-// AuthKit owns role membership and authorization. No role flag or permission
-// copied from a JWT is used to grant moderation access.
+// AuthKit owns role membership and authorization. Elevated moderation access
+// also requires a live account; ordinary authors avoid this account lookup.
 func (api *blogAPI) canModerate(c fiber.Ctx, userID, permission string) (bool, error) {
 	if userID == "" {
 		return false, nil
 	}
-	return api.auth.client.CanOnGroup(c.Context(), authkit.UserSubject(userID), api.auth.rootGroupID, authkit.Perm(permission))
+	allowed, err := api.auth.client.Can(c.Context(), authkit.UserSubject(userID), authkit.RootGroup(), authkit.Perm(permission))
+	if err != nil || !allowed {
+		return false, err
+	}
+	claims, _ := authkitfiber.Claims(c)
+	live, _, err := api.auth.Verifier().IsLive(c.Context(), claims)
+	return live, err
 }
 
 func (api *blogAPI) readAccess(c fiber.Ctx) (string, bool, error) {
 	user, ok := authkitfiber.UserClaims(c)
 	if !ok {
 		return "", false, nil
-	}
-	claims, _ := authkitfiber.Claims(c)
-	live, _, err := api.auth.Verifier().IsLive(c.Context(), claims)
-	if err != nil || !live {
-		return "", false, fiber.NewError(http.StatusUnauthorized, "account is unavailable")
 	}
 	admin, err := api.canModerate(c, user.UserID, postReadPermission)
 	if err != nil {

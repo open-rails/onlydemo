@@ -31,14 +31,10 @@ func TestBlogPostsIntegration(t *testing.T) {
 		}
 	}
 	var placed bool
-	if err := pool.QueryRow(t.Context(), `SELECT to_regclass('profiles.users') IS NOT NULL AND to_regclass('public.users') IS NULL`).Scan(&placed); err != nil || !placed {
-		t.Fatalf("AuthKit namespace placement = %v, err=%v", placed, err)
+	if err := pool.QueryRow(t.Context(), `SELECT to_regclass('demo.blog_posts') IS NOT NULL AND to_regclass('public.blog_posts') IS NULL`).Scan(&placed); err != nil || !placed {
+		t.Fatalf("application namespace placement = %v, err=%v", placed, err)
 	}
-	var sequenceType string
-	if err := pool.QueryRow(t.Context(), `SELECT data_type FROM information_schema.columns WHERE table_schema='public' AND table_name='migrations' AND column_name='sequence'`).Scan(&sequenceType); err != nil || sequenceType != "bigint" {
-		t.Fatalf("ledger sequence type = %q, err=%v", sequenceType, err)
-	}
-	service, err := newAuth(Config{
+	service, err := newAuth(t.Context(), Config{
 		AuthIssuer:   "http://localhost:3000",
 		AuthAudience: "openrails-demo",
 	}, pool)
@@ -90,12 +86,12 @@ func TestBlogPostsIntegration(t *testing.T) {
 		blogTestRequest(t, app, http.MethodDelete, "/api/v1/user/sessions/example-id", "", nil, http.StatusUnauthorized)
 	})
 
-	alice := registerBlogTestUser(t, app, pool, "writeralice")
+	alice := registerBlogTestUser(t, app, service, "writeralice")
 	// A second real peer gets its own registration rate-limit bucket.
 	bobApp := blogTestServer{url: app.url, client: newBlogTestHTTPClient(t, "127.0.0.3")}
-	bob := registerBlogTestUser(t, &bobApp, pool, "writerbob")
+	bob := registerBlogTestUser(t, &bobApp, service, "writerbob")
 	adminApp := blogTestServer{url: app.url, client: newBlogTestHTTPClient(t, "127.0.0.4")}
-	admin := registerBlogTestUser(t, &adminApp, pool, "moderator")
+	admin := registerBlogTestUser(t, &adminApp, service, "moderator")
 	if err := service.grantAdmin(t.Context(), admin.id); err != nil {
 		t.Fatalf("grant AuthKit admin role: %v", err)
 	}
@@ -189,6 +185,22 @@ func TestBlogPostsIntegration(t *testing.T) {
 		}
 		blogTestRequest(t, app, http.MethodDelete, blogTestPath(moderated.ID), admin.token, nil, http.StatusNoContent)
 		blogTestRequest(t, app, http.MethodGet, blogTestPath(moderated.ID), alice.token, nil, http.StatusNotFound)
+
+		if err := service.client.BanUser(t.Context(), admin.id, nil, nil, admin.id); err != nil {
+			t.Fatalf("ban moderator: %v", err)
+		}
+		// A valid token retains ordinary author access, but no elevated authority.
+		blogTestRequest(t, app, http.MethodGet, blogTestPath(private.ID), admin.token, nil, http.StatusNotFound)
+		blogTestRequest(t, app, http.MethodPatch, blogTestPath(private.ID), admin.token,
+			map[string]any{"title": "Banned moderator edit"}, http.StatusNotFound)
+		blogTestRequest(t, app, http.MethodDelete, blogTestPath(private.ID), admin.token, nil, http.StatusNotFound)
+		own := createBlogTestPost(t, app, admin.token, map[string]any{
+			"slug": "moderator-own-draft", "title": "Own draft", "body": "Ordinary author access",
+		})
+		blogTestRequest(t, app, http.MethodDelete, blogTestPath(own.ID), admin.token, nil, http.StatusNoContent)
+		if err := service.client.UnbanUser(t.Context(), admin.id); err != nil {
+			t.Fatalf("unban moderator: %v", err)
+		}
 	})
 	blogTestRequest(t, app, http.MethodPost, "/api/posts", "", map[string]any{"slug": "anonymous", "title": "Anonymous", "body": "No owner"}, http.StatusUnauthorized)
 	blogTestRequest(t, app, http.MethodPatch, blogTestPath(public.ID), "", map[string]any{"title": "Anonymous edit"}, http.StatusUnauthorized)
@@ -220,6 +232,20 @@ func TestBlogPostsIntegration(t *testing.T) {
 	}
 	blogTestRequest(t, app, http.MethodDelete, blogTestPath(bobPrivate.ID), bob.token, nil, http.StatusNoContent)
 	assertBlogPostIDs(t, app, bob.token, bobPublic.ID)
+
+	t.Run("account bans apply on refresh", func(t *testing.T) {
+		if err := service.client.BanUser(t.Context(), bob.id, nil, nil, admin.id); err != nil {
+			t.Fatalf("ban user: %v", err)
+		}
+		// Both Optional reads and Required writes accept an already-issued token.
+		// Account status is checked when obtaining another token, not per request.
+		blogTestRequest(t, app, http.MethodGet, blogTestPath(bobPublic.ID), bob.token, nil, http.StatusOK)
+		blogTestRequest(t, app, http.MethodPatch, blogTestPath(bobPublic.ID), bob.token,
+			map[string]any{"title": "Existing token is still valid"}, http.StatusOK)
+		blogTestRequest(t, app, http.MethodPost, "/api/v1/token", "", map[string]any{
+			"grant_type": "refresh_token", "refresh_token": bob.refreshToken,
+		}, http.StatusUnauthorized)
+	})
 }
 
 func newBlogTestDatabase(t *testing.T) *pgxpool.Pool {
@@ -265,11 +291,12 @@ func newBlogTestDatabase(t *testing.T) *pgxpool.Pool {
 }
 
 type blogTestUser struct {
-	id    string
-	token string
+	id           string
+	token        string
+	refreshToken string
 }
 
-func registerBlogTestUser(t *testing.T, app *blogTestServer, pool *pgxpool.Pool, username string) blogTestUser {
+func registerBlogTestUser(t *testing.T, app *blogTestServer, auth *appAuth, username string) blogTestUser {
 	t.Helper()
 	email := username + "@example.com"
 	const password = "Local-demo-test-password-42!"
@@ -291,16 +318,22 @@ func registerBlogTestUser(t *testing.T, app *blogTestServer, pool *pgxpool.Pool,
 		"identifier": email, "password": password,
 	}, http.StatusOK)
 	var login struct {
-		AccessToken string `json:"access_token"`
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
 	}
 	decodeBlogTestJSON(t, body, &login)
 	if login.AccessToken == "" {
 		t.Fatal("password login returned no access token")
 	}
-	user := blogTestUser{token: login.AccessToken}
-	if err := pool.QueryRow(t.Context(), "SELECT id::text FROM profiles.users WHERE email = $1", email).Scan(&user.id); err != nil {
+	if login.RefreshToken == "" {
+		t.Fatal("password login returned no refresh token")
+	}
+	user := blogTestUser{token: login.AccessToken, refreshToken: login.RefreshToken}
+	registered, err := auth.client.GetUserByUsername(t.Context(), username)
+	if err != nil {
 		t.Fatalf("find registered user: %v", err)
 	}
+	user.id = registered.ID
 	return user
 }
 
@@ -318,7 +351,7 @@ func createBlogTestPost(t *testing.T, app *blogTestServer, token string, input m
 func assertBlogPostOwner(t *testing.T, pool *pgxpool.Pool, postID int64, expected string) {
 	t.Helper()
 	var owner string
-	if err := pool.QueryRow(t.Context(), "SELECT owner_id::text FROM blog_posts WHERE id = $1", postID).Scan(&owner); err != nil {
+	if err := pool.QueryRow(t.Context(), "SELECT owner_id::text FROM "+blogPostsTable+" WHERE id = $1", postID).Scan(&owner); err != nil {
 		t.Fatalf("read post owner: %v", err)
 	}
 	if owner != expected {

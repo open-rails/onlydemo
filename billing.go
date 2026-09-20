@@ -42,20 +42,24 @@ type postBilling interface {
 }
 
 type billingService struct {
-	runtime       *openrailsembed.Runtime
-	client        *openrails.Client
-	pool          *pgxpool.Pool
-	webhook       http.Handler
-	publicURL     string
-	workersCancel context.CancelFunc
-	workersDone   chan struct{}
-	workersErr    error
+	runtime   *openrailsembed.Runtime
+	client    *openrails.Client
+	pool      *pgxpool.Pool
+	webhook   http.Handler
+	publicURL string
+}
+
+func initializeBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, jobs *appJobs) error {
+	return openrailsembed.ApplyMigrations(ctx, pool, openrailsembed.MigrationOptions{
+		Schema: cfg.BillingSchema,
+		River:  jobs.ownership(),
+	})
 }
 
 // newBilling is deliberately sandbox-only. A missing Stripe key leaves selling
 // disabled; supplying a key requires the complete persistent billing config.
 // transport is the supported OpenRails fake-Stripe seam for integration tests.
-func newBilling(ctx context.Context, cfg Config, transport ...http.RoundTripper) (*billingService, error) {
+func newBilling(ctx context.Context, cfg Config, jobs *appJobs, transport ...http.RoundTripper) (*billingService, error) {
 	if cfg.StripeSecretKey == "" {
 		return nil, nil
 	}
@@ -91,11 +95,11 @@ func newBilling(ctx context.Context, cfg Config, transport ...http.RoundTripper)
 			MerchantSource:    openrailsconfig.MerchantSourceAPI,
 			SecretBackend:     openrailsconfig.SecretBackendDB,
 			APIURL:            strings.TrimRight(cfg.PublicURL, "/") + "/billing",
-			DB:                &openrailsconfig.DBConfig{URL: cfg.BillingDatabaseURL},
+			DB:                &openrailsconfig.DBConfig{URL: cfg.BillingDatabaseURL, Schema: cfg.BillingSchema},
 			Encryption:        &openrailsconfig.EncryptionConfig{MasterKey: cfg.BillingEncryptionKey},
 		},
 		PGXPool: pool,
-		River:   openrailsembed.RiverManagedByOpenRails(),
+		River:   jobs.ownership(),
 	}
 	if len(transport) == 1 {
 		opts.StripeTransport = transport[0]
@@ -131,27 +135,11 @@ func newBilling(ctx context.Context, cfg Config, transport ...http.RoundTripper)
 	if err != nil {
 		return nil, err
 	}
-	// Register the merchant and its provider before the periodic workers start.
-	// Their lifetime belongs to this service, not the startup request context.
-	workersCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	billing.workersCancel = cancel
-	billing.workersDone = make(chan struct{})
-	go func() {
-		billing.workersErr = runtime.RunWorkers(workersCtx)
-		close(billing.workersDone)
-	}()
 	complete = true
 	return billing, nil
 }
 
 func (b *billingService) Close(ctx context.Context) error {
-	if b.workersCancel != nil {
-		b.workersCancel()
-		select {
-		case <-b.workersDone:
-		case <-ctx.Done():
-		}
-	}
 	err := b.runtime.Close(ctx)
 	b.pool.Close()
 	return err
@@ -160,12 +148,7 @@ func (b *billingService) Close(ctx context.Context) error {
 func (b *billingService) WebhookHandler() http.Handler { return b.webhook }
 
 func (b *billingService) Ready(ctx context.Context) error {
-	select {
-	case <-b.workersDone:
-		return fmt.Errorf("OpenRails workers stopped: %v", b.workersErr)
-	default:
-		return b.runtime.Ready(ctx)
-	}
+	return b.runtime.Ready(ctx)
 }
 
 func (b *billingService) EnsurePostOffer(ctx context.Context, billingKey, title string, priceCents int64) (string, string, error) {

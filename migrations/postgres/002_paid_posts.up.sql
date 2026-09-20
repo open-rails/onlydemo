@@ -1,4 +1,4 @@
--- parent: 1 sha256:d5f04c3e5a60ab6d6beb2a47b39c01b25a00001169cfa3844e6b0e430fc23b64
+-- parent: 1 sha256:23ae8917c29a3f9fb8bd2b26bdb4f72ce4237b5cefd237871923e578fb1f424e
 
 ALTER TABLE blog_posts
     ADD COLUMN billing_key UUID NOT NULL DEFAULT gen_random_uuid(),

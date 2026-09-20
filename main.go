@@ -45,17 +45,25 @@ func run(ctx context.Context) error {
 	migrationContext, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	if err := applyMigrations(migrationContext, pool); err != nil {
-		return fmt.Errorf("apply database migrations: %w", err)
+		return fmt.Errorf("apply application migrations: %w", err)
 	}
-	if config.MigrationsOnly {
-		return nil
+	jobs := newJobs(pool, config)
+	if err := jobs.initialize(migrationContext); err != nil {
+		return fmt.Errorf("initialize application jobs: %w", err)
 	}
 
-	authService, err := newAuth(config, pool)
+	authService, err := newAuth(migrationContext, config, pool)
 	if err != nil {
 		return fmt.Errorf("initialize authkit: %w", err)
 	}
 	defer authService.Close()
+	jobs.auth = authService
+	if err := initializeBilling(migrationContext, config, pool, jobs); err != nil {
+		return fmt.Errorf("initialize openrails database: %w", err)
+	}
+	if config.MigrationsOnly {
+		return nil
+	}
 	if config.AdminOnly {
 		if config.AdminRevoke {
 			if err := authService.revokeAdmin(ctx, config.AdminUserID); err != nil {
@@ -70,7 +78,7 @@ func run(ctx context.Context) error {
 		log.Printf("Granted AuthKit admin role to %s", config.AdminUserID)
 		return nil
 	}
-	billing, err := newBilling(ctx, config)
+	billing, err := newBilling(ctx, config, jobs)
 	if err != nil {
 		return fmt.Errorf("initialize OpenRails: %w", err)
 	}
@@ -86,6 +94,16 @@ func run(ctx context.Context) error {
 		}()
 	} else {
 		log.Print("Stripe is not configured; post sales are disabled")
+	}
+	defer func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := jobs.close(stopCtx); err != nil {
+			log.Printf("close background jobs: %v", err)
+		}
+	}()
+	if err := jobs.start(ctx); err != nil {
+		return fmt.Errorf("start application jobs: %w", err)
 	}
 
 	app, err := newApp(pool, authService, postsBilling)
@@ -132,10 +150,7 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing postBilling) (*fib
 	})
 
 	optional := authkitfiber.Optional(authService.Verifier())
-	required, err := authkitfiber.RequiredLive(authService.Verifier())
-	if err != nil {
-		return nil, err
-	}
+	required := authkitfiber.Required(authService.Verifier())
 	app.Get("/api/posts", optional, blogAPI.list)
 	app.Post("/api/posts", required, blogAPI.create)
 	app.Get("/api/posts/:id", optional, blogAPI.get)
