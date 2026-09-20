@@ -21,9 +21,6 @@ func applyMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	if err != nil {
 		return err
 	}
-	if _, err := pool.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS profiles`); err != nil {
-		return err
-	}
 	authMigrator, err := migratekit.NewPostgresFromPGXPool(pool, "authkit")
 	if err != nil {
 		return err
@@ -44,9 +41,6 @@ func applyMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 	billingMigrations, err := migratekit.LoadFromFS(openrailsmigrations.FS)
 	if err != nil {
-		return err
-	}
-	if _, err := pool.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS openrails`); err != nil {
 		return err
 	}
 	billingMigrator, err := migratekit.NewPostgresFromPGXPool(pool, "openrails")

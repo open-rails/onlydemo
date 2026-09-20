@@ -61,7 +61,10 @@ The default database URL is
 `postgres://postgres:postgres@localhost:55433/openrails_demo?sslmode=disable`.
 AuthKit uses `profiles`, River uses `public`, OpenRails uses `openrails`, and the
 blog uses `public`. Migrations run in that order using the published embedded
-sources and migratekit (River uses its own migrator). The local `db:roles` task
+sources and their migration runners (River uses its own migrator). Each
+`migratekit.WithSchema(...).ApplyMigrations(...)` call creates and migrates its
+target schema; the demo does not create AuthKit or OpenRails schemas directly.
+The local `db:roles` task
 creates the demo billing login with the password shown in `.env.example`.
 
 Existing posts are extended by migration `002`; they are not reset. Databases
