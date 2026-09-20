@@ -46,7 +46,7 @@ func TestBlogPostsIntegration(t *testing.T) {
 		t.Fatalf("initialize AuthKit: %v", err)
 	}
 	t.Cleanup(func() { service.Close() })
-	fiberApp, err := newApp(pool, service)
+	fiberApp, err := newApp(pool, service, nil)
 	if err != nil {
 		t.Fatalf("mount AuthKit: %v", err)
 	}
@@ -94,6 +94,11 @@ func TestBlogPostsIntegration(t *testing.T) {
 	// A second real peer gets its own registration rate-limit bucket.
 	bobApp := blogTestServer{url: app.url, client: newBlogTestHTTPClient(t, "127.0.0.3")}
 	bob := registerBlogTestUser(t, &bobApp, pool, "writerbob")
+	adminApp := blogTestServer{url: app.url, client: newBlogTestHTTPClient(t, "127.0.0.4")}
+	admin := registerBlogTestUser(t, &adminApp, pool, "moderator")
+	if err := service.grantAdmin(t.Context(), admin.id); err != nil {
+		t.Fatalf("grant AuthKit admin role: %v", err)
+	}
 
 	private := createBlogTestPost(t, app, alice.token, map[string]any{
 		"slug": "alice-private", "title": "Private draft", "body": "Alice's private body",
@@ -117,6 +122,7 @@ func TestBlogPostsIntegration(t *testing.T) {
 	assertBlogPostIDs(t, app, "", public.ID, bobPublic.ID)
 	assertBlogPostIDs(t, app, alice.token, private.ID, public.ID, bobPublic.ID)
 	assertBlogPostIDs(t, app, bob.token, public.ID, bobPrivate.ID, bobPublic.ID)
+	assertBlogPostIDs(t, app, admin.token, private.ID, public.ID, bobPrivate.ID, bobPublic.ID)
 
 	for _, post := range []blogPost{public, bobPublic} {
 		for _, token := range []string{"", alice.token, bob.token} {
@@ -156,6 +162,34 @@ func TestBlogPostsIntegration(t *testing.T) {
 	// Public visibility permits reading, never changing somebody else's post.
 	blogTestRequest(t, app, http.MethodPatch, blogTestPath(public.ID), bob.token, map[string]any{"title": "Unauthorized edit"}, http.StatusNotFound)
 	blogTestRequest(t, app, http.MethodDelete, blogTestPath(public.ID), bob.token, nil, http.StatusNotFound)
+	t.Run("AuthKit admin permissions", func(t *testing.T) {
+		moderated := createBlogTestPost(t, app, alice.token, map[string]any{
+			"slug": "admin-moderation", "title": "Moderated draft", "body": "Private moderation target",
+		})
+		// The token predates the grant: authority comes from AuthKit's live
+		// permission system rather than a role claim copied into a JWT.
+		blogTestRequest(t, app, http.MethodGet, blogTestPath(moderated.ID), admin.token, nil, http.StatusOK)
+		body := blogTestRequest(t, app, http.MethodPatch, blogTestPath(moderated.ID), admin.token,
+			map[string]any{"title": "Moderated title", "owner_id": admin.id}, http.StatusOK)
+		var edited blogPost
+		decodeBlogTestJSON(t, body, &edited)
+		if edited.Title != "Moderated title" {
+			t.Fatalf("admin edit returned title %q", edited.Title)
+		}
+		assertBlogPostOwner(t, pool, moderated.ID, alice.id)
+		if err := service.revokeAdmin(t.Context(), admin.id); err != nil {
+			t.Fatalf("revoke AuthKit admin role: %v", err)
+		}
+		blogTestRequest(t, app, http.MethodPatch, blogTestPath(moderated.ID), admin.token,
+			map[string]any{"title": "Revoked admin edit"}, http.StatusNotFound)
+		blogTestRequest(t, app, http.MethodDelete, blogTestPath(moderated.ID), admin.token, nil, http.StatusNotFound)
+		blogTestRequest(t, app, http.MethodGet, blogTestPath(moderated.ID), admin.token, nil, http.StatusNotFound)
+		if err := service.grantAdmin(t.Context(), admin.id); err != nil {
+			t.Fatalf("restore AuthKit admin role: %v", err)
+		}
+		blogTestRequest(t, app, http.MethodDelete, blogTestPath(moderated.ID), admin.token, nil, http.StatusNoContent)
+		blogTestRequest(t, app, http.MethodGet, blogTestPath(moderated.ID), alice.token, nil, http.StatusNotFound)
+	})
 	blogTestRequest(t, app, http.MethodPost, "/api/posts", "", map[string]any{"slug": "anonymous", "title": "Anonymous", "body": "No owner"}, http.StatusUnauthorized)
 	blogTestRequest(t, app, http.MethodPatch, blogTestPath(public.ID), "", map[string]any{"title": "Anonymous edit"}, http.StatusUnauthorized)
 	blogTestRequest(t, app, http.MethodDelete, blogTestPath(public.ID), "", nil, http.StatusUnauthorized)
@@ -203,7 +237,7 @@ func newBlogTestDatabase(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("connect to test PostgreSQL server: %v", err)
 	}
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
 		if err := admin.Close(ctx); err != nil {
 			t.Errorf("close test database administrator connection: %v", err)
@@ -215,7 +249,7 @@ func newBlogTestDatabase(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("create isolated test database: %v", err)
 	}
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
 		if _, err := admin.Exec(ctx, "DROP DATABASE "+quotedName+" WITH (FORCE)"); err != nil {
 			t.Errorf("drop isolated test database %s: %v", databaseName, err)
@@ -310,7 +344,7 @@ func assertBlogPostIDs(t *testing.T, app *blogTestServer, token string, expected
 
 func blogTestPath(id int64) string { return fmt.Sprintf("/api/posts/%d", id) }
 
-func blogTestRequest(t *testing.T, app *blogTestServer, method, path, token string, input any, status int) []byte {
+func blogTestRequest(t *testing.T, app *blogTestServer, method, path, token string, input any, status int, headers ...http.Header) []byte {
 	t.Helper()
 	var encoded []byte
 	if input != nil {
@@ -329,6 +363,13 @@ func blogTestRequest(t *testing.T, app *blogTestServer, method, path, token stri
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	for _, header := range headers {
+		for name, values := range header {
+			for _, value := range values {
+				req.Header.Add(name, value)
+			}
+		}
 	}
 	resp, err := app.client.Do(req)
 	if err != nil {

@@ -1,6 +1,9 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -8,8 +11,24 @@ import (
 	"github.com/open-rails/authkit/embedded"
 )
 
-func newAuth(config Config, pool *pgxpool.Pool) (*authhttp.Service, error) {
+const (
+	postReadPermission   = "root:posts:read"
+	postEditPermission   = "root:posts:edit"
+	postDeletePermission = "root:posts:delete"
+)
+
+type appAuth struct {
+	*authhttp.Service
+	client      *embedded.Client
+	rootGroupID string
+}
+
+func newAuth(config Config, pool *pgxpool.Pool) (*appAuth, error) {
 	client, err := embedded.New(embedded.Config{
+		RBAC: []embedded.PersonaDef{embedded.IntrinsicRootPersona(embedded.RoleDef{
+			Name:        "admin",
+			Permissions: []string{postReadPermission, postEditPermission, postDeletePermission},
+		})},
 		Token: embedded.TokenConfig{
 			Issuer:              config.AuthIssuer,
 			IssuedAudiences:     []string{config.AuthAudience},
@@ -33,11 +52,44 @@ func newAuth(config Config, pool *pgxpool.Pool) (*authhttp.Service, error) {
 	if err != nil {
 		return nil, err
 	}
+	rootGroupID, err := client.EnsureRootGroup(context.Background())
+	if err != nil {
+		client.Close()
+		return nil, err
+	}
 
 	service, err := authhttp.New(client, authhttp.Config{DirectPeerIP: true})
 	if err != nil {
 		client.Close()
 		return nil, err
 	}
-	return service, nil
+	service.Verifier().WithLiveness(client)
+	return &appAuth{Service: service, client: client, rootGroupID: rootGroupID}, nil
+}
+
+// grantAdmin is only called by the explicit, one-off admin:grant command.
+// Normal startup never restores a permission that an operator has revoked.
+func (a *appAuth) grantAdmin(ctx context.Context, userID string) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return errors.New("a registered user ID is required")
+	}
+	user, err := a.client.AdminGetUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return errors.New("admin user does not exist; register the user first")
+	}
+	return a.client.Genesis().AssignRoleBySlug(ctx, userID, "admin")
+}
+
+// revokeAdmin is the matching explicit operator command; ordinary requests
+// cannot invoke either bootstrap method.
+func (a *appAuth) revokeAdmin(ctx context.Context, userID string) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return errors.New("a registered user ID is required")
+	}
+	return a.client.Genesis().RemoveRoleBySlug(ctx, userID, "admin")
 }
