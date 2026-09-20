@@ -18,6 +18,14 @@ Postgres uses port `55433`; the API uses port `3000`. If Postgres is still
 initializing, wait until its logs show it is ready before migrating.
 Startup also applies the embedded AuthKit and application migrations.
 
+Open [http://localhost:3000/](http://localhost:3000/) for a searchable route
+directory. It lists the app's registered routes separately from the enabled
+AuthKit routes, with their HTTP methods and paths. Disabled AuthKit features
+are omitted; HEAD routes are included. The directory reads Fiber's route table
+on each request. `authkitfiber.Mount(app, service)` registers AuthKit's routes
+automatically; there is no endpoint list embedded in the HTML or maintained by
+the demo.
+
 `task db:down` removes the disposable development container. It is not a
 backup/persistent-storage workflow.
 
@@ -61,8 +69,10 @@ always taken from verified AuthKit claims. Hidden or non-owned posts return
 Routes use `authkitfiber.Optional`/`Required`; handlers read
 `authkitfiber.UserClaims(c)`. Optional authentication rejects a supplied invalid
 token. User-only writes also check the accessor's boolean because Required
-accepts other AuthKit principal types. AuthKit's own routes use its canonical
-mount through `authkitfiber.Fallback`.
+accepts other AuthKit principal types. `authkitfiber.Mount(app, service)` registers
+AuthKit's endpoints as regular Fiber routes and preserves its canonical request
+guards and path parameters. The application creates the service and mounts it;
+it does not construct a separate HTTP mount or use fallback routing.
 
 ## Verify
 

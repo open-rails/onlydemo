@@ -7,8 +7,8 @@ require (
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/knadh/koanf/providers/env/v2 v2.0.1
 	github.com/knadh/koanf/v2 v2.3.6
-	github.com/open-rails/authkit v0.107.0
-	github.com/open-rails/authkit/adapters/fiber v0.2.0
+	github.com/open-rails/authkit v0.108.0
+	github.com/open-rails/authkit/adapters/fiber v0.3.0
 	github.com/open-rails/migratekit v1.9.1
 )
 

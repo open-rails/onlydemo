@@ -1,7 +1,6 @@
 package main
 
 import (
-	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -9,7 +8,7 @@ import (
 	"github.com/open-rails/authkit/embedded"
 )
 
-func newAuth(config Config, pool *pgxpool.Pool) (*authhttp.Service, http.Handler, error) {
+func newAuth(config Config, pool *pgxpool.Pool) (*authhttp.Service, error) {
 	client, err := embedded.New(embedded.Config{
 		Token: embedded.TokenConfig{
 			Issuer:              config.AuthIssuer,
@@ -32,19 +31,13 @@ func newAuth(config Config, pool *pgxpool.Pool) (*authhttp.Service, http.Handler
 		},
 	}, embedded.Deps{Postgres: pool})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	service, err := authhttp.New(client, authhttp.Config{DirectPeerIP: true})
 	if err != nil {
-		return nil, nil, err
+		client.Close()
+		return nil, err
 	}
-
-	mount, err := authhttp.MountHandler(service, authhttp.MountOptions{})
-	if err != nil {
-		service.Close()
-		return nil, nil, err
-	}
-
-	return service, mount, nil
+	return service, nil
 }

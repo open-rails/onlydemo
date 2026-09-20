@@ -38,7 +38,7 @@ func TestBlogPostsIntegration(t *testing.T) {
 	if err := pool.QueryRow(t.Context(), `SELECT data_type FROM information_schema.columns WHERE table_schema='public' AND table_name='migrations' AND column_name='sequence'`).Scan(&sequenceType); err != nil || sequenceType != "bigint" {
 		t.Fatalf("ledger sequence type = %q, err=%v", sequenceType, err)
 	}
-	service, mount, err := newAuth(Config{
+	service, err := newAuth(Config{
 		AuthIssuer:   "http://localhost:3000",
 		AuthAudience: "openrails-demo",
 	}, pool)
@@ -46,7 +46,49 @@ func TestBlogPostsIntegration(t *testing.T) {
 		t.Fatalf("initialize AuthKit: %v", err)
 	}
 	t.Cleanup(func() { service.Close() })
-	app := newBlogTestServer(t, newApp(pool, service, mount))
+	fiberApp, err := newApp(pool, service)
+	if err != nil {
+		t.Fatalf("mount AuthKit: %v", err)
+	}
+	app := newBlogTestServer(t, fiberApp)
+
+	t.Run("homepage route directory", func(t *testing.T) {
+		home := string(blogTestRequest(t, app, http.MethodGet, "/", "", nil, http.StatusOK))
+		registered := make(map[string]bool)
+		for _, route := range fiberApp.GetRoutes(true) {
+			registered[route.Method+" "+route.Path] = true
+		}
+		for _, route := range []struct{ method, path string }{
+			{http.MethodGet, "/"},
+			{http.MethodGet, "/health"},
+			{http.MethodPost, "/api/posts"},
+			{http.MethodDelete, "/api/posts/:id"},
+			{http.MethodPost, "/api/v1/register"},
+			{http.MethodPost, "/api/v1/password/login"},
+			{http.MethodGet, "/api/v1/admin/users"},
+			{http.MethodDelete, "/api/v1/user/sessions/:id"},
+			{http.MethodGet, "/.well-known/jwks.json"},
+			{http.MethodHead, "/.well-known/jwks.json"},
+		} {
+			if !registered[route.method+" "+route.path] {
+				t.Errorf("missing native Fiber route %s %s", route.method, route.path)
+			}
+			if !strings.Contains(home, fmt.Sprintf(`data-method="%s" data-path="%s"`, route.method, route.path)) {
+				t.Errorf("homepage missing %s %s", route.method, route.path)
+			}
+		}
+		for _, path := range []string{"/api/v1/user/2fa", "/api/v1/delegated/token", "/api/v1/device-keys", "/*"} {
+			if strings.Contains(home, fmt.Sprintf(`data-path="%s"`, path)) {
+				t.Errorf("homepage listed disabled route or middleware catch-all %s", path)
+			}
+		}
+		if !strings.Contains(home, "Application routes") || !strings.Contains(home, "AuthKit routes") {
+			t.Error("homepage missing route origins")
+		}
+		// The directory advertises these paths without bypassing their guards.
+		blogTestRequest(t, app, http.MethodGet, "/api/v1/admin/users", "", nil, http.StatusUnauthorized)
+		blogTestRequest(t, app, http.MethodDelete, "/api/v1/user/sessions/example-id", "", nil, http.StatusUnauthorized)
+	})
 
 	alice := registerBlogTestUser(t, app, pool, "writeralice")
 	// A second real peer gets its own registration rate-limit bucket.

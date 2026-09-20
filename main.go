@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -40,28 +39,27 @@ func main() {
 		return
 	}
 
-	authService, authMount, err := newAuth(config, pool)
+	authService, err := newAuth(config, pool)
 	if err != nil {
 		log.Fatalf("initialize authkit: %v", err)
 	}
 	defer authService.Close()
 
-	app := newApp(pool, authService, authMount)
+	app, err := newApp(pool, authService)
+	if err != nil {
+		log.Fatalf("mount authkit: %v", err)
+	}
 	log.Printf("API listening on http://localhost:%d", config.Port)
 	if err := app.Listen(fmt.Sprintf(":%d", config.Port)); err != nil {
 		log.Printf("server stopped: %v", err)
 	}
 }
 
-func newApp(pool *pgxpool.Pool, authService *authhttp.Service, authMount http.Handler) *fiber.App {
+func newApp(pool *pgxpool.Pool, authService *authhttp.Service) (*fiber.App, error) {
 	app := fiber.New()
 	blogAPI := &blogAPI{pool: pool}
 
-	app.Get("/", func(c fiber.Ctx) error {
-		return c.JSON(fiber.Map{
-			"message": "openrails demo api",
-		})
-	})
+	app.Get("/", homepage(app))
 
 	app.Get("/health", func(c fiber.Ctx) error {
 		pingContext, cancel := context.WithTimeout(c.Context(), 2*time.Second)
@@ -87,9 +85,9 @@ func newApp(pool *pgxpool.Pool, authService *authhttp.Service, authMount http.Ha
 	app.Patch("/api/posts/:id", required, blogAPI.update)
 	app.Delete("/api/posts/:id", required, blogAPI.delete)
 
-	// AuthKit owns registration, password login, token refresh, logout, and
-	// account-management routes under /api/v1. Its JWKS and browser OIDC
-	// routes are mounted at their standard root paths as well.
-	app.Use(authkitfiber.Fallback(authMount))
-	return app
+	// Register AuthKit endpoints on Fiber so they appear in its route table.
+	if err := authkitfiber.Mount(app, authService); err != nil {
+		return nil, err
+	}
+	return app, nil
 }
