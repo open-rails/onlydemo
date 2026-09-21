@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/knadh/koanf/providers/env/v2"
@@ -14,11 +15,9 @@ type Config struct {
 	DatabaseURL         string
 	AuthIssuer          string
 	AuthAudience        string
-	MigrationsOnly      bool
-	AdminOnly           bool
-	AdminRevoke         bool
-	AdminUserID         string
 	PublicURL           string
+	AuthSchema          string
+	AppSchema           string
 	BillingSchema       string
 	RiverSchema         string
 	StripeSecretKey     string
@@ -35,10 +34,8 @@ func loadConfig() (Config, error) {
 				return strings.ToLower(key), value
 			case "DATABASE_URL":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
-			case "AUTH_ISSUER", "AUTH_AUDIENCE", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA", "STRIPE_SECRET_KEY", "STRIPE_ACCOUNT_ID", "STRIPE_WEBHOOK_SECRET", "ADMIN_USER_ID", "ADMIN_ONLY", "ADMIN_REVOKE":
+			case "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_SCHEMA", "APP_SCHEMA", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA", "STRIPE_SECRET_KEY", "STRIPE_ACCOUNT_ID", "STRIPE_WEBHOOK_SECRET":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
-			case "MIGRATIONS_ONLY":
-				return "migrations.only", value
 			default:
 				return "", nil
 			}
@@ -80,11 +77,9 @@ func loadConfig() (Config, error) {
 		DatabaseURL:         databaseURL,
 		AuthIssuer:          authIssuer,
 		AuthAudience:        authAudience,
-		MigrationsOnly:      k.Bool("migrations.only"),
-		AdminOnly:           k.Bool("admin.only"),
-		AdminRevoke:         k.Bool("admin.revoke"),
-		AdminUserID:         k.String("admin.user.id"),
 		PublicURL:           publicURL,
+		AuthSchema:          k.String("auth.schema"),
+		AppSchema:           k.String("app.schema"),
 		BillingSchema:       k.String("billing.schema"),
 		RiverSchema:         k.String("river.schema"),
 		StripeSecretKey:     k.String("stripe.secret.key"),
@@ -97,18 +92,23 @@ func loadConfig() (Config, error) {
 	return cfg, nil
 }
 
-// Keep independent application, library and queue schemas from colliding.
+// Libraries own distinct relation names and can share a schema. Validate
+// identifiers before any initializer runs; never change the host search_path.
+var databaseSchemaPattern = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+
 func validateDatabaseSchemas(cfg Config) error {
-	billing := strings.TrimSpace(cfg.BillingSchema)
-	if billing == "" {
-		billing = "billing"
-	}
-	river := strings.TrimSpace(cfg.RiverSchema)
-	if river == "" {
-		river = "public"
-	}
-	if billing == "demo" || billing == "profiles" || river == "demo" || river == "profiles" || billing == river {
-		return fmt.Errorf("BILLING_SCHEMA and RIVER_SCHEMA must be distinct from each other, demo, and profiles")
+	for name, value := range map[string]string{"AUTH_SCHEMA": cfg.AuthSchema, "APP_SCHEMA": cfg.AppSchema, "BILLING_SCHEMA": cfg.BillingSchema, "RIVER_SCHEMA": cfg.RiverSchema} {
+		value = strings.TrimSpace(value)
+		if value != "" && (len(value) > 63 || !databaseSchemaPattern.MatchString(value) || strings.HasPrefix(value, "pg_")) {
+			return fmt.Errorf("%s must be a lowercase PostgreSQL schema identifier (at most 63 bytes, no pg_ prefix)", name)
+		}
 	}
 	return nil
+}
+
+func appSchema(cfg Config) string {
+	if schema := strings.TrimSpace(cfg.AppSchema); schema != "" {
+		return schema
+	}
+	return "demo"
 }

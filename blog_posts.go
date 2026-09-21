@@ -19,9 +19,8 @@ type blogAPI struct {
 	pool    *pgxpool.Pool
 	auth    *appAuth
 	billing postBilling
+	table   string
 }
-
-const blogPostsTable = "demo.blog_posts"
 
 type blogPost struct {
 	ID         int64     `json:"id"`
@@ -70,7 +69,7 @@ func (api *blogAPI) list(c fiber.Ctx) error {
 			products = append(products, product)
 		}
 	}
-	rows, err := api.pool.Query(c.Context(), `SELECT `+postColumns+` FROM `+blogPostsTable+`
+	rows, err := api.pool.Query(c.Context(), `SELECT `+postColumns+` FROM `+api.table+`
 		WHERE visibility = 'public' OR owner_id::text = $1 OR price_cents IS NOT NULL
 			OR openrails_product_id = ANY($2::text[]) OR $3
 		ORDER BY created_at DESC`, userID, products, admin)
@@ -103,7 +102,7 @@ func (api *blogAPI) get(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	post, err := scanBlogPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+blogPostsTable+` WHERE id = $1`, id))
+	post, err := scanBlogPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id = $1`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, http.StatusNotFound, "post not found")
 	}
@@ -160,7 +159,7 @@ func (api *blogAPI) create(c fiber.Ctx) error {
 			return billingUnavailable(c)
 		}
 	}
-	post, err = scanBlogPost(api.pool.QueryRow(c.Context(), `INSERT INTO `+blogPostsTable+`
+	post, err = scanBlogPost(api.pool.QueryRow(c.Context(), `INSERT INTO `+api.table+`
         (owner_id, billing_key, slug, title, body, visibility, price_cents, openrails_product_id, openrails_price_id)
         VALUES ($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),NULLIF($9,'')) RETURNING `+postColumns,
 		post.OwnerID, post.BillingKey, post.Slug, post.Title, post.Body, post.Visibility, post.PriceCents, post.ProductID, post.PriceID))
@@ -191,7 +190,7 @@ func (api *blogAPI) update(c fiber.Ctx) error {
 	// Use an optimistic revision check after billing work so simultaneous
 	// edits cannot overwrite each other or hold a shared-pool connection idle.
 	post, err := scanBlogPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+`
-        FROM `+blogPostsTable+` WHERE id=$1 AND (owner_id=$2 OR $3)`, id, user.UserID, admin))
+        FROM `+api.table+` WHERE id=$1 AND (owner_id=$2 OR $3)`, id, user.UserID, admin))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, http.StatusNotFound, "post not found")
 	}
@@ -232,7 +231,7 @@ func (api *blogAPI) update(c fiber.Ctx) error {
 			return billingUnavailable(c)
 		}
 	}
-	post, err = scanBlogPost(api.pool.QueryRow(c.Context(), `UPDATE `+blogPostsTable+`
+	post, err = scanBlogPost(api.pool.QueryRow(c.Context(), `UPDATE `+api.table+`
 		SET slug=$1, title=$2, body=$3, visibility=$4, price_cents=$5,
 			openrails_product_id=NULLIF($6,''), openrails_price_id=NULLIF($7,''), updated_at=NOW()
 		WHERE id=$8 AND (owner_id=$9 OR $10) AND updated_at=$11 RETURNING `+postColumns,
@@ -260,7 +259,7 @@ func (api *blogAPI) delete(c fiber.Ctx) error {
 	if err != nil {
 		return clientError(c, http.StatusServiceUnavailable, "permission service is unavailable")
 	}
-	result, err := api.pool.Exec(c.Context(), `DELETE FROM `+blogPostsTable+` WHERE id=$1 AND (owner_id=$2 OR $3)`, id, user.UserID, admin)
+	result, err := api.pool.Exec(c.Context(), `DELETE FROM `+api.table+` WHERE id=$1 AND (owner_id=$2 OR $3)`, id, user.UserID, admin)
 	if err != nil {
 		return databaseError(c, err)
 	}

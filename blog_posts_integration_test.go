@@ -20,6 +20,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+const blogPostsTable = "demo.blog_posts"
+
 // TEST_DATABASE_URL selects a PostgreSQL server where the test user can create
 // databases. Every run creates and removes its own database; the database named
 // in the connection string and its contents are never reset.

@@ -30,19 +30,20 @@ const blogTestStripeWebhookSecret = "whsec_demo_integration_only"
 
 func TestPostPurchasesIntegration(t *testing.T) {
 	for _, test := range []struct {
-		name, billingSchema, riverSchema string
-		maxConns                         int32
+		name, billingSchema, riverSchema, authSchema, appSchema string
+		maxConns                                                int32
 	}{
 		{name: "default_schema_single_connection", maxConns: 1},
 		{name: "custom_schemas", billingSchema: "demo_billing", riverSchema: "demo_jobs"},
+		{name: "all_public_single_connection", billingSchema: "public", riverSchema: "public", authSchema: "public", appSchema: "public", maxConns: 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			runPostPurchasesIntegration(t, test.billingSchema, test.riverSchema, test.maxConns)
+			runPostPurchasesIntegration(t, test.billingSchema, test.riverSchema, test.maxConns, test.authSchema, test.appSchema)
 		})
 	}
 }
 
-func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string, maxConns int32) {
+func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string, maxConns int32, schemas ...string) {
 	migrationPool := newBlogTestDatabase(t)
 	config := Config{
 		AuthIssuer: "http://localhost:3000", AuthAudience: "openrails-demo",
@@ -51,12 +52,22 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 		StripeWebhookSecret: blogTestStripeWebhookSecret,
 		BillingSchema:       billingSchema, RiverSchema: riverSchema,
 	}
+	if len(schemas) == 2 {
+		config.AuthSchema, config.AppSchema = schemas[0], schemas[1]
+	}
+	table := pgx.Identifier{appSchema(config), "blog_posts"}.Sanitize()
 	pool, databaseURL := newBlogTestOwnerPool(t, migrationPool, maxConns)
 	config.DatabaseURL = databaseURL
 	if err := initializeDatabase(t.Context(), config, pool); err != nil {
 		t.Fatalf("initialize database: %v", err)
 	}
 	assertBlogTestOwnerRole(t, pool)
+	if config.AppSchema == "public" {
+		if err := initializeDatabase(t.Context(), config, pool); err != nil {
+			t.Fatalf("repeat public initialization: %v", err)
+		}
+		assertAllPublicStorage(t, pool)
+	}
 	migrationPool.Close()
 	jobs := newJobs(pool, config)
 	service, err := newAuth(t.Context(), config, pool)
@@ -85,12 +96,15 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 			t.Errorf("stop host jobs: %v", err)
 		}
 	})
+	if err := billing.initialize(t.Context(), config, jobs); err != nil {
+		t.Fatalf("initialize billing: %v", err)
+	}
 	jobEvents, unsubscribe := jobs.client.Subscribe(river.EventKindJobCompleted)
 	defer unsubscribe()
 	if err := jobs.start(t.Context()); err != nil {
 		t.Fatalf("start host River: %v", err)
 	}
-	fiberApp, err := newApp(pool, service, billing)
+	fiberApp, err := newApp(pool, service, billing, config)
 	if err != nil {
 		t.Fatalf("mount purchase API: %v", err)
 	}
@@ -201,7 +215,7 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 	t.Run("creator catalogs and moderator pricing", func(t *testing.T) {
 		// A buyer is also an independent author. Supplied owner/catalog fields
 		// cannot move their new product into the original seller's catalog.
-		alicePost := blogTestStoredPost(t, pool, paid.ID)
+		alicePost := blogTestStoredPost(t, pool, paid.ID, table)
 		aliceClient, err := billing.runtime.CatalogClient(alice.id)
 		if err != nil {
 			t.Fatal(err)
@@ -215,7 +229,7 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 			"visibility": "private", "price_cents": 699, "owner_id": alice.id,
 			"catalog_id": aliceCatalog.ID.String(), "openrails_product_id": alicePost.ProductID,
 		})
-		bobPost := blogTestStoredPost(t, pool, otherPost.ID)
+		bobPost := blogTestStoredPost(t, pool, otherPost.ID, table)
 		if bobPost.OwnerID != bob.id {
 			t.Fatal("request fields changed the authenticated post owner")
 		}
@@ -257,7 +271,7 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 		}
 		blogTestRequest(t, app, http.MethodPatch, blogTestPath(otherPost.ID), moderator.token,
 			map[string]any{"price_cents": 1299, "title": "Moderated title", "owner_id": moderator.id}, http.StatusOK)
-		after := blogTestStoredPost(t, pool, otherPost.ID)
+		after := blogTestStoredPost(t, pool, otherPost.ID, table)
 		product, err := bobClient.GetProduct(t.Context(), bobProduct)
 		if err != nil {
 			t.Fatal(err)
@@ -291,7 +305,7 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 		assertBlogTestReadable(t, app, paid, bob.token, true)
 	})
 	t.Run("concurrent content edit survives completed billing work", func(t *testing.T) {
-		before := blogTestStoredPost(t, pool, paid.ID)
+		before := blogTestStoredPost(t, pool, paid.ID, table)
 		productID, err := openrails.ParseProductID(before.ProductID)
 		if err != nil {
 			t.Fatal(err)
@@ -306,17 +320,17 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 		observer := postOfferCallbackBilling{postBilling: billing, after: func(ctx context.Context) error {
 			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
-			_, err := pool.Exec(ctx, "UPDATE "+blogPostsTable+" SET title=$1, updated_at=now() WHERE id=$2", "Concurrent content edit", paid.ID)
+			_, err := pool.Exec(ctx, "UPDATE "+table+" SET title=$1, updated_at=now() WHERE id=$2", "Concurrent content edit", paid.ID)
 			return err
 		}}
-		fiberApp, err := newApp(pool, service, observer)
+		fiberApp, err := newApp(pool, service, observer, config)
 		if err != nil {
 			t.Fatal(err)
 		}
 		concurrentApp := newBlogTestServer(t, fiberApp)
 		blogTestRequest(t, concurrentApp, http.MethodPatch, blogTestPath(paid.ID), alice.token,
 			map[string]any{"title": "Stale pricing edit", "price_cents": 1099}, http.StatusConflict)
-		after := blogTestStoredPost(t, pool, paid.ID)
+		after := blogTestStoredPost(t, pool, paid.ID, table)
 		if after.Title != "Concurrent content edit" || after.PriceCents != nil || after.PriceID != before.PriceID || after.ProductID != before.ProductID {
 			t.Fatal("a stale pricing edit overwrote the committed content revision")
 		}
@@ -376,9 +390,13 @@ func (b postOfferCallbackBilling) EnsurePostOffer(ctx context.Context, author, k
 	return productID, priceID, err
 }
 
-func blogTestStoredPost(t *testing.T, pool *pgxpool.Pool, id int64) blogPost {
+func blogTestStoredPost(t *testing.T, pool *pgxpool.Pool, id int64, tables ...string) blogPost {
 	t.Helper()
-	post, err := scanBlogPost(pool.QueryRow(t.Context(), "SELECT "+postColumns+" FROM "+blogPostsTable+" WHERE id=$1", id))
+	table := blogPostsTable
+	if len(tables) == 1 {
+		table = tables[0]
+	}
+	post, err := scanBlogPost(pool.QueryRow(t.Context(), "SELECT "+postColumns+" FROM "+table+" WHERE id=$1", id))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -627,5 +645,23 @@ func assertBlogTestOwnerRole(t *testing.T, runtimePool *pgxpool.Pool) {
 	var ownsMigrations bool
 	if err := runtimePool.QueryRow(t.Context(), `SELECT pg_get_userbyid(relowner) = current_user FROM pg_class WHERE oid = 'public.migrations'::regclass`).Scan(&ownsMigrations); err != nil || !ownsMigrations {
 		t.Fatalf("the same application login must own its initialized storage: owner=%v err=%v", ownsMigrations, err)
+	}
+}
+
+func assertAllPublicStorage(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	for _, table := range []string{"blog_posts", "users", "products", "prices", "payments", "river_job"} {
+		var exists bool
+		if err := pool.QueryRow(t.Context(), "SELECT to_regclass($1) IS NOT NULL", "public."+table).Scan(&exists); err != nil || !exists {
+			t.Fatalf("public table %s missing: %v", table, err)
+		}
+	}
+	var escaped int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM pg_namespace WHERE nspname IN ('demo','profiles','billing','openrails')`).Scan(&escaped); err != nil || escaped != 0 {
+		t.Fatalf("default schemas leaked: %d %v", escaped, err)
+	}
+	var searchPath string
+	if err := pool.QueryRow(t.Context(), "SHOW search_path").Scan(&searchPath); err != nil || searchPath != `"$user", public` {
+		t.Fatalf("shared pool search_path changed: %q %v", searchPath, err)
 	}
 }

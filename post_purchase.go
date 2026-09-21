@@ -31,7 +31,7 @@ func (api *blogAPI) checkout(c fiber.Ctx) error {
 	// Later price edits create a new offer; this checkout retains these terms.
 	// Request JSON never selects a customer or price.
 	post, err := scanBlogPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+`
-        FROM `+blogPostsTable+` WHERE id=$1 AND visibility='private' AND price_cents IS NOT NULL`, id))
+        FROM `+api.table+` WHERE id=$1 AND visibility='private' AND price_cents IS NOT NULL`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, http.StatusNotFound, "post is not for sale")
 	}

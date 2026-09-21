@@ -72,13 +72,13 @@ func newBilling(ctx context.Context, cfg Config, jobs *appJobs, transport ...htt
 	}
 	opts := openrailsembed.Options{
 		Config: &openrailsconfig.Config{
-			Env:               "development",
-			TestMode:          openrailsconfig.CredentialPostureSandbox,
-			ProviderWriteMode: openrailsconfig.ProviderWriteModeFull,
-			MerchantSource:    openrailsconfig.MerchantSourceManifest,
-			CatalogSource:     openrailsconfig.CatalogSourceAPI,
-			APIURL:            strings.TrimRight(cfg.PublicURL, "/") + "/billing",
-			DB:                &openrailsconfig.DBConfig{URL: cfg.DatabaseURL, Schema: cfg.BillingSchema},
+			Env:                  "development",
+			TestMode:             openrailsconfig.CredentialPostureSandbox,
+			ProviderWriteMode:    openrailsconfig.ProviderWriteModeFull,
+			MerchantConfigSource: openrailsconfig.MerchantConfigSourceManifest,
+			CatalogSource:        openrailsconfig.CatalogSourceAPI,
+			APIURL:               strings.TrimRight(cfg.PublicURL, "/") + "/billing",
+			DB:                   &openrailsconfig.DBConfig{URL: cfg.DatabaseURL, Schema: cfg.BillingSchema},
 		},
 		PGXPool: jobs.pool,
 		River:   openrailsembed.RiverFromHost(),
@@ -91,16 +91,17 @@ func newBilling(ctx context.Context, cfg Config, jobs *appJobs, transport ...htt
 	if err != nil {
 		return nil, fmt.Errorf("start OpenRails: %w", err)
 	}
-	billing := &billingService{runtime: runtime, publicURL: strings.TrimRight(cfg.PublicURL, "/")}
-	complete := false
-	defer func() {
-		if !complete {
-			_ = billing.Close(context.Background())
-		}
-	}()
+	return &billingService{runtime: runtime, publicURL: strings.TrimRight(cfg.PublicURL, "/")}, nil
+}
+
+// The caller defers Close immediately after construction, before this fallible
+// configuration. The same defer covers initialization failure and normal shutdown.
+func (billing *billingService) initialize(ctx context.Context, cfg Config, jobs *appJobs) error {
+	runtime := billing.runtime
+	var err error
 	jobs.client, err = runtime.BindRiver(ctx, jobs.pool, jobs.configure)
 	if err != nil {
-		return nil, fmt.Errorf("compose application River fleet: %w", err)
+		return fmt.Errorf("compose application River fleet: %w", err)
 	}
 	_, err = runtime.UpsertMerchantConfig(ctx, billingMerchantSlug, openrailsembed.MerchantConfig{
 		DisplayName: "OpenRails Blog Demo",
@@ -113,11 +114,11 @@ func newBilling(ctx context.Context, cfg Config, jobs *appJobs, transport ...htt
 		}}},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("configure billing merchant: %w", err)
+		return fmt.Errorf("configure billing merchant: %w", err)
 	}
 	billing.client, err = runtime.Client()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	billing.webhook, err = runtime.Handler(openrailsembed.MountOptions{
 		MountPrefix:    "/billing",
@@ -125,10 +126,9 @@ func newBilling(ctx context.Context, cfg Config, jobs *appJobs, transport ...htt
 		ProviderRoutes: &openrailsembed.ProviderRoutes{Webhooks: true},
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
-	complete = true
-	return billing, nil
+	return nil
 }
 
 func (b *billingService) Close(ctx context.Context) error {

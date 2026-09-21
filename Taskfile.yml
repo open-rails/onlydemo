@@ -32,10 +32,8 @@ tasks:
 
   migrate:
     desc: Initialize application and library storage with the application connection
-    env:
-      MIGRATIONS_ONLY: 'true'
     cmds:
-      - go run .
+      - go run . migrate
 
   run:
     desc: Run the API against local PostgreSQL
@@ -46,22 +44,15 @@ tasks:
     desc: Grant an existing user's AuthKit admin role (USER_ID required)
     requires:
       vars: [USER_ID]
-    env:
-      ADMIN_ONLY: 'true'
-      ADMIN_USER_ID: '{{.USER_ID}}'
     cmds:
-      - go run .
+      - go run . admin grant --user-id {{.USER_ID | shellQuote}}
 
   admin:revoke:
     desc: Revoke an existing user's AuthKit admin role (USER_ID required)
     requires:
       vars: [USER_ID]
-    env:
-      ADMIN_ONLY: 'true'
-      ADMIN_REVOKE: 'true'
-      ADMIN_USER_ID: '{{.USER_ID}}'
     cmds:
-      - go run .
+      - go run . admin revoke --user-id {{.USER_ID | shellQuote}}
 
   stripe:listen:
     desc: Forward Stripe test webhooks locally; copy its signing secret into .env

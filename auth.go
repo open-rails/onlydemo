@@ -30,6 +30,7 @@ func (a *appAuth) Close() {
 func newAuth(ctx context.Context, config Config, pool *pgxpool.Pool) (*appAuth, error) {
 	ownership := embedded.RiverFromHost()
 	client, err := embedded.New(embedded.Config{
+		Schema: strings.TrimSpace(config.AuthSchema),
 		RBAC: []embedded.PersonaDef{embedded.IntrinsicRootPersona(embedded.RoleDef{
 			Name:        "admin",
 			Permissions: []string{postReadPermission, postEditPermission, postDeletePermission},

@@ -52,19 +52,24 @@ PostgreSQL uses port `55433`; the API uses `3000`. Task loads `.env`; plain
 | --- | --- |
 | `PORT`, `PUBLIC_URL` | Listening port and browser return origin; defaults to localhost |
 | `DATABASE_URL` | One owning connection/pool for initialization, blog, AuthKit, OpenRails, and River |
-| `BILLING_SCHEMA`, `RIVER_SCHEMA` | Optional namespace overrides; defaults are `billing` and `public` |
+| `APP_SCHEMA`, `AUTH_SCHEMA`, `BILLING_SCHEMA`, `RIVER_SCHEMA` | Optional namespaces; defaults are `demo`, `profiles`, `billing`, `public` |
 | `AUTH_ISSUER`, `AUTH_AUDIENCE` | AuthKit token identity |
 | `STRIPE_SECRET_KEY`, `STRIPE_ACCOUNT_ID`, `STRIPE_WEBHOOK_SECRET` | Test account and webhook credentials |
 
 The default database URL is
 `postgres://postgres:postgres@localhost:55433/openrails_demo?sslmode=disable`.
 AuthKit defaults to `profiles`, OpenRails to `billing`, and River to `public`.
-Billing and River schemas must be distinct from each other, `demo`, and `profiles`.
-The application owns `demo`. The app loads only its own migrations. AuthKit
+All four may use `public`, or another shared schema. For example, set
+`APP_SCHEMA=public AUTH_SCHEMA=public BILLING_SCHEMA=public RIVER_SCHEMA=public`. Each component addresses its
+own tables explicitly; the host pool search path is unchanged. Schema changes
+select a different namespace and do not move existing data. The application owns
+its blog tables. The app loads only its own migrations. AuthKit
 and OpenRails initialize their storage through public library calls; their SQL,
 ledger keys and migration runners are private implementation details.
 `task run` explicitly calls those initializers before constructing the services.
-`task migrate` performs the same initialization and exits. Both use `DATABASE_URL`;
+`task migrate` (`go run . migrate`) performs the same initialization and exits.
+`go run .` and `go run . serve` start the server; `go run . help` prints usage.
+One-off operations are CLI commands, not environment flags. Both use `DATABASE_URL`;
 there is no separate admin connection, login creation, or grant script in the app.
 The connected user owns the objects it creates and already has access to them.
 The libraries also support optional separate runtime credentials for deployments
@@ -75,7 +80,10 @@ initializes the host's River schema during migration. At runtime, OpenRails'
 `BindRiver` composes its workers/schedules with AuthKit's registration before
 constructing one client on the shared pool. Without billing, the host constructs
 the AuthKit fleet itself. The host starts and stops workers before closing
-library services, then closes its pool. Libraries borrow that pool.
+library services, then closes its pool. OpenRails and River borrow that pool.
+AuthKit creates and owns a schema-bound pool from the same connection settings;
+closing it leaves the host pool open. A `MaxConns=1` host pool therefore does not
+limit the whole process to one database connection.
 Every replica must register the same complete schedules, since River's
 elected leader schedules periodic jobs. A consumer that wants a library-managed
 fleet can omit the host integration and let the library initialize its queue.
@@ -210,6 +218,13 @@ and disputes remain subject to OpenRails' billing/access policy.
 This demo uses one Stripe storefront. Authors choose prices; separate seller
 accounts, commissions and payouts are outside this example.
 
+Direct admin commands use the same application environment:
+
+```sh
+go run . admin grant --user-id <registered-user-id>
+go run . admin revoke --user-id <registered-user-id>
+```
+
 ## Verify
 
 ```sh
@@ -222,7 +237,9 @@ Integration tests create and remove isolated databases and normal database-owner
 logins, so use an administrative test connection. All application/library
 initialization and runtime then use the same owner pool without role memberships.
 The full purchase journey runs with default schemas and `MaxConns=1`, and again
-with custom billing/River schemas. Tests verify both libraries' scheduled jobs,
+with custom billing/River schemas and all four components sharing `public`.
+Shared-schema cases also test initializer order, concurrent/repeated initialization,
+managed River migrations, and CLI migration/admin commands. Tests verify both libraries' scheduled jobs,
 borrowed-pool shutdown ownership, distinct author catalogs, moderator pricing,
 and zero persisted provider-secret rows without an encryption key. A concurrent
 edit regression borrows the same pool during billing handoff and checks the 409

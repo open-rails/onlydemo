@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/adaptor"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	authkitfiber "github.com/open-rails/authkit/adapters/fiber"
 )
@@ -19,12 +21,19 @@ import (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx); err != nil {
+	if err := run(ctx, os.Args[1:], os.Stdout); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func run(ctx context.Context) error {
+func run(ctx context.Context, args []string, output io.Writer) error {
+	command, err := parseCommand(args, output)
+	if err != nil {
+		return err
+	}
+	if command.kind == "help" {
+		return nil
+	}
 	config, err := loadConfig()
 	if err != nil {
 		return fmt.Errorf("load configuration: %w", err)
@@ -42,13 +51,10 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("connect to database: %w", err)
 	}
 
-	migrationContext, stopMigration := context.WithTimeout(ctx, 5*time.Minute)
-	err = initializeDatabase(migrationContext, config, pool)
-	stopMigration()
-	if err != nil {
+	if err := initializeDatabase(ctx, config, pool); err != nil {
 		return err
 	}
-	if config.MigrationsOnly {
+	if command.kind == "migrate" {
 		return nil
 	}
 
@@ -61,18 +67,18 @@ func run(ctx context.Context) error {
 	defer authService.Close()
 	jobs.auth = authService
 
-	if config.AdminOnly {
-		if config.AdminRevoke {
-			if err := authService.revokeAdmin(ctx, config.AdminUserID); err != nil {
+	if command.kind == "admin" {
+		if command.revoke {
+			if err := authService.revokeAdmin(ctx, command.userID); err != nil {
 				return err
 			}
-			log.Printf("Revoked AuthKit admin role from %s", config.AdminUserID)
+			log.Printf("Revoked AuthKit admin role from %s", command.userID)
 			return nil
 		}
-		if err := authService.grantAdmin(ctx, config.AdminUserID); err != nil {
+		if err := authService.grantAdmin(ctx, command.userID); err != nil {
 			return err
 		}
-		log.Printf("Granted AuthKit admin role to %s", config.AdminUserID)
+		log.Printf("Granted AuthKit admin role to %s", command.userID)
 		return nil
 	}
 
@@ -82,14 +88,11 @@ func run(ctx context.Context) error {
 	}
 	var postsBilling postBilling
 	if billing != nil {
+		defer billing.Close(context.Background())
+		if err := billing.initialize(ctx, config, jobs); err != nil {
+			return fmt.Errorf("initialize OpenRails: %w", err)
+		}
 		postsBilling = billing
-		defer func() {
-			closeCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			defer cancel()
-			if err := billing.Close(closeCtx); err != nil {
-				log.Printf("close OpenRails: %v", err)
-			}
-		}()
 	} else {
 		log.Print("Stripe is not configured; post sales are disabled")
 	}
@@ -104,7 +107,7 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("start application jobs: %w", err)
 	}
 
-	app, err := newApp(pool, authService, postsBilling)
+	app, err := newApp(pool, authService, postsBilling, config)
 	if err != nil {
 		return fmt.Errorf("create application: %w", err)
 	}
@@ -118,9 +121,19 @@ func run(ctx context.Context) error {
 	return app.Listen(fmt.Sprintf(":%d", config.Port))
 }
 
-func newApp(pool *pgxpool.Pool, authService *appAuth, billing postBilling) (*fiber.App, error) {
+func newApp(pool *pgxpool.Pool, authService *appAuth, billing postBilling, configs ...Config) (*fiber.App, error) {
 	app := fiber.New()
-	blogAPI := &blogAPI{pool: pool, auth: authService, billing: billing}
+	cfg := Config{}
+	if len(configs) > 1 {
+		return nil, fmt.Errorf("newApp accepts one configuration")
+	}
+	if len(configs) == 1 {
+		cfg = configs[0]
+	}
+	if err := validateDatabaseSchemas(cfg); err != nil {
+		return nil, err
+	}
+	blogAPI := &blogAPI{pool: pool, auth: authService, billing: billing, table: pgx.Identifier{appSchema(cfg), "blog_posts"}.Sanitize()}
 
 	app.Get("/", homepage(app))
 
