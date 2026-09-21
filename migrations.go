@@ -3,13 +3,33 @@ package main
 import (
 	"context"
 	"embed"
+	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/authkit/embedded"
 	"github.com/open-rails/migratekit"
 )
 
 //go:embed migrations/postgres/*.sql
 var migrationFiles embed.FS
+
+// initializeDatabase uses the same owning pool as the API and shared workers.
+// Each library initializes its own private storage through its public API.
+func initializeDatabase(ctx context.Context, cfg Config, pool *pgxpool.Pool) error {
+	if err := validateDatabaseSchemas(cfg); err != nil {
+		return err
+	}
+	if err := applyMigrations(ctx, pool); err != nil {
+		return fmt.Errorf("application migrations: %w", err)
+	}
+	if err := newJobs(pool, cfg).initialize(ctx); err != nil {
+		return fmt.Errorf("host River migrations: %w", err)
+	}
+	if err := embedded.ApplyMigrations(ctx, pool, "", embedded.MigrationOptions{River: embedded.RiverFromHost()}); err != nil {
+		return fmt.Errorf("AuthKit migrations: %w", err)
+	}
+	return initializeBilling(ctx, cfg, pool)
+}
 
 func applyMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	migrations, err := migratekit.LoadFromFS(migrationFiles, "migrations/postgres")

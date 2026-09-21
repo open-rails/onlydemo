@@ -6,9 +6,9 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -29,31 +29,46 @@ import (
 const blogTestStripeWebhookSecret = "whsec_demo_integration_only"
 
 func TestPostPurchasesIntegration(t *testing.T) {
-	pool := newBlogTestDatabase(t)
-	if err := applyMigrations(t.Context(), pool); err != nil {
-		t.Fatalf("migrate purchase test database: %v", err)
+	for _, test := range []struct {
+		name, billingSchema, riverSchema string
+		maxConns                         int32
+	}{
+		{name: "default_schema_single_connection", maxConns: 1},
+		{name: "custom_schemas", billingSchema: "demo_billing", riverSchema: "demo_jobs"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runPostPurchasesIntegration(t, test.billingSchema, test.riverSchema, test.maxConns)
+		})
 	}
+}
+
+func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string, maxConns int32) {
+	migrationPool := newBlogTestDatabase(t)
 	config := Config{
 		AuthIssuer: "http://localhost:3000", AuthAudience: "openrails-demo",
 		PublicURL:       "http://localhost:3000",
 		StripeSecretKey: "sk_test_demo_integration", StripeAccountID: "acct_demo_test",
-		StripeWebhookSecret:  blogTestStripeWebhookSecret,
-		BillingEncryptionKey: base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{42}, 32)),
+		StripeWebhookSecret: blogTestStripeWebhookSecret,
+		BillingSchema:       billingSchema, RiverSchema: riverSchema,
 	}
-	// Billing initialization is independent of AuthKit's schema and runs first.
+	pool, databaseURL := newBlogTestOwnerPool(t, migrationPool, maxConns)
+	config.DatabaseURL = databaseURL
+	if err := initializeDatabase(t.Context(), config, pool); err != nil {
+		t.Fatalf("initialize database: %v", err)
+	}
+	assertBlogTestOwnerRole(t, pool)
+	migrationPool.Close()
 	jobs := newJobs(pool, config)
-	if err := jobs.initialize(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if err := initializeBilling(t.Context(), config, pool, jobs); err != nil {
-		t.Fatalf("initialize billing database: %v", err)
-	}
-	config.BillingDatabaseURL = blogTestBillingDSN(t, pool)
 	service, err := newAuth(t.Context(), config, pool)
 	if err != nil {
 		t.Fatalf("initialize AuthKit: %v", err)
 	}
-	t.Cleanup(func() { service.Close() })
+	t.Cleanup(func() {
+		service.Close()
+		if err := pool.Ping(context.Background()); err != nil {
+			t.Errorf("services closed the borrowed host pool: %v", err)
+		}
+	})
 	jobs.auth = service
 	stripe := &blogTestStripe{}
 	billing, err := newBilling(t.Context(), config, jobs, stripe)
@@ -114,7 +129,7 @@ func TestPostPurchasesIntegration(t *testing.T) {
 	checkout := blogTestCheckout(t, app, paid.ID, bob.token, "purchase-once", map[string]any{
 		"customer_id": charlie.id, "price_cents": 1, "currency": "EUR", "payment_status": "paid",
 	})
-	if checkout.Status != "requires_action" || checkout.Amount != 4_990_000 || !strings.EqualFold(checkout.Currency, "USD") || checkout.URL == nil {
+	if checkout.Status != "requires_action" || checkout.Amount == nil || *checkout.Amount != 4_990_000 || checkout.Currency == nil || !strings.EqualFold(*checkout.Currency, "USD") || checkout.URL == nil {
 		t.Fatalf("checkout did not use server-owned USD terms: %+v", checkout)
 	}
 	first := stripe.latestSession(t)
@@ -172,7 +187,7 @@ func TestPostPurchasesIntegration(t *testing.T) {
 		assertBlogTestReadable(t, app, paid, alice.token, true)
 		if price == 799 {
 			newPriceCheckout := blogTestCheckout(t, app, paid.ID, charlie.token, "updated-price", nil)
-			if newPriceCheckout.Amount != 7_990_000 || stripe.latestSession(t).amount != 799 {
+			if newPriceCheckout.Amount == nil || *newPriceCheckout.Amount != 7_990_000 || stripe.latestSession(t).amount != 799 {
 				t.Fatal("new checkout did not use the author's changed price")
 			}
 		}
@@ -183,6 +198,146 @@ func TestPostPurchasesIntegration(t *testing.T) {
 	assertBlogPostIDs(t, app, alice.token, paid.ID)
 	assertBlogPostIDs(t, app, charlie.token)
 	assertBlogPostIDs(t, app, "")
+	t.Run("creator catalogs and moderator pricing", func(t *testing.T) {
+		// A buyer is also an independent author. Supplied owner/catalog fields
+		// cannot move their new product into the original seller's catalog.
+		alicePost := blogTestStoredPost(t, pool, paid.ID)
+		aliceClient, err := billing.runtime.CatalogClient(alice.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		aliceCatalog, err := aliceClient.EnsureOwnCatalog(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		otherPost := createBlogTestPost(t, bobApp, bob.token, map[string]any{
+			"slug": "second-author", "title": "Another author's work", "body": "Second purchased body",
+			"visibility": "private", "price_cents": 699, "owner_id": alice.id,
+			"catalog_id": aliceCatalog.ID.String(), "openrails_product_id": alicePost.ProductID,
+		})
+		bobPost := blogTestStoredPost(t, pool, otherPost.ID)
+		if bobPost.OwnerID != bob.id {
+			t.Fatal("request fields changed the authenticated post owner")
+		}
+		bobClient, err := billing.runtime.CatalogClient(bob.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bobCatalog, err := bobClient.EnsureOwnCatalog(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if aliceCatalog.ID == bobCatalog.ID || bobCatalog.OwnerSubject == nil || *bobCatalog.OwnerSubject != bob.id {
+			t.Fatal("authors must have distinct OpenRails-owned catalogs")
+		}
+		aliceProduct, err := openrails.ParseProductID(alicePost.ProductID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bobProduct, err := openrails.ParseProductID(bobPost.ProductID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := bobClient.GetProduct(t.Context(), aliceProduct); !errors.Is(err, openrails.ErrNotFound) {
+			t.Fatalf("another author could address the seller's product: %v", err)
+		}
+		if _, _, err := billing.EnsurePostOffer(t.Context(), bob.id, alicePost.BillingKey, "Foreign author", 999); err == nil {
+			t.Fatal("author billing path accepted another author's billing key")
+		}
+		if _, _, err := billing.EnsurePostOfferAsAdmin(t.Context(), bob.id, alicePost.BillingKey, "Wrong catalog", 999); err == nil {
+			t.Fatal("administrator path silently reassigned a product to another catalog")
+		}
+		blogTestRequest(t, app, http.MethodPatch, blogTestPath(otherPost.ID), alice.token, map[string]any{"price_cents": 999}, http.StatusNotFound)
+
+		moderatorApp := &blogTestServer{url: app.url, client: newBlogTestHTTPClient(t, "127.0.0.5")}
+		moderator := registerBlogTestUser(t, moderatorApp, service, "pricemoderator")
+		blogTestRequest(t, app, http.MethodPatch, blogTestPath(otherPost.ID), moderator.token, map[string]any{"price_cents": 1299}, http.StatusNotFound)
+		if err := service.grantAdmin(t.Context(), moderator.id); err != nil {
+			t.Fatal(err)
+		}
+		blogTestRequest(t, app, http.MethodPatch, blogTestPath(otherPost.ID), moderator.token,
+			map[string]any{"price_cents": 1299, "title": "Moderated title", "owner_id": moderator.id}, http.StatusOK)
+		after := blogTestStoredPost(t, pool, otherPost.ID)
+		product, err := bobClient.GetProduct(t.Context(), bobProduct)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if after.Title != "Moderated title" || after.PriceCents == nil || *after.PriceCents != 1299 || after.OwnerID != bob.id || after.ProductID != bobPost.ProductID || product.CatalogID != bobCatalog.ID || product.DisplayName != bobPost.Title {
+			t.Fatal("moderator edit failed to preserve the product owner/title snapshot while updating the post and price")
+		}
+		if err := service.revokeAdmin(t.Context(), moderator.id); err != nil {
+			t.Fatal(err)
+		}
+		blogTestRequest(t, app, http.MethodPatch, blogTestPath(otherPost.ID), moderator.token, map[string]any{"price_cents": 1599}, http.StatusNotFound)
+		catalogs, err := billing.client.ListCatalogs(t.Context(), openrails.PageOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, owned := range catalogs {
+			if owned.OwnerSubject != nil && *owned.OwnerSubject == moderator.id {
+				t.Fatal("moderation created a catalog for the moderator")
+			}
+		}
+		checkout := blogTestCheckout(t, app, otherPost.ID, charlie.token, "second-author-purchase", nil)
+		if checkout.Amount == nil || *checkout.Amount != 12_990_000 {
+			t.Fatal("checkout did not use the authorized moderator price")
+		}
+		session := stripe.latestSession(t)
+		blogTestStripeWebhook(t, app, session.event(t, "evt_second_author_paid", "checkout.session.completed", "complete", "paid"), blogTestStripeWebhookSecret, http.StatusOK)
+		assertBlogTestReadable(t, app, otherPost, charlie.token, true)
+		assertBlogTestReadable(t, app, otherPost, alice.token, false)
+		assertBlogTestReadable(t, app, otherPost, bob.token, true)
+		blogTestRequest(t, app, http.MethodPatch, blogTestPath(otherPost.ID), charlie.token, map[string]any{"price_cents": 50}, http.StatusNotFound)
+		assertBlogTestReadable(t, app, paid, bob.token, true)
+	})
+	t.Run("concurrent content edit survives completed billing work", func(t *testing.T) {
+		before := blogTestStoredPost(t, pool, paid.ID)
+		productID, err := openrails.ParseProductID(before.ProductID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		productBefore, err := billing.client.GetProduct(t.Context(), productID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Simulate an editor committing after the offer has been prepared. The
+		// callback borrows the exact same pool, including the MaxConns=1 case.
+		// A held host transaction would stall; a missing CAS would lose this edit.
+		observer := postOfferCallbackBilling{postBilling: billing, after: func(ctx context.Context) error {
+			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			_, err := pool.Exec(ctx, "UPDATE "+blogPostsTable+" SET title=$1, updated_at=now() WHERE id=$2", "Concurrent content edit", paid.ID)
+			return err
+		}}
+		fiberApp, err := newApp(pool, service, observer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		concurrentApp := newBlogTestServer(t, fiberApp)
+		blogTestRequest(t, concurrentApp, http.MethodPatch, blogTestPath(paid.ID), alice.token,
+			map[string]any{"title": "Stale pricing edit", "price_cents": 1099}, http.StatusConflict)
+		after := blogTestStoredPost(t, pool, paid.ID)
+		if after.Title != "Concurrent content edit" || after.PriceCents != nil || after.PriceID != before.PriceID || after.ProductID != before.ProductID {
+			t.Fatal("a stale pricing edit overwrote the committed content revision")
+		}
+		productAfter, err := billing.client.GetProduct(t.Context(), productID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if productAfter.DisplayName != productBefore.DisplayName || productAfter.DisplayName == "Stale pricing edit" {
+			t.Fatal("the rejected blog edit changed the existing billing product label")
+		}
+		blogTestRequest(t, concurrentApp, http.MethodPost, checkoutPath, charlie.token, nil, http.StatusNotFound,
+			http.Header{"Idempotency-Key": {"after-conflicting-price"}})
+	})
+	schema := config.BillingSchema
+	if schema == "" {
+		schema = "billing"
+	}
+	var secrets int
+	if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{schema, "merchant_secrets"}.Sanitize()).Scan(&secrets); err != nil || secrets != 0 {
+		t.Fatalf("host provider credentials were persisted: rows=%d err=%v", secrets, err)
+	}
 	// The shared leader must schedule both libraries, using one complete config.
 	jobCtx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
@@ -206,6 +361,28 @@ func TestPostPurchasesIntegration(t *testing.T) {
 			t.Error("OpenRails did not pin Stripe-Version above the transport seam")
 		}
 	}
+}
+
+type postOfferCallbackBilling struct {
+	postBilling
+	after func(context.Context) error
+}
+
+func (b postOfferCallbackBilling) EnsurePostOffer(ctx context.Context, author, key, title string, price int64) (string, string, error) {
+	productID, priceID, err := b.postBilling.EnsurePostOffer(ctx, author, key, title, price)
+	if err == nil {
+		err = b.after(ctx)
+	}
+	return productID, priceID, err
+}
+
+func blogTestStoredPost(t *testing.T, pool *pgxpool.Pool, id int64) blogPost {
+	t.Helper()
+	post, err := scanBlogPost(pool.QueryRow(t.Context(), "SELECT "+postColumns+" FROM "+blogPostsTable+" WHERE id=$1", id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return post
 }
 
 func blogTestCheckout(t *testing.T, app *blogTestServer, postID int64, token, key string, input any) openrails.CheckoutSession {
@@ -371,41 +548,84 @@ func blogTestStripeWebhook(t *testing.T, app *blogTestServer, payload []byte, se
 	}
 }
 
-// Run OpenRails with a non-superuser LOGIN role inheriting the upstream
-// openrails_app grants; never weaken RLS or alter a shared cluster role.
-func blogTestBillingDSN(t *testing.T, pool *pgxpool.Pool) string {
+// The test harness creates an isolated normal database owner. Application
+// initialization and runtime then share that one login without provisioning roles.
+func newBlogTestOwnerPool(t *testing.T, pool *pgxpool.Pool, maxConns int32) (*pgxpool.Pool, string) {
 	t.Helper()
-	role := "demo_billing_test_" + strings.ToLower(rand.Text())
+	role := "demo_app_test_" + strings.ToLower(rand.Text())
+	quotedRole := pgx.Identifier{role}.Sanitize()
 	password := rand.Text()
-	if _, err := pool.Exec(t.Context(), "CREATE ROLE "+pgx.Identifier{role}.Sanitize()+" LOGIN PASSWORD '"+password+"'"); err != nil {
-		t.Fatalf("create isolated billing role: %v", err)
+	adminConfig := pool.Config().ConnConfig.Copy()
+	var statement string
+	if err := pool.QueryRow(t.Context(), "SELECT format('CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS PASSWORD %L', $1::text, $2::text)", role, password).Scan(&statement); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), statement); err != nil {
+		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
-		if _, err := pool.Exec(ctx, "REVOKE SELECT, UPDATE(attempted_at) ON public.river_job FROM "+pgx.Identifier{role}.Sanitize()); err != nil {
-			t.Errorf("revoke isolated queue grants: %v", err)
+		admin, err := pgx.ConnectConfig(ctx, adminConfig)
+		if err != nil {
+			t.Errorf("connect to remove isolated role: %v", err)
+			return
 		}
-		if _, err := pool.Exec(ctx, "DROP ROLE "+pgx.Identifier{role}.Sanitize()); err != nil {
-			t.Errorf("drop isolated billing role: %v", err)
+		defer admin.Close(ctx)
+		var exists bool
+		if err := admin.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)", role).Scan(&exists); err != nil {
+			t.Errorf("check isolated application role: %v", err)
+			return
+		}
+		if !exists {
+			return
+		}
+		if _, err := admin.Exec(ctx, "ALTER DATABASE "+pgx.Identifier{adminConfig.Database}.Sanitize()+" OWNER TO CURRENT_USER"); err != nil {
+			t.Errorf("return owned test database to fixture administrator: %v", err)
+			return
+		}
+		if _, err := admin.Exec(ctx, "DROP OWNED BY "+quotedRole+"; DROP ROLE "+quotedRole); err != nil {
+			t.Errorf("remove isolated application role: %v", err)
 		}
 	})
-	if _, err := pool.Exec(t.Context(), "GRANT openrails_app TO "+pgx.Identifier{role}.Sanitize()); err != nil {
-		t.Fatalf("grant billing RLS role: %v", err)
-	}
-	// The host lets billing observe/heartbeat its jobs; this grants no access
-	// to the application's content or AuthKit data.
-	if _, err := pool.Exec(t.Context(), "GRANT SELECT, UPDATE(attempted_at) ON public.river_job TO "+pgx.Identifier{role}.Sanitize()); err != nil {
+	if _, err := pool.Exec(t.Context(), "ALTER DATABASE "+pgx.Identifier{adminConfig.Database}.Sanitize()+" OWNER TO "+quotedRole); err != nil {
 		t.Fatal(err)
 	}
-	config := pool.Config().ConnConfig
-	dsn := &url.URL{Scheme: "postgres", Host: net.JoinHostPort(config.Host, strconv.Itoa(int(config.Port))), Path: "/" + config.Database, User: url.UserPassword(role, password)}
+	runtimeConfig := pool.Config()
+	runtimeConfig.ConnConfig.User = role
+	runtimeConfig.ConnConfig.Password = password
+	if maxConns > 0 {
+		runtimeConfig.MaxConns = maxConns
+	}
+	runtimePool, err := pgxpool.NewWithConfig(t.Context(), runtimeConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(runtimePool.Close)
+	conn := runtimeConfig.ConnConfig
+	dsn := &url.URL{Scheme: "postgres", Host: net.JoinHostPort(conn.Host, strconv.Itoa(int(conn.Port))), Path: "/" + conn.Database, User: url.UserPassword(role, password)}
 	query := dsn.Query()
-	if config.TLSConfig == nil {
+	if conn.TLSConfig == nil {
 		query.Set("sslmode", "disable")
 	} else {
 		query.Set("sslmode", "require")
 	}
 	dsn.RawQuery = query.Encode()
-	return dsn.String()
+	return runtimePool, dsn.String()
+}
+
+func assertBlogTestOwnerRole(t *testing.T, runtimePool *pgxpool.Pool) {
+	t.Helper()
+	var privileged bool
+	if err := runtimePool.QueryRow(t.Context(), `SELECT rolsuper OR rolbypassrls OR rolcreatedb OR rolcreaterole FROM pg_roles WHERE rolname = current_user`).Scan(&privileged); err != nil || privileged {
+		t.Fatalf("runtime must use a normal application login: privileged=%v err=%v", privileged, err)
+	}
+	var memberships int
+	if err := runtimePool.QueryRow(t.Context(), `SELECT count(*) FROM pg_auth_members WHERE member = (SELECT oid FROM pg_roles WHERE rolname = current_user)`).Scan(&memberships); err != nil || memberships != 0 {
+		t.Fatalf("runtime login must have no role memberships: memberships=%d err=%v", memberships, err)
+	}
+	var ownsMigrations bool
+	if err := runtimePool.QueryRow(t.Context(), `SELECT pg_get_userbyid(relowner) = current_user FROM pg_class WHERE oid = 'public.migrations'::regclass`).Scan(&ownsMigrations); err != nil || !ownsMigrations {
+		t.Fatalf("the same application login must own its initialized storage: owner=%v err=%v", ownsMigrations, err)
+	}
 }

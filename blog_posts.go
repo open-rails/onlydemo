@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	authkit "github.com/open-rails/authkit"
@@ -149,27 +150,21 @@ func (api *blogAPI) create(c fiber.Ctx) error {
 	if post.PriceCents != nil && api.billing == nil {
 		return billingUnavailable(c)
 	}
-	tx, err := api.pool.Begin(c.Context())
-	if err != nil {
-		return databaseError(c, err)
-	}
-	defer tx.Rollback(c.Context())
-	post, err = scanBlogPost(tx.QueryRow(c.Context(), `INSERT INTO `+blogPostsTable+`
-		(owner_id, slug, title, body, visibility, price_cents) VALUES ($1,$2,$3,$4,$5,$6)
-		RETURNING `+postColumns, post.OwnerID, post.Slug, post.Title, post.Body, post.Visibility, post.PriceCents))
-	if err != nil {
-		return databaseError(c, err)
-	}
+	// Publish the post after its offer exists. Holding an application
+	// transaction while billing borrows the same pool can exhaust that pool.
+	post.BillingKey = uuid.NewString()
+	var err error
 	if post.PriceCents != nil {
-		post.ProductID, post.PriceID, err = api.billing.EnsurePostOffer(c.Context(), post.BillingKey, post.Title, *post.PriceCents)
+		post.ProductID, post.PriceID, err = api.billing.EnsurePostOffer(c.Context(), user.UserID, post.BillingKey, post.Title, *post.PriceCents)
 		if err != nil {
 			return billingUnavailable(c)
 		}
-		if _, err := tx.Exec(c.Context(), `UPDATE `+blogPostsTable+` SET openrails_product_id=$1, openrails_price_id=$2 WHERE id=$3`, post.ProductID, post.PriceID, post.ID); err != nil {
-			return databaseError(c, err)
-		}
 	}
-	if err := tx.Commit(c.Context()); err != nil {
+	post, err = scanBlogPost(api.pool.QueryRow(c.Context(), `INSERT INTO `+blogPostsTable+`
+        (owner_id, billing_key, slug, title, body, visibility, price_cents, openrails_product_id, openrails_price_id)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),NULLIF($9,'')) RETURNING `+postColumns,
+		post.OwnerID, post.BillingKey, post.Slug, post.Title, post.Body, post.Visibility, post.PriceCents, post.ProductID, post.PriceID))
+	if err != nil {
 		return databaseError(c, err)
 	}
 	post.setReadable(true)
@@ -193,21 +188,17 @@ func (api *blogAPI) update(c fiber.Ctx) error {
 	if err != nil {
 		return clientError(c, http.StatusServiceUnavailable, "permission service is unavailable")
 	}
-	tx, err := api.pool.Begin(c.Context())
-	if err != nil {
-		return databaseError(c, err)
-	}
-	defer tx.Rollback(c.Context())
-	// Serialize price changes and checkout creation for this post. The product
-	// remains stable when a new price is created, preserving earlier purchases.
-	post, err := scanBlogPost(tx.QueryRow(c.Context(), `SELECT `+postColumns+`
-		FROM `+blogPostsTable+` WHERE id=$1 AND (owner_id=$2 OR $3) FOR UPDATE`, id, user.UserID, admin))
+	// Use an optimistic revision check after billing work so simultaneous
+	// edits cannot overwrite each other or hold a shared-pool connection idle.
+	post, err := scanBlogPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+`
+        FROM `+blogPostsTable+` WHERE id=$1 AND (owner_id=$2 OR $3)`, id, user.UserID, admin))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, http.StatusNotFound, "post not found")
 	}
 	if err != nil {
 		return databaseError(c, err)
 	}
+	revision := post.UpdatedAt
 	if input.Slug != nil {
 		post.Slug = *input.Slug
 	}
@@ -231,20 +222,25 @@ func (api *blogAPI) update(c fiber.Ctx) error {
 		if api.billing == nil {
 			return billingUnavailable(c)
 		}
-		post.ProductID, post.PriceID, err = api.billing.EnsurePostOffer(c.Context(), post.BillingKey, post.Title, *post.PriceCents)
+		if post.OwnerID == user.UserID {
+			post.ProductID, post.PriceID, err = api.billing.EnsurePostOffer(c.Context(), user.UserID, post.BillingKey, post.Title, *post.PriceCents)
+		} else {
+			// The row lookup above requires AuthKit's moderation grant here.
+			post.ProductID, post.PriceID, err = api.billing.EnsurePostOfferAsAdmin(c.Context(), post.OwnerID, post.BillingKey, post.Title, *post.PriceCents)
+		}
 		if err != nil {
 			return billingUnavailable(c)
 		}
 	}
-	post, err = scanBlogPost(tx.QueryRow(c.Context(), `UPDATE `+blogPostsTable+`
+	post, err = scanBlogPost(api.pool.QueryRow(c.Context(), `UPDATE `+blogPostsTable+`
 		SET slug=$1, title=$2, body=$3, visibility=$4, price_cents=$5,
 			openrails_product_id=NULLIF($6,''), openrails_price_id=NULLIF($7,''), updated_at=NOW()
-		WHERE id=$8 AND (owner_id=$9 OR $10) RETURNING `+postColumns,
-		post.Slug, post.Title, post.Body, post.Visibility, post.PriceCents, post.ProductID, post.PriceID, id, user.UserID, admin))
-	if err != nil {
-		return databaseError(c, err)
+		WHERE id=$8 AND (owner_id=$9 OR $10) AND updated_at=$11 RETURNING `+postColumns,
+		post.Slug, post.Title, post.Body, post.Visibility, post.PriceCents, post.ProductID, post.PriceID, id, user.UserID, admin, revision))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return clientError(c, http.StatusConflict, "post changed while editing; fetch it again and retry")
 	}
-	if err := tx.Commit(c.Context()); err != nil {
+	if err != nil {
 		return databaseError(c, err)
 	}
 	post.setReadable(true)

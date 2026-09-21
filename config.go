@@ -10,22 +10,20 @@ import (
 )
 
 type Config struct {
-	Port                 int
-	DatabaseURL          string
-	AuthIssuer           string
-	AuthAudience         string
-	MigrationsOnly       bool
-	AdminOnly            bool
-	AdminRevoke          bool
-	AdminUserID          string
-	PublicURL            string
-	BillingDatabaseURL   string
-	BillingSchema        string
-	RiverSchema          string
-	StripeSecretKey      string
-	StripeAccountID      string
-	StripeWebhookSecret  string
-	BillingEncryptionKey string
+	Port                int
+	DatabaseURL         string
+	AuthIssuer          string
+	AuthAudience        string
+	MigrationsOnly      bool
+	AdminOnly           bool
+	AdminRevoke         bool
+	AdminUserID         string
+	PublicURL           string
+	BillingSchema       string
+	RiverSchema         string
+	StripeSecretKey     string
+	StripeAccountID     string
+	StripeWebhookSecret string
 }
 
 func loadConfig() (Config, error) {
@@ -37,7 +35,7 @@ func loadConfig() (Config, error) {
 				return strings.ToLower(key), value
 			case "DATABASE_URL":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
-			case "AUTH_ISSUER", "AUTH_AUDIENCE", "PUBLIC_URL", "BILLING_DATABASE_URL", "BILLING_SCHEMA", "RIVER_SCHEMA", "STRIPE_SECRET_KEY", "STRIPE_ACCOUNT_ID", "STRIPE_WEBHOOK_SECRET", "BILLING_ENCRYPTION_KEY", "ADMIN_USER_ID", "ADMIN_ONLY", "ADMIN_REVOKE":
+			case "AUTH_ISSUER", "AUTH_AUDIENCE", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA", "STRIPE_SECRET_KEY", "STRIPE_ACCOUNT_ID", "STRIPE_WEBHOOK_SECRET", "ADMIN_USER_ID", "ADMIN_ONLY", "ADMIN_REVOKE":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
 			case "MIGRATIONS_ONLY":
 				return "migrations.only", value
@@ -76,27 +74,41 @@ func loadConfig() (Config, error) {
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" {
 		return Config{}, fmt.Errorf("PUBLIC_URL must be an http(s) origin without a path, credentials, query, or fragment")
 	}
-	billingURL := k.String("billing.database.url")
-	if billingURL == "" {
-		billingURL = "postgres://openrails_demo_billing:local-demo-billing@localhost:55433/openrails_demo?sslmode=disable"
-	}
 
-	return Config{
-		Port:                 port,
-		DatabaseURL:          databaseURL,
-		AuthIssuer:           authIssuer,
-		AuthAudience:         authAudience,
-		MigrationsOnly:       k.Bool("migrations.only"),
-		AdminOnly:            k.Bool("admin.only"),
-		AdminRevoke:          k.Bool("admin.revoke"),
-		AdminUserID:          k.String("admin.user.id"),
-		PublicURL:            publicURL,
-		BillingDatabaseURL:   billingURL,
-		BillingSchema:        k.String("billing.schema"),
-		RiverSchema:          k.String("river.schema"),
-		StripeSecretKey:      k.String("stripe.secret.key"),
-		StripeAccountID:      k.String("stripe.account.id"),
-		StripeWebhookSecret:  k.String("stripe.webhook.secret"),
-		BillingEncryptionKey: k.String("billing.encryption.key"),
-	}, nil
+	cfg := Config{
+		Port:                port,
+		DatabaseURL:         databaseURL,
+		AuthIssuer:          authIssuer,
+		AuthAudience:        authAudience,
+		MigrationsOnly:      k.Bool("migrations.only"),
+		AdminOnly:           k.Bool("admin.only"),
+		AdminRevoke:         k.Bool("admin.revoke"),
+		AdminUserID:         k.String("admin.user.id"),
+		PublicURL:           publicURL,
+		BillingSchema:       k.String("billing.schema"),
+		RiverSchema:         k.String("river.schema"),
+		StripeSecretKey:     k.String("stripe.secret.key"),
+		StripeAccountID:     k.String("stripe.account.id"),
+		StripeWebhookSecret: k.String("stripe.webhook.secret"),
+	}
+	if err := validateDatabaseSchemas(cfg); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+// Keep independent application, library and queue schemas from colliding.
+func validateDatabaseSchemas(cfg Config) error {
+	billing := strings.TrimSpace(cfg.BillingSchema)
+	if billing == "" {
+		billing = "billing"
+	}
+	river := strings.TrimSpace(cfg.RiverSchema)
+	if river == "" {
+		river = "public"
+	}
+	if billing == "demo" || billing == "profiles" || river == "demo" || river == "profiles" || billing == river {
+		return fmt.Errorf("BILLING_SCHEMA and RIVER_SCHEMA must be distinct from each other, demo, and profiles")
+	}
+	return nil
 }

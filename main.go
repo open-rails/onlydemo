@@ -42,28 +42,25 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("connect to database: %w", err)
 	}
 
-	migrationContext, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer cancel()
-	if err := applyMigrations(migrationContext, pool); err != nil {
-		return fmt.Errorf("apply application migrations: %w", err)
+	migrationContext, stopMigration := context.WithTimeout(ctx, 5*time.Minute)
+	err = initializeDatabase(migrationContext, config, pool)
+	stopMigration()
+	if err != nil {
+		return err
 	}
-	jobs := newJobs(pool, config)
-	if err := jobs.initialize(migrationContext); err != nil {
-		return fmt.Errorf("initialize application jobs: %w", err)
+	if config.MigrationsOnly {
+		return nil
 	}
 
-	authService, err := newAuth(migrationContext, config, pool)
+	jobs := newJobs(pool, config)
+
+	authService, err := newAuth(ctx, config, pool)
 	if err != nil {
 		return fmt.Errorf("initialize authkit: %w", err)
 	}
 	defer authService.Close()
 	jobs.auth = authService
-	if err := initializeBilling(migrationContext, config, pool, jobs); err != nil {
-		return fmt.Errorf("initialize openrails database: %w", err)
-	}
-	if config.MigrationsOnly {
-		return nil
-	}
+
 	if config.AdminOnly {
 		if config.AdminRevoke {
 			if err := authService.revokeAdmin(ctx, config.AdminUserID); err != nil {
@@ -78,6 +75,7 @@ func run(ctx context.Context) error {
 		log.Printf("Granted AuthKit admin role to %s", config.AdminUserID)
 		return nil
 	}
+
 	billing, err := newBilling(ctx, config, jobs)
 	if err != nil {
 		return fmt.Errorf("initialize OpenRails: %w", err)

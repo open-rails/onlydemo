@@ -27,15 +27,11 @@ func (api *blogAPI) checkout(c fiber.Ctx) error {
 	if api.billing == nil {
 		return billingUnavailable(c)
 	}
-	tx, err := api.pool.Begin(c.Context())
-	if err != nil {
-		return databaseError(c, err)
-	}
-	defer tx.Rollback(c.Context())
-	// Checkout uses a server-selected price, held stable until OpenRails has
-	// stored the attempt. Request JSON never selects a customer or price.
-	post, err := scanBlogPost(tx.QueryRow(c.Context(), `SELECT `+postColumns+`
-		FROM `+blogPostsTable+` WHERE id=$1 AND visibility='private' AND price_cents IS NOT NULL FOR SHARE`, id))
+	// Select the current immutable offer before billing borrows the same pool.
+	// Later price edits create a new offer; this checkout retains these terms.
+	// Request JSON never selects a customer or price.
+	post, err := scanBlogPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+`
+        FROM `+blogPostsTable+` WHERE id=$1 AND visibility='private' AND price_cents IS NOT NULL`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, http.StatusNotFound, "post is not for sale")
 	}
@@ -61,9 +57,6 @@ func (api *blogAPI) checkout(c fiber.Ctx) error {
 	}
 	if err != nil {
 		return billingUnavailable(c)
-	}
-	if err := tx.Commit(c.Context()); err != nil {
-		return databaseError(c, err)
 	}
 	c.Set("Cache-Control", "no-store")
 	return c.Status(http.StatusCreated).JSON(session)

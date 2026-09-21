@@ -24,24 +24,41 @@ import (
 // databases. Every run creates and removes its own database; the database named
 // in the connection string and its contents are never reset.
 func TestBlogPostsIntegration(t *testing.T) {
-	pool := newBlogTestDatabase(t)
+	migrationPool := newBlogTestDatabase(t)
+	config := Config{AuthIssuer: "http://localhost:3000", AuthAudience: "openrails-demo"}
+	pool, databaseURL := newBlogTestOwnerPool(t, migrationPool, 0)
+	config.DatabaseURL = databaseURL
 	for pass := 1; pass <= 2; pass++ {
-		if err := applyMigrations(t.Context(), pool); err != nil {
+		if err := initializeDatabase(t.Context(), config, pool); err != nil {
 			t.Fatalf("apply embedded migrations pass %d: %v", pass, err)
 		}
 	}
+	assertBlogTestOwnerRole(t, pool)
+	migrationPool.Close()
 	var placed bool
 	if err := pool.QueryRow(t.Context(), `SELECT to_regclass('demo.blog_posts') IS NOT NULL AND to_regclass('public.blog_posts') IS NULL`).Scan(&placed); err != nil || !placed {
 		t.Fatalf("application namespace placement = %v, err=%v", placed, err)
 	}
-	service, err := newAuth(t.Context(), Config{
-		AuthIssuer:   "http://localhost:3000",
-		AuthAudience: "openrails-demo",
-	}, pool)
+	service, err := newAuth(t.Context(), config, pool)
 	if err != nil {
 		t.Fatalf("initialize AuthKit: %v", err)
 	}
-	t.Cleanup(func() { service.Close() })
+	t.Cleanup(func() {
+		service.Close()
+		if err := pool.Ping(context.Background()); err != nil {
+			t.Errorf("AuthKit closed the borrowed host pool: %v", err)
+		}
+	})
+	jobs := newJobs(pool, config)
+	jobs.auth = service
+	t.Cleanup(func() {
+		if err := jobs.close(context.Background()); err != nil {
+			t.Errorf("stop AuthKit-only host jobs: %v", err)
+		}
+	})
+	if err := jobs.start(t.Context()); err != nil {
+		t.Fatalf("start AuthKit-only host jobs: %v", err)
+	}
 	fiberApp, err := newApp(pool, service, nil)
 	if err != nil {
 		t.Fatalf("mount AuthKit: %v", err)
@@ -246,6 +263,23 @@ func TestBlogPostsIntegration(t *testing.T) {
 			"grant_type": "refresh_token", "refresh_token": bob.refreshToken,
 		}, http.StatusUnauthorized)
 	})
+	// Await maintenance while the test context and host fleet are still alive.
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	for {
+		var completed bool
+		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM public.river_job WHERE kind = 'authkit_cleanup_expired_auth_state' AND state = 'completed')`).Scan(&completed); err != nil {
+			t.Fatalf("AuthKit maintenance did not complete: %v", err)
+		}
+		if completed {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("AuthKit maintenance did not complete before deadline")
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }
 
 func newBlogTestDatabase(t *testing.T) *pgxpool.Pool {

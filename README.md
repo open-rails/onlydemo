@@ -7,19 +7,19 @@ and access grants; the app owns posts and their catalog references.
 
 ## Run locally
 
-Install Go 1.26.6+, Docker, the PostgreSQL `psql` client, [Task](https://taskfile.dev) and the
+Install Go 1.26.6+, Docker, [Task](https://taskfile.dev) and the
 [Stripe CLI](https://docs.stripe.com/stripe-cli). Then:
 
 ```sh
 cp -n .env.example .env
 task db:up
 task migrate
-task db:roles
 ```
 
 Fill in the ignored `.env` with your Stripe **test** secret key and account ID.
-Generate `BILLING_ENCRYPTION_KEY` once with `openssl rand -base64 32`; keep it
-stable because it encrypts the stored provider credentials. Live Stripe keys
+The host supplies these credentials directly to OpenRails; provider credential
+API routes are not mounted and the keys are not copied into its database secret store.
+This Stripe-only demo does not need a billing encryption key. Live Stripe keys
 are rejected. Restricted `rk_test_` keys need permissions for the catalog,
 customers, checkout, payments and webhook operations used by OpenRails.
 
@@ -51,38 +51,45 @@ PostgreSQL uses port `55433`; the API uses `3000`. Task loads `.env`; plain
 | Variable | Purpose |
 | --- | --- |
 | `PORT`, `PUBLIC_URL` | Listening port and browser return origin; defaults to localhost |
-| `DATABASE_URL` | Migration/application connection, with permission to create roles/extensions |
-| `BILLING_DATABASE_URL` | Separate non-superuser, NOBYPASSRLS billing login |
+| `DATABASE_URL` | One owning connection/pool for initialization, blog, AuthKit, OpenRails, and River |
 | `BILLING_SCHEMA`, `RIVER_SCHEMA` | Optional namespace overrides; defaults are `billing` and `public` |
 | `AUTH_ISSUER`, `AUTH_AUDIENCE` | AuthKit token identity |
 | `STRIPE_SECRET_KEY`, `STRIPE_ACCOUNT_ID`, `STRIPE_WEBHOOK_SECRET` | Test account and webhook credentials |
-| `BILLING_ENCRYPTION_KEY` | Base64 of 32 random bytes, retained across restarts |
 
 The default database URL is
 `postgres://postgres:postgres@localhost:55433/openrails_demo?sslmode=disable`.
 AuthKit defaults to `profiles`, OpenRails to `billing`, and River to `public`.
+Billing and River schemas must be distinct from each other, `demo`, and `profiles`.
 The application owns `demo`. The app loads only its own migrations. AuthKit
 and OpenRails initialize their storage through public library calls; their SQL,
 ledger keys and migration runners are private implementation details.
+`task run` explicitly calls those initializers before constructing the services.
+`task migrate` performs the same initialization and exits. Both use `DATABASE_URL`;
+there is no separate admin connection, login creation, or grant script in the app.
+The connected user owns the objects it creates and already has access to them.
+The libraries also support optional separate runtime credentials for deployments
+that want them, but this demo keeps one pool.
 
 This demo chooses one host-owned River fleet for both libraries. `jobs.go`
-initializes the host's River schema, collects OpenRails workers and AuthKit's
-cleanup worker/schedule, then constructs one client. The host starts and stops
-it, stopping workers before closing library services and database pools.
+initializes the host's River schema during migration. At runtime, OpenRails'
+`BindRiver` composes its workers/schedules with AuthKit's registration before
+constructing one client on the shared pool. Without billing, the host constructs
+the AuthKit fleet itself. The host starts and stops workers before closing
+library services, then closes its pool. Libraries borrow that pool.
 Every replica must register the same complete schedules, since River's
 elected leader schedules periodic jobs. A consumer that wants a library-managed
 fleet can omit the host integration and let the library initialize its queue.
 
-The `db:roles` task grants billing access only to its own data and the specific
-shared River job read/heartbeat operations it needs. It grants no access to
-AuthKit's schema or blog content, and no future-table privileges in `public`.
+The local container provides the default `postgres` login. A normal PostgreSQL
+login that owns its database also works; integration tests use that setup. There
+are no per-library logins or permission-group roles. Merchant authorization uses
+explicit scoped queries, independently of database-role flags.
 
-This schema-layout release targets fresh databases. Point both database URLs at
-a new database to retain an older demo database separately. It does not rename
-old schemas, move old blog tables, or restamp vendor ledgers. Post owners are
-opaque AuthKit IDs; there is no foreign key into AuthKit's private schema.
-`task db:down` removes the entire disposable development container; it is not a
-backup workflow.
+The changed library baseline requires a fresh database when upgrading from the
+old demo. Point `DATABASE_URL` at a new database to preserve an older one; startup
+does not rewrite historical migration checksums or drop existing databases.
+Post owners are opaque AuthKit IDs, with no foreign key into AuthKit's schema.
+`task db:down` removes the disposable development container and its databases.
 
 AuthKit uses development signing keys and memory-backed challenge/rate-limit
 storage. Email verification and MFA are disabled for this demo. Signing keys
@@ -131,6 +138,22 @@ lookup for ordinary authors. This is based on permissions, not a special role
 name.
 
 ## Posts and purchases
+
+The application is one OpenRails merchant with one Stripe collection account.
+Each author has an OpenRails catalog bound to their authenticated subject. Author
+writes use `CatalogClient`; a separately authorized moderator uses the merchant
+client while preserving the author's catalog ownership. OpenRails enforces these
+catalog boundaries; the demo retains content access checks and product/price
+references. Creator payouts and Stripe Connect are separate from catalog ownership
+and are not configured by this demo.
+
+Catalog/provider work runs outside blog database transactions so a shared pool
+cannot deadlock waiting for itself. Post updates use an atomic revision check;
+concurrent edits can return 409 and should be retried after fetching the post.
+Checkout captures the selected immutable offer, so a later price change does not
+change an already-created checkout's terms. The billing product label keeps the
+title from its first listing. Later title edits change the blog post only, so a
+rejected concurrent edit cannot leave its title in billing.
 
 | Method | Route | Behavior |
 | --- | --- | --- |
@@ -195,10 +218,17 @@ go vet ./...
 TEST_DATABASE_URL='postgres://postgres:postgres@localhost:55433/openrails_demo?sslmode=disable' go test -race ./...
 ```
 
-Integration tests create and remove isolated databases and billing login roles,
-so use an administrative test connection. They run real AuthKit and OpenRails,
-real migrations and PostgreSQL, and the supported Stripe HTTP transport test
-seam. Coverage includes admin grant/revoke, owner/buyer isolation, hidden bodies,
-server-selected checkout terms, signed payment confirmation, replay, repricing
-and delisting. CI never contacts Stripe. A real sandbox checkout additionally
+Integration tests create and remove isolated databases and normal database-owner
+logins, so use an administrative test connection. All application/library
+initialization and runtime then use the same owner pool without role memberships.
+The full purchase journey runs with default schemas and `MaxConns=1`, and again
+with custom billing/River schemas. Tests verify both libraries' scheduled jobs,
+borrowed-pool shutdown ownership, distinct author catalogs, moderator pricing,
+and zero persisted provider-secret rows without an encryption key. A concurrent
+edit regression borrows the same pool during billing handoff and checks the 409
+revision conflict preserves the committed content.
+They run real AuthKit, OpenRails, migrations and PostgreSQL with the supported
+Stripe HTTP transport seam. Coverage also includes owner/buyer isolation, hidden
+bodies, server-selected checkout terms, signed payment confirmation, replay,
+repricing and delisting. CI never contacts Stripe. A real sandbox checkout additionally
 requires account credentials, a running webhook listener and browser payment.

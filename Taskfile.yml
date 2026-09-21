@@ -17,7 +17,7 @@ tasks:
         -e POSTGRES_USER=postgres
         -e POSTGRES_PASSWORD=postgres
         -e POSTGRES_DB=openrails_demo
-        -p {{.POSTGRES_PORT}}:5432
+        -p 127.0.0.1:{{.POSTGRES_PORT}}:5432
         -d {{.POSTGRES_IMAGE}}
 
   db:down:
@@ -30,16 +30,8 @@ tasks:
     cmds:
       - docker logs -f {{.POSTGRES_CONTAINER}}
 
-  db:roles:
-    desc: Configure the local unprivileged billing login after migrations
-    cmds:
-      - psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -v river_schema="$RIVER_SCHEMA" -f scripts/db-role.sql
-    env:
-      DATABASE_URL: '{{.DATABASE_URL | default "postgres://postgres:postgres@localhost:55433/openrails_demo?sslmode=disable"}}'
-      RIVER_SCHEMA: '{{.RIVER_SCHEMA | default "public"}}'
-
   migrate:
-    desc: Initialize library storage and apply demo migrations
+    desc: Initialize application and library storage with the application connection
     env:
       MIGRATIONS_ONLY: 'true'
     cmds:

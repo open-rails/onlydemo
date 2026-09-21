@@ -29,9 +29,6 @@ func (a *appAuth) Close() {
 
 func newAuth(ctx context.Context, config Config, pool *pgxpool.Pool) (*appAuth, error) {
 	ownership := embedded.RiverFromHost()
-	if err := embedded.ApplyMigrations(ctx, pool, "", embedded.MigrationOptions{River: ownership}); err != nil {
-		return nil, err
-	}
 	client, err := embedded.New(embedded.Config{
 		RBAC: []embedded.PersonaDef{embedded.IntrinsicRootPersona(embedded.RoleDef{
 			Name:        "admin",

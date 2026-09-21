@@ -59,38 +59,31 @@ func (j *appJobs) initialize(ctx context.Context) error {
 	return err
 }
 
-func (j *appJobs) ownership() openrailsembed.RiverOwnership {
-	return openrailsembed.RiverFromHost(j.bind)
-}
-
-func (j *appJobs) bind(_ context.Context, fleet *openrailsembed.RiverFleet) (*river.Client[pgx.Tx], error) {
+func (j *appJobs) configure(_ context.Context, cfg *river.Config) error {
 	if j.client != nil {
-		return nil, errors.New("application River client already constructed")
+		return errors.New("application River client already constructed")
 	}
 	if j.auth == nil {
-		return nil, errors.New("AuthKit must be constructed before registering jobs")
+		return errors.New("AuthKit must be constructed before registering jobs")
 	}
-	cfg := &river.Config{Schema: j.schema, Workers: river.NewWorkers(), Queues: map[string]river.QueueConfig{}}
-	if fleet != nil {
-		cfg.Workers = fleet.Workers
-		cfg.Queues[fleet.QueueBilling] = river.QueueConfig{MaxWorkers: 4}
+	cfg.Schema = j.schema
+	if _, ok := cfg.Queues[openrailsembed.QueueBilling]; ok {
+		cfg.Queues[openrailsembed.QueueBilling] = river.QueueConfig{MaxWorkers: 4}
 	}
-	if err := j.auth.client.RegisterRiver(cfg); err != nil {
-		return nil, err
-	}
-	client, err := river.NewClient(riverpgxv5.New(j.pool), cfg)
-	if err != nil {
-		return nil, err
-	}
-	j.client = client
-	return client, nil
+	return j.auth.client.RegisterRiver(cfg)
 }
 
 func (j *appJobs) start(ctx context.Context) error {
 	if j.client == nil {
-		if _, err := j.bind(ctx, nil); err != nil {
+		cfg := &river.Config{Workers: river.NewWorkers(), Queues: map[string]river.QueueConfig{}}
+		if err := j.configure(ctx, cfg); err != nil {
 			return err
 		}
+		client, err := river.NewClient(riverpgxv5.New(j.pool), cfg)
+		if err != nil {
+			return err
+		}
+		j.client = client
 	}
 	if err := j.auth.client.Start(ctx); err != nil {
 		return err
