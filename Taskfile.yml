@@ -57,7 +57,7 @@ tasks:
   stripe:listen:
     desc: Forward Stripe test webhooks locally; copy its signing secret into .env
     cmds:
-      - '{{.STRIPE_BIN}} listen --forward-to localhost:3000/billing/v1/merchants/openrails-demo/webhooks/stripe'
+      - '{{.STRIPE_BIN}} listen --all-snapshot --forward-to localhost:3000/billing/v1/merchants/openrails-demo/webhooks/stripe'
     env:
       STRIPE_API_KEY: '{{.STRIPE_SECRET_KEY}}'
 
