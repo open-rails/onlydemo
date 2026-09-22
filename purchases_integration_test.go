@@ -396,7 +396,23 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 		blogTestRequest(t, pagedApp, http.MethodGet, "/api/posts?limit=101", bob.token, nil, http.StatusBadRequest)
 		blogTestRequest(t, pagedApp, http.MethodGet, "/api/posts?before=invalid", bob.token, nil, http.StatusBadRequest)
 	})
-	// The shared leader must schedule both libraries, using one complete config.
+	// Observe both libraries before the restart proof below. River closes its
+	// event subscription when stopped; buffered events cannot prove a new fleet.
+	jobCtx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	var authJob, billingJob bool
+	for !authJob || !billingJob {
+		select {
+		case event := <-jobEvents:
+			if event == nil {
+				t.Fatal("host job subscription stopped")
+			}
+			authJob = authJob || event.Job.Kind == "authkit_cleanup_expired_auth_state"
+			billingJob = billingJob || strings.HasPrefix(event.Job.Kind, "openrails.")
+		case <-jobCtx.Done():
+			t.Fatalf("shared job fleet did not execute both libraries: authkit=%v, openrails=%v", authJob, billingJob)
+		}
+	}
 	t.Run("durable channel deletion serializes catalog writes", func(t *testing.T) {
 		var team channel
 		decodeBlogTestJSON(t, blogTestRequest(t, app, http.MethodPost, "/api/channels", alice.token, map[string]any{"slug": "retiring-publisher", "name": "Retiring publisher"}, http.StatusCreated), &team)
@@ -531,22 +547,6 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 		}
 		blogTestRequest(t, app, http.MethodGet, blogTestPath(firstPost.ID), bob.token, nil, http.StatusNotFound)
 	})
-	// The shared leader must schedule both libraries, using one complete config.
-	jobCtx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
-	var authJob, billingJob bool
-	for !authJob || !billingJob {
-		select {
-		case event := <-jobEvents:
-			if event == nil {
-				t.Fatal("host job subscription stopped")
-			}
-			authJob = authJob || event.Job.Kind == "authkit_cleanup_expired_auth_state"
-			billingJob = billingJob || strings.HasPrefix(event.Job.Kind, "openrails.")
-		case <-jobCtx.Done():
-			t.Fatalf("shared job fleet did not execute both libraries: authkit=%v, openrails=%v", authJob, billingJob)
-		}
-	}
 	stripe.mu.Lock()
 	defer stripe.mu.Unlock()
 	if len(stripe.catalogWrites) != 0 {
