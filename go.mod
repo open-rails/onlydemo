@@ -11,12 +11,12 @@ require (
 	github.com/open-rails/authkit v0.124.0
 	github.com/open-rails/authkit/adapters/fiber v0.117.0
 	github.com/open-rails/migratekit v1.0.4
-	github.com/open-rails/openrails v0.151.0-rc.1
+	github.com/open-rails/openrails v0.152.0
 	github.com/riverqueue/river v0.47.0
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.47.0
 )
 
-require github.com/open-rails/openrails/adapters/fiber v0.151.0-rc.1
+require github.com/open-rails/openrails/adapters/fiber v0.151.0
 
 require github.com/open-rails/helpers v0.1.0
 
