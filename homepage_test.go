@@ -36,4 +36,7 @@ func TestHomepageDiscoversRegisteredRoutes(t *testing.T) {
 	if strings.Contains(string(body), `data-path="/middleware-only"`) {
 		t.Fatal("homepage advertised middleware as an endpoint")
 	}
+	if !strings.Contains(string(body), `data-method="HEAD" data-path="/" data-source="application" hidden`) || !strings.Contains(string(body), `id="show-head" type="checkbox"`) {
+		t.Fatal("homepage must retain HEAD routes in the live inventory and hide them until requested")
+	}
 }

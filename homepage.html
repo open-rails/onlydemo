@@ -20,6 +20,8 @@
     label { display: block; font-size: 13px; font-weight: 650; margin-bottom: 7px; }
     input { display: block; width: 100%; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font: inherit; }
     input:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .head-toggle { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+    .head-toggle input { display: inline-block; width: auto; margin: 0; padding: 0; }
     #filter-status { display: block; margin-top: 7px; color: var(--muted); font-size: 13px; }
     section { margin-top: 32px; scroll-margin-top: 20px; }
     .heading { display: flex; align-items: center; gap: 12px; }
@@ -52,26 +54,27 @@
 <main>
   <div class="eyebrow">OpenRails demo</div>
   <h1>Explore the API routes</h1>
-  <p>See what this application and AuthKit expose in the running server.</p>
+  <p>See what this application, AuthKit, and OpenRails expose in the running server.</p>
   <nav aria-label="Route sections">
-    {{range .}}<a href="#{{.ID}}">{{.Name}} · {{len .Routes}}</a>{{end}}
+    {{range .}}<a href="#{{.ID}}">{{.Name}} · <span data-count-source="{{.ID}}">{{len .Routes}} registered</span></a>{{end}}
   </nav>
   <div class="search">
     <label for="route-search">Filter routes</label>
     <input id="route-search" type="search" placeholder="Search a path, method, or source…" autocomplete="off">
+    <label class="head-toggle"><input id="show-head" type="checkbox">Show HEAD routes</label>
     <output id="filter-status" aria-live="polite"></output>
   </div>
   {{range .}}
   {{$section := .}}
   <section id="{{.ID}}">
-    <div class="heading"><h2>{{.Name}}</h2><span class="count">{{len .Routes}}</span></div>
+    <div class="heading"><h2>{{.Name}}</h2><span class="count" data-count-source="{{.ID}}">{{len .Routes}} registered</span></div>
     <p>{{.Description}}</p>
     <div class="table">
       <table aria-label="{{.Name}}">
         <thead><tr><th scope="col">Method</th><th scope="col">Path</th></tr></thead>
         <tbody>
         {{range .Routes}}
-          <tr data-method="{{.Method}}" data-path="{{.Path}}" data-source="{{$section.ID}}">
+          <tr data-method="{{.Method}}" data-path="{{.Path}}" data-source="{{$section.ID}}"{{if eq .Method "HEAD"}} hidden{{end}}>
             <td><span class="method">{{.Method}}</span></td>
             <td>{{if .CanOpen}}<a href="{{.Path}}"><code>{{.Path}}</code></a>{{else}}<code>{{.Path}}</code>{{end}}</td>
           </tr>
@@ -81,21 +84,30 @@
     </div>
   </section>
   {{end}}
-  <footer>HEAD routes are included. Paths containing <code>:id</code> need actual values. Links open GET requests; protected routes still require their normal credentials and permissions.</footer>
+  <footer>HEAD routes remain available to HTTP clients and are hidden here by default. Counts reflect the current filter. Paths containing <code>:id</code> need actual values. Links open GET requests; protected routes still require their normal credentials and permissions.</footer>
 </main>
 <script>
   const search = document.getElementById('route-search');
+  const showHead = document.getElementById('show-head');
   const rows = [...document.querySelectorAll('tbody tr')];
   function filterRoutes() {
     const query = search.value.trim().toLowerCase();
     let visible = 0;
+    const counts = {};
     for (const row of rows) {
-      row.hidden = !(row.dataset.source + ' ' + row.textContent).toLowerCase().includes(query);
-      if (!row.hidden) visible++;
+      row.hidden = (!showHead.checked && row.dataset.method === 'HEAD') || !(row.dataset.source + ' ' + row.textContent).toLowerCase().includes(query);
+      if (!row.hidden) {
+        visible++;
+        counts[row.dataset.source] = (counts[row.dataset.source] || 0) + 1;
+      }
     }
-    document.getElementById('filter-status').textContent = `${visible} of ${rows.length} routes shown`;
+    for (const count of document.querySelectorAll('[data-count-source]')) {
+      count.textContent = `${counts[count.dataset.countSource] || 0} shown`;
+    }
+    document.getElementById('filter-status').textContent = `${visible} of ${rows.length} registered routes shown`;
   }
   search.addEventListener('input', filterRoutes);
+  showHead.addEventListener('change', filterRoutes);
   filterRoutes();
 </script>
 </body>

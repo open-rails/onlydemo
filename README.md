@@ -142,7 +142,8 @@ task admin:grant USER_ID=<user-uuid>
 task admin:revoke USER_ID=<user-uuid>
 ```
 
-These operator commands use AuthKit's trusted client operations. Ordinary server startup
+These operator commands use AuthKit's trusted `OperatorAssignGroupRole` and
+`OperatorUnassignGroupRole` client operations. Ordinary server startup
 does not restore revoked roles. The `admin` role is an AuthKit root permission
 group role granting `root:posts:read`, `root:posts:edit` and `root:posts:delete`.
 The application checks those permissions through AuthKit on each request;

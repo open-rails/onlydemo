@@ -76,7 +76,7 @@ func (a *appAuth) grantAdmin(ctx context.Context, userID string) error {
 	if user == nil {
 		return errors.New("admin user does not exist; register the user first")
 	}
-	return a.client.AdminAssignGroupRole(ctx, authkit.RootGroup(), authkit.UserSubject(userID), authkit.Role("admin"))
+	return a.client.OperatorAssignGroupRole(ctx, authkit.RootGroup(), authkit.UserSubject(userID), authkit.Role("admin"))
 }
 
 // revokeAdmin is the matching explicit operator command; ordinary requests
@@ -86,5 +86,5 @@ func (a *appAuth) revokeAdmin(ctx context.Context, userID string) error {
 	if userID == "" {
 		return errors.New("a registered user ID is required")
 	}
-	return a.client.AdminUnassignGroupRole(ctx, authkit.RootGroup(), authkit.UserSubject(userID), authkit.Role("admin"))
+	return a.client.OperatorUnassignGroupRole(ctx, authkit.RootGroup(), authkit.UserSubject(userID), authkit.Role("admin"))
 }

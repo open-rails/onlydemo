@@ -8,15 +8,15 @@ require (
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/knadh/koanf/providers/env/v2 v2.0.1
 	github.com/knadh/koanf/v2 v2.3.6
-	github.com/open-rails/authkit v0.118.0
+	github.com/open-rails/authkit v0.119.0
 	github.com/open-rails/authkit/adapters/fiber v0.117.0
 	github.com/open-rails/migratekit v1.0.4
-	github.com/open-rails/openrails v0.150.0-rc.1
+	github.com/open-rails/openrails v0.150.0-rc.2
 	github.com/riverqueue/river v0.47.0
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.47.0
 )
 
-require github.com/open-rails/openrails/adapters/fiber v0.150.0-rc.1
+require github.com/open-rails/openrails/adapters/fiber v0.150.0-rc.2
 
 require github.com/open-rails/helpers v0.1.0
 
