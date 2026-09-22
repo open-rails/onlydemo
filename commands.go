@@ -1,65 +1,74 @@
 package main
 
 import (
+	"context"
 	"errors"
-	"flag"
-	"fmt"
 	"io"
 	"strings"
+
+	"github.com/spf13/cobra"
 )
 
-type command struct {
-	kind   string
-	userID string
-	revoke bool
+func run(ctx context.Context, args []string, output io.Writer) error {
+	root := newRootCommand()
+	root.SetArgs(append([]string{}, args...))
+	root.SetOut(output)
+	root.SetErr(output)
+	return root.ExecuteContext(ctx)
 }
 
-const commandUsage = `Usage:
-  openrails-demo [serve]
-  openrails-demo migrate
-  openrails-demo admin grant --user-id ID
-  openrails-demo admin revoke --user-id ID
-  openrails-demo help
-
-Configuration comes from environment variables; one-off operations are commands.
-`
-
-// Parse before configuration or database access so help and invalid commands
-// remain safe even when a configured database is unavailable.
-func parseCommand(args []string, output io.Writer) (command, error) {
-	if len(args) == 0 {
-		return command{kind: "serve"}, nil
+// Cobra validates flags and arguments before invoking a handler. Help and
+// invalid commands never load configuration or connect to PostgreSQL.
+func newRootCommand() *cobra.Command {
+	serveCommand := &cobra.Command{
+		Use: "serve", Short: "Run the API server", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error { return serve(cmd.Context()) },
 	}
-	switch args[0] {
-	case "help", "-h", "--help":
-		if len(args) != 1 {
-			return command{}, errors.New("help accepts no arguments")
-		}
-		_, err := io.WriteString(output, commandUsage)
-		return command{kind: "help"}, err
-	case "serve", "migrate":
-		if len(args) != 1 {
-			return command{}, fmt.Errorf("%s accepts no arguments", args[0])
-		}
-		return command{kind: args[0]}, nil
-	case "admin":
-		if len(args) < 2 || (args[1] != "grant" && args[1] != "revoke") {
-			return command{}, errors.New("use admin grant or admin revoke --user-id ID")
-		}
-		flags := flag.NewFlagSet("admin "+args[1], flag.ContinueOnError)
-		flags.SetOutput(output)
-		userID := flags.String("user-id", "", "registered AuthKit user ID")
-		if err := flags.Parse(args[2:]); err != nil {
-			if errors.Is(err, flag.ErrHelp) {
-				return command{kind: "help"}, nil
+	root := &cobra.Command{
+		Use: "openrails-demo", Short: "A Fiber API with AuthKit and OpenRails",
+		Long: "Run the API server or an explicit maintenance command. Configuration comes from environment variables.",
+		Args: cobra.NoArgs, RunE: serveCommand.RunE,
+		SilenceUsage: true, SilenceErrors: true,
+		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
+	}
+	root.AddCommand(serveCommand, &cobra.Command{
+		Use: "migrate", Short: "Initialize application and library storage", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error { return migrate(cmd.Context()) },
+	})
+	admin := &cobra.Command{
+		Use: "admin", Short: "Manage a registered user's AuthKit admin role", Args: cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			return errors.New("choose admin grant or admin revoke --user-id ID")
+		},
+	}
+	admin.AddCommand(
+		adminCommand("grant", "Grant the admin role", grantAdmin),
+		adminCommand("revoke", "Revoke the admin role", revokeAdmin),
+	)
+	root.AddCommand(admin)
+	return root
+}
+
+func adminCommand(name, description string, action func(context.Context, string) error) *cobra.Command {
+	var userID string
+	cmd := &cobra.Command{
+		Use: name, Short: description,
+		Args: func(cmd *cobra.Command, args []string) error {
+			if err := cobra.NoArgs(cmd, args); err != nil {
+				return err
 			}
-			return command{}, err
-		}
-		if flags.NArg() != 0 || strings.TrimSpace(*userID) == "" {
-			return command{}, errors.New("admin command requires --user-id ID and no positional arguments")
-		}
-		return command{kind: "admin", userID: strings.TrimSpace(*userID), revoke: args[1] == "revoke"}, nil
-	default:
-		return command{}, fmt.Errorf("unknown command %q; use help", args[0])
+			if cmd.Flags().Changed("user-id") && strings.TrimSpace(userID) == "" {
+				return errors.New("--user-id cannot be empty")
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return action(cmd.Context(), strings.TrimSpace(userID))
+		},
 	}
+	cmd.Flags().StringVar(&userID, "user-id", "", "registered AuthKit user ID")
+	if err := cmd.MarkFlagRequired("user-id"); err != nil {
+		panic(err) // The flag is declared above; absence is a programming error.
+	}
+	return cmd
 }

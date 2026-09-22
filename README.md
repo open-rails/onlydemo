@@ -72,7 +72,12 @@ and OpenRails initialize their storage through public library calls; their SQL,
 ledger keys and migration runners are private implementation details.
 `task run` explicitly calls those initializers before constructing the services.
 `task migrate` (`go run . migrate`) performs the same initialization and exits.
-`go run .` and `go run . serve` start the server; `go run . help` prints usage.
+The host uses `riverkit.ApplyMigrations` for River storage and composes the
+application, AuthKit and OpenRails contributions into one River client.
+`go run .` and `go run . serve` start the server. Cobra provides help for every
+command: `go run . help`, `go run . migrate --help`, and
+`go run . admin grant --help` all work without loading configuration or connecting
+to PostgreSQL.
 One-off operations are CLI commands, not environment flags. Both use `DATABASE_URL`;
 there is no separate admin connection, login creation, or grant script in the app.
 The connected user owns the objects it creates and already has access to them.

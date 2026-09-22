@@ -52,16 +52,20 @@ func TestBlogPostsIntegration(t *testing.T) {
 			t.Errorf("AuthKit closed the borrowed host pool: %v", err)
 		}
 	})
-	jobs := newJobs(pool, config)
-	jobs.auth = service
 	channels := newChannels(pool, service, nil, config)
-	jobs.channels = channels
+	jobs, err := newJobs(t.Context(), pool, config, service, nil, channels)
+	if err != nil {
+		t.Fatalf("compose AuthKit-only host jobs: %v", err)
+	}
 	t.Cleanup(func() {
-		if err := jobs.close(context.Background()); err != nil {
+		if err := stopJobs(context.Background(), jobs); err != nil {
 			t.Errorf("stop AuthKit-only host jobs: %v", err)
 		}
 	})
-	if err := jobs.start(t.Context()); err != nil {
+	if err := service.runtime.Start(t.Context()); err != nil {
+		t.Fatalf("start AuthKit: %v", err)
+	}
+	if err := jobs.Start(t.Context()); err != nil {
 		t.Fatalf("start AuthKit-only host jobs: %v", err)
 	}
 	fiberApp, err := newApp(pool, service, nil, config, channels)

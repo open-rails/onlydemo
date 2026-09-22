@@ -69,7 +69,6 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 		assertAllPublicStorage(t, pool)
 	}
 	migrationPool.Close()
-	jobs := newJobs(pool, config)
 	service, err := newAuth(t.Context(), config, pool)
 	if err != nil {
 		t.Fatalf("initialize AuthKit: %v", err)
@@ -80,7 +79,6 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 			t.Errorf("services closed the borrowed host pool: %v", err)
 		}
 	})
-	jobs.auth = service
 	stripe := &blogTestStripe{}
 	billing, err := newBilling(t.Context(), config, pool, service, stripe)
 	if err != nil {
@@ -91,21 +89,22 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 			t.Errorf("close OpenRails: %v", err)
 		}
 	})
+	channels := newChannels(pool, service, billing, config)
+	jobs, err := newJobs(t.Context(), pool, config, service, billing, channels)
+	if err != nil {
+		t.Fatalf("compose jobs: %v", err)
+	}
 	t.Cleanup(func() {
-		if err := jobs.close(context.Background()); err != nil {
+		if err := stopJobs(context.Background(), jobs); err != nil {
 			t.Errorf("stop host jobs: %v", err)
 		}
 	})
-
-	jobs.billing = billing
-	channels := newChannels(pool, service, billing, config)
-	jobs.channels = channels
-	if err := jobs.compose(t.Context()); err != nil {
-		t.Fatalf("compose jobs: %v", err)
-	}
-	jobEvents, unsubscribe := jobs.client.Subscribe(river.EventKindJobCompleted)
+	jobEvents, unsubscribe := jobs.Subscribe(river.EventKindJobCompleted)
 	defer unsubscribe()
-	if err := jobs.start(t.Context()); err != nil {
+	if err := service.runtime.Start(t.Context()); err != nil {
+		t.Fatalf("start AuthKit: %v", err)
+	}
+	if err := jobs.Start(t.Context()); err != nil {
 		t.Fatalf("start host River: %v", err)
 	}
 	fiberApp, err := newApp(pool, service, billing, config, channels)
@@ -422,7 +421,7 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 		purchase := stripe.latestSession(t)
 		blogTestStripeWebhook(t, app, purchase.event(t, "evt_retirement_paid", "checkout.session.completed", "complete", "paid"), blogTestStripeWebhookSecret, http.StatusOK)
 		assertBlogTestReadable(t, app, firstPost, bob.token, true)
-		if err := jobs.client.Stop(t.Context()); err != nil {
+		if err := jobs.Stop(t.Context()); err != nil {
 			t.Fatal(err)
 		}
 		// The enqueue client remains usable while processing is stopped. A
@@ -517,7 +516,7 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 			t.Fatalf("durable deletion queue rows=%d err=%v", queued, err)
 		}
 		blogTestRequest(t, app, http.MethodPost, "/api/posts", alice.token, map[string]any{"channel_id": team.ID, "slug": "too-late", "title": "Too late", "body": "Rejected", "price_cents": 299}, http.StatusNotFound)
-		if err = jobs.client.Start(t.Context()); err != nil {
+		if err = jobs.Start(t.Context()); err != nil {
 			t.Fatal(err)
 		}
 		deadline, stop := context.WithTimeout(t.Context(), 20*time.Second)

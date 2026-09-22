@@ -13,12 +13,15 @@ require (
 	github.com/open-rails/migratekit v1.0.4
 	github.com/open-rails/openrails v0.152.0
 	github.com/riverqueue/river v0.47.0
-	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.47.0
+	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.47.0 // indirect
 )
 
 require github.com/open-rails/openrails/adapters/fiber v0.151.0
 
-require github.com/open-rails/helpers v0.1.0
+require (
+	github.com/open-rails/helpers v0.2.0
+	github.com/spf13/cobra v1.10.2
+)
 
 require (
 	github.com/andybalholm/brotli v1.2.2 // indirect
@@ -61,6 +64,7 @@ require (
 	github.com/hashicorp/go-sockaddr v1.0.7 // indirect
 	github.com/hashicorp/hcl v1.0.1-vault-7 // indirect
 	github.com/hashicorp/vault/api v1.23.0 // indirect
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
@@ -95,6 +99,7 @@ require (
 	github.com/sendgrid/rest v2.6.9+incompatible // indirect
 	github.com/sendgrid/sendgrid-go v3.16.1+incompatible // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
+	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/streamingfast/logging v0.0.0-20250729153644-6ddeb9abb112 // indirect
 	github.com/tidwall/gjson v1.19.0 // indirect
 	github.com/tidwall/match v1.2.0 // indirect

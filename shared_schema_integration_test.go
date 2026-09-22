@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit/embedded"
+	riverkit "github.com/open-rails/helpers/river"
 	openrailsembed "github.com/open-rails/openrails/embed"
 )
 
@@ -32,7 +33,7 @@ func TestAllPublicInitializerOrderAndConcurrentReplay(t *testing.T) {
 					return embedded.ApplyMigrations(ctx, pool, "public", embedded.MigrationOptions{River: embedded.RiverFromHost()})
 				},
 				func(ctx context.Context) error { return initializeBilling(ctx, cfg, pool) },
-				func(ctx context.Context) error { return newJobs(pool, cfg).initialize(ctx) },
+				func(ctx context.Context) error { return riverkit.ApplyMigrations(ctx, pool, cfg.RiverSchema) },
 			}
 			for i := range names {
 				if err := initializers[(first+i)%len(names)](ctx); err != nil {
@@ -196,7 +197,7 @@ func TestAllPublicConcurrentFreshInitializers(t *testing.T) {
 					return embedded.ApplyMigrations(ctx, pool, "public", embedded.MigrationOptions{River: embedded.RiverFromHost()})
 				},
 				func(ctx context.Context) error { return initializeBilling(ctx, cfg, pool) },
-				func(ctx context.Context) error { return newJobs(pool, cfg).initialize(ctx) },
+				func(ctx context.Context) error { return riverkit.ApplyMigrations(ctx, pool, cfg.RiverSchema) },
 			}
 			start := make(chan struct{})
 			results := make(chan error, len(initializers))

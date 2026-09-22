@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit/embedded"
+	riverkit "github.com/open-rails/helpers/river"
 	"github.com/open-rails/migratekit"
 )
 
@@ -19,13 +20,10 @@ var migrationFiles embed.FS
 func initializeDatabase(ctx context.Context, cfg Config, pool *pgxpool.Pool) error {
 	ctx, cancelMigration := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancelMigration()
-	if err := validateDatabaseSchemas(cfg); err != nil {
-		return err
-	}
 	if err := applyMigrations(ctx, pool, cfg); err != nil {
 		return fmt.Errorf("application migrations: %w", err)
 	}
-	if err := newJobs(pool, cfg).initialize(ctx); err != nil {
+	if err := riverkit.ApplyMigrations(ctx, pool, cfg.RiverSchema); err != nil {
 		return fmt.Errorf("host River migrations: %w", err)
 	}
 	if err := embedded.ApplyMigrations(ctx, pool, cfg.AuthSchema, embedded.MigrationOptions{River: embedded.RiverFromHost()}); err != nil {

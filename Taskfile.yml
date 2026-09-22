@@ -38,7 +38,7 @@ tasks:
   run:
     desc: Run the API against local PostgreSQL
     cmds:
-      - go run .
+      - go run . serve
 
   admin:grant:
     desc: Grant an existing user's AuthKit admin role (USER_ID required)

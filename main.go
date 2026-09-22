@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -25,61 +24,85 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, args []string, output io.Writer) error {
-	command, err := parseCommand(args, output)
-	if err != nil {
-		return err
-	}
-	if command.kind == "help" {
-		return nil
-	}
+func openDatabase(ctx context.Context) (Config, *pgxpool.Pool, error) {
 	config, err := loadConfig()
 	if err != nil {
-		return fmt.Errorf("load configuration: %w", err)
+		return Config{}, nil, fmt.Errorf("load configuration: %w", err)
 	}
 
 	pool, err := pgxpool.New(ctx, config.DatabaseURL)
 	if err != nil {
-		return fmt.Errorf("create database pool: %w", err)
+		return Config{}, nil, fmt.Errorf("create database pool: %w", err)
 	}
-	defer pool.Close()
 
 	pingContext, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := pool.Ping(pingContext); err != nil {
-		return fmt.Errorf("connect to database: %w", err)
+		pool.Close()
+		return Config{}, nil, fmt.Errorf("connect to database: %w", err)
 	}
 
 	if err := initializeDatabase(ctx, config, pool); err != nil {
+		pool.Close()
+		return Config{}, nil, err
+	}
+	return config, pool, nil
+}
+
+func migrate(ctx context.Context) error {
+	_, pool, err := openDatabase(ctx)
+	if err != nil {
 		return err
 	}
-	if command.kind == "migrate" {
-		return nil
+	defer pool.Close()
+	return nil
+}
+
+func withAuth(ctx context.Context, action func(*appAuth) error) error {
+	config, pool, err := openDatabase(ctx)
+	if err != nil {
+		return err
 	}
-
-	jobs := newJobs(pool, config)
-
+	defer pool.Close()
 	authService, err := newAuth(ctx, config, pool)
 	if err != nil {
 		return fmt.Errorf("initialize authkit: %w", err)
 	}
 	defer authService.Close()
-	jobs.auth = authService
+	return action(authService)
+}
 
-	if command.kind == "admin" {
-		if command.revoke {
-			if err := authService.revokeAdmin(ctx, command.userID); err != nil {
-				return err
-			}
-			log.Printf("Revoked AuthKit admin role from %s", command.userID)
-			return nil
-		}
-		if err := authService.grantAdmin(ctx, command.userID); err != nil {
+func grantAdmin(ctx context.Context, userID string) error {
+	return withAuth(ctx, func(authService *appAuth) error {
+		if err := authService.grantAdmin(ctx, userID); err != nil {
 			return err
 		}
-		log.Printf("Granted AuthKit admin role to %s", command.userID)
+		log.Printf("Granted AuthKit admin role to %s", userID)
 		return nil
+	})
+}
+
+func revokeAdmin(ctx context.Context, userID string) error {
+	return withAuth(ctx, func(authService *appAuth) error {
+		if err := authService.revokeAdmin(ctx, userID); err != nil {
+			return err
+		}
+		log.Printf("Revoked AuthKit admin role from %s", userID)
+		return nil
+	})
+}
+
+func serve(ctx context.Context) error {
+	config, pool, err := openDatabase(ctx)
+	if err != nil {
+		return err
 	}
+	defer pool.Close()
+	authService, err := newAuth(ctx, config, pool)
+	if err != nil {
+		return fmt.Errorf("initialize authkit: %w", err)
+	}
+	defer authService.Close()
 
 	billing, err := newBilling(ctx, config, pool, authService)
 	if err != nil {
@@ -89,21 +112,26 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 	if billing != nil {
 		defer billing.Close(context.Background())
 
-		jobs.billing = billing
 		postsBilling = billing
 	} else {
 		log.Print("Stripe is not configured; post sales are disabled")
 	}
 	channels := newChannels(pool, authService, postsBilling, config)
-	jobs.channels = channels
+	jobs, err := newJobs(ctx, pool, config, authService, billing, channels)
+	if err != nil {
+		return fmt.Errorf("compose application jobs: %w", err)
+	}
 	defer func() {
 		stopCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		if err := jobs.close(stopCtx); err != nil {
+		if err := stopJobs(stopCtx, jobs); err != nil {
 			log.Printf("close background jobs: %v", err)
 		}
 	}()
-	if err := jobs.start(ctx); err != nil {
+	if err := authService.runtime.Start(ctx); err != nil {
+		return fmt.Errorf("start AuthKit: %w", err)
+	}
+	if err := jobs.Start(ctx); err != nil {
 		return fmt.Errorf("start application jobs: %w", err)
 	}
 
@@ -123,9 +151,6 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 
 func newApp(pool *pgxpool.Pool, authService *appAuth, billing postBilling, cfg Config, channels *channelAPI) (*fiber.App, error) {
 	app := fiber.New()
-	if err := validateDatabaseSchemas(cfg); err != nil {
-		return nil, err
-	}
 	blogAPI := &blogAPI{pool: pool, auth: authService, billing: billing, channels: channels, table: pgx.Identifier{appSchema(cfg), "blog_posts"}.Sanitize()}
 
 	app.Get("/", homepage(app))
