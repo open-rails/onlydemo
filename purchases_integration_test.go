@@ -82,7 +82,7 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 	})
 	jobs.auth = service
 	stripe := &blogTestStripe{}
-	billing, err := newBilling(t.Context(), config, jobs, stripe)
+	billing, err := newBilling(t.Context(), config, pool, stripe)
 	if err != nil {
 		t.Fatalf("initialize OpenRails: %v", err)
 	}
@@ -96,8 +96,12 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 			t.Errorf("stop host jobs: %v", err)
 		}
 	})
-	if err := billing.initialize(t.Context(), config, jobs); err != nil {
+	if err := billing.initialize(t.Context(), config); err != nil {
 		t.Fatalf("initialize billing: %v", err)
+	}
+	jobs.billing = billing
+	if err := jobs.compose(t.Context()); err != nil {
+		t.Fatalf("compose jobs: %v", err)
 	}
 	jobEvents, unsubscribe := jobs.client.Subscribe(river.EventKindJobCompleted)
 	defer unsubscribe()
@@ -370,6 +374,9 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 	}
 	stripe.mu.Lock()
 	defer stripe.mu.Unlock()
+	if len(stripe.catalogWrites) != 0 {
+		t.Errorf("engine catalog unexpectedly wrote Stripe objects: %v", stripe.catalogWrites)
+	}
 	for _, version := range stripe.versions {
 		if version == "" {
 			t.Error("OpenRails did not pin Stripe-Version above the transport seam")
@@ -432,12 +439,11 @@ func assertBlogTestReadable(t *testing.T, app *blogTestServer, post blogPost, to
 // signature verification, payment recording and access grants all execute in
 // the real embedded OpenRails engine against an isolated PostgreSQL database.
 type blogTestStripe struct {
-	mu        sync.Mutex
-	products  int
-	customers int
-	prices    map[string]int64
-	sessions  []blogTestStripeSession
-	versions  []string
+	mu            sync.Mutex
+	customers     int
+	sessions      []blogTestStripeSession
+	versions      []string
+	catalogWrites []string
 }
 
 type blogTestStripeSession struct {
@@ -470,29 +476,20 @@ func (s *blogTestStripe) RoundTrip(req *http.Request) (*http.Response, error) {
 		body = map[string]any{"object": "search_result", "data": []any{}, "has_more": false}
 	case "GET /v1/prices", "GET /v1/subscriptions", "GET /v1/webhook_endpoints":
 		body = map[string]any{"object": "list", "data": []any{}, "has_more": false}
-	case "POST /v1/products":
-		s.products++
-		body = map[string]any{"id": fmt.Sprintf("prod_demo_%d", s.products), "object": "product"}
-	case "POST /v1/prices":
-		if s.prices == nil {
-			s.prices = make(map[string]int64)
-		}
-		amount, err := strconv.ParseInt(req.PostForm.Get("unit_amount"), 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("Stripe price amount: %w", err)
-		}
-		id := fmt.Sprintf("price_demo_%d", len(s.prices)+1)
-		s.prices[id] = amount
-		body = map[string]any{"id": id, "object": "price", "unit_amount": amount, "currency": "usd", "product": req.PostForm.Get("product")}
+	case "POST /v1/products", "POST /v1/prices":
+		s.catalogWrites = append(s.catalogWrites, req.URL.Path)
+		return nil, fmt.Errorf("engine catalog must stay local: %s", req.URL.Path)
 	case "POST /v1/customers":
 		s.customers++
 		body = map[string]any{"id": fmt.Sprintf("cus_demo_%d", s.customers), "object": "customer"}
 	case "POST /v1/checkout/sessions":
 		id := fmt.Sprintf("cs_test_demo_%d", len(s.sessions)+1)
-		priceID := req.PostForm.Get("line_items[0][price]")
-		amount, ok := s.prices[priceID]
-		if !ok {
-			return nil, fmt.Errorf("checkout used unknown Stripe price %q", priceID)
+		if req.PostForm.Get("line_items[0][price]") != "" {
+			return nil, fmt.Errorf("checkout must use inline terms, not a mirrored Stripe price")
+		}
+		amount, err := strconv.ParseInt(req.PostForm.Get("line_items[0][price_data][unit_amount]"), 10, 64)
+		if err != nil || amount <= 0 || req.PostForm.Get("line_items[0][price_data][currency]") != "usd" || req.PostForm.Get("line_items[0][price_data][product_data][name]") == "" {
+			return nil, fmt.Errorf("checkout omitted accepted inline price terms: %v", req.PostForm)
 		}
 		s.sessions = append(s.sessions, blogTestStripeSession{id: id, form: req.PostForm, amount: amount, customer: req.PostForm.Get("customer")})
 		body = map[string]any{"id": id, "object": "checkout.session", "status": "open", "payment_status": "unpaid", "url": "https://checkout.stripe.com/c/pay/" + id}

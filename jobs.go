@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	openrailsembed "github.com/open-rails/openrails/embed"
+	"github.com/open-rails/riverkit"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
@@ -18,10 +19,11 @@ import (
 // This app owns one River fleet shared by AuthKit and OpenRails. Every replica
 // registers both libraries' workers and schedules before constructing River.
 type appJobs struct {
-	pool   *pgxpool.Pool
-	schema string
-	auth   *appAuth
-	client *river.Client[pgx.Tx]
+	pool    *pgxpool.Pool
+	schema  string
+	auth    *appAuth
+	billing *billingService
+	client  *river.Client[pgx.Tx]
 }
 
 func newJobs(pool *pgxpool.Pool, cfg Config) *appJobs {
@@ -59,31 +61,29 @@ func (j *appJobs) initialize(ctx context.Context) error {
 	return err
 }
 
-func (j *appJobs) configure(_ context.Context, cfg *river.Config) error {
+func (j *appJobs) compose(ctx context.Context) error {
 	if j.client != nil {
 		return errors.New("application River client already constructed")
 	}
 	if j.auth == nil {
-		return errors.New("AuthKit must be constructed before registering jobs")
+		return errors.New("AuthKit must be constructed before composing jobs")
 	}
-	cfg.Schema = j.schema
-	if _, ok := cfg.Queues[openrailsembed.QueueBilling]; ok {
-		cfg.Queues[openrailsembed.QueueBilling] = river.QueueConfig{MaxWorkers: 4}
+	contributions := []riverkit.Contribution{j.auth.client.RiverJobs()}
+	queues := map[string]river.QueueConfig{}
+	if j.billing != nil {
+		contributions = append(contributions, j.billing.runtime.RiverJobs())
+		queues[openrailsembed.QueueBilling] = river.QueueConfig{MaxWorkers: 4}
 	}
-	return j.auth.client.RegisterRiver(cfg)
+	var err error
+	j.client, err = riverkit.New(ctx, j.pool, &river.Config{Schema: j.schema, Queues: queues}, contributions...)
+	return err
 }
 
 func (j *appJobs) start(ctx context.Context) error {
 	if j.client == nil {
-		cfg := &river.Config{Workers: river.NewWorkers(), Queues: map[string]river.QueueConfig{}}
-		if err := j.configure(ctx, cfg); err != nil {
+		if err := j.compose(ctx); err != nil {
 			return err
 		}
-		client, err := river.NewClient(riverpgxv5.New(j.pool), cfg)
-		if err != nil {
-			return err
-		}
-		j.client = client
 	}
 	if err := j.auth.client.Start(ctx); err != nil {
 		return err

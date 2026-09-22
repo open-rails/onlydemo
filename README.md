@@ -76,10 +76,10 @@ The libraries also support optional separate runtime credentials for deployments
 that want them, but this demo keeps one pool.
 
 This demo chooses one host-owned River fleet for both libraries. `jobs.go`
-initializes the host's River schema during migration. At runtime, OpenRails'
-`BindRiver` composes its workers/schedules with AuthKit's registration before
-constructing one client on the shared pool. Without billing, the host constructs
-the AuthKit fleet itself. The host starts and stops workers before closing
+initializes the host's River schema during migration. After both services and
+merchant configuration are ready, `riverkit.New` composes `auth.RiverJobs()` and
+`billing.RiverJobs()` into one unstarted client and binds producers automatically.
+Without billing, the same composer receives only AuthKit's contribution. The host starts and stops workers before closing
 library services, then closes its pool. OpenRails and River borrow that pool.
 AuthKit creates and owns a schema-bound pool from the same connection settings;
 closing it leaves the host pool open. A `MaxConns=1` host pool therefore does not
@@ -206,7 +206,9 @@ curl -X POST http://localhost:3000/api/posts/1/checkout \
 
 Open the response's `url` in a browser. Retry the same purchase attempt with
 the same key; use a new key for a new attempt. The server chooses the current
-price, currency and buyer. Supplying those fields in the request cannot change
+price, currency and buyer. OpenRails keeps the catalog locally and passes the
+accepted one-time price inline to Stripe Checkout; it does not mirror Products
+or Prices into Stripe. Supplying those fields in the request cannot change
 the charge. Checkout status is scoped to its buyer.
 
 Access is granted only after OpenRails confirms payment through Stripe's

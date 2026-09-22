@@ -53,7 +53,7 @@ func initializeBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool) erro
 // newBilling is deliberately sandbox-only. A missing Stripe key leaves selling
 // disabled; supplying a key requires the host-owned account and webhook config.
 // transport is the supported OpenRails fake-Stripe seam for integration tests.
-func newBilling(ctx context.Context, cfg Config, jobs *appJobs, transport ...http.RoundTripper) (*billingService, error) {
+func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, transport ...http.RoundTripper) (*billingService, error) {
 	if cfg.StripeSecretKey == "" {
 		return nil, nil
 	}
@@ -70,17 +70,21 @@ func newBilling(ctx context.Context, cfg Config, jobs *appJobs, transport ...htt
 	if len(transport) > 1 {
 		return nil, errors.New("newBilling accepts at most one Stripe transport")
 	}
+	if pool == nil {
+		return nil, errors.New("billing requires the host PostgreSQL pool")
+	}
 	opts := openrailsembed.Options{
 		Config: &openrailsconfig.Config{
-			Env:                  "development",
-			TestMode:             openrailsconfig.CredentialPostureSandbox,
-			ProviderWriteMode:    openrailsconfig.ProviderWriteModeFull,
-			MerchantConfigSource: openrailsconfig.MerchantConfigSourceManifest,
-			CatalogSource:        openrailsconfig.CatalogSourceAPI,
-			APIURL:               strings.TrimRight(cfg.PublicURL, "/") + "/billing",
-			DB:                   &openrailsconfig.DBConfig{URL: cfg.DatabaseURL, Schema: cfg.BillingSchema},
+			Env:                             "development",
+			TestMode:                        openrailsconfig.CredentialPostureSandbox,
+			ProviderWriteMode:               openrailsconfig.ProviderWriteModeFull,
+			MerchantConfigSource:            openrailsconfig.MerchantConfigSourceManifest,
+			NewSubscriptionCollectionPolicy: "engine",
+			CatalogSource:                   openrailsconfig.CatalogSourceAPI,
+			APIURL:                          strings.TrimRight(cfg.PublicURL, "/") + "/billing",
+			DB:                              &openrailsconfig.DBConfig{URL: cfg.DatabaseURL, Schema: cfg.BillingSchema},
 		},
-		PGXPool: jobs.pool,
+		PGXPool: pool,
 		River:   openrailsembed.RiverFromHost(),
 	}
 	if len(transport) == 1 {
@@ -96,14 +100,9 @@ func newBilling(ctx context.Context, cfg Config, jobs *appJobs, transport ...htt
 
 // The caller defers Close immediately after construction, before this fallible
 // configuration. The same defer covers initialization failure and normal shutdown.
-func (billing *billingService) initialize(ctx context.Context, cfg Config, jobs *appJobs) error {
+func (billing *billingService) initialize(ctx context.Context, cfg Config) error {
 	runtime := billing.runtime
-	var err error
-	jobs.client, err = runtime.BindRiver(ctx, jobs.pool, jobs.configure)
-	if err != nil {
-		return fmt.Errorf("compose application River fleet: %w", err)
-	}
-	_, err = runtime.UpsertMerchantConfig(ctx, billingMerchantSlug, openrailsembed.MerchantConfig{
+	_, err := runtime.UpsertMerchantConfig(ctx, billingMerchantSlug, openrailsembed.MerchantConfig{
 		DisplayName: "OpenRails Blog Demo",
 		PSPs: map[string]openrailsembed.PSPConfig{"stripe": {"stripe": {
 			AccountID: cfg.StripeAccountID,
@@ -203,9 +202,6 @@ func ensurePostOffer(ctx context.Context, client *openrails.Client, catalogID op
 	})
 	if err != nil {
 		return "", "", fmt.Errorf("ensure post price: %w", err)
-	}
-	if state, ok := price.Providers["stripe"]; !ok || state.Status != openrails.ProviderStatusLinked {
-		return "", "", errors.New("post price is not linked to Stripe")
 	}
 	return product.ID.String(), price.ID.String(), nil
 }

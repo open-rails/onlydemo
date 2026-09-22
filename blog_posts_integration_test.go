@@ -61,7 +61,7 @@ func TestBlogPostsIntegration(t *testing.T) {
 	if err := jobs.start(t.Context()); err != nil {
 		t.Fatalf("start AuthKit-only host jobs: %v", err)
 	}
-	fiberApp, err := newApp(pool, service, nil)
+	fiberApp, err := newApp(pool, service, nil, config)
 	if err != nil {
 		t.Fatalf("mount AuthKit: %v", err)
 	}

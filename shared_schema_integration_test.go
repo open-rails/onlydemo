@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit/embedded"
 	openrailsembed "github.com/open-rails/openrails/embed"
+	"github.com/open-rails/riverkit"
 )
 
 func TestAllPublicInitializerOrderAndConcurrentReplay(t *testing.T) {
@@ -161,25 +163,27 @@ func TestBillingCallerClosesAfterInitializationFailure(t *testing.T) {
 	if err := initializeDatabase(t.Context(), cfg, pool); err != nil {
 		t.Fatal(err)
 	}
-	jobs := newJobs(pool, cfg) // no AuthKit registration: fail in the configure callback
 	var billing *billingService
 	err := func() error {
 		var err error
-		billing, err = newBilling(t.Context(), cfg, jobs, &blogTestStripe{})
+		billing, err = newBilling(t.Context(), cfg, pool, &blogTestStripe{})
 		if err != nil {
 			return err
 		}
 		defer billing.Close(context.Background())
-		return billing.initialize(t.Context(), cfg, jobs)
+		canceled, cancel := context.WithCancel(t.Context())
+		cancel()
+		return billing.initialize(canceled, cfg)
 	}()
-	if err == nil || !strings.Contains(err.Error(), "AuthKit must be constructed") {
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected initialization failure: %v", err)
 	}
-	if _, err := billing.runtime.BindRiver(t.Context(), pool, nil); err == nil || !strings.Contains(err.Error(), "closed") {
+	if _, err := riverkit.New(t.Context(), pool, nil, billing.runtime.RiverJobs()); err == nil || !strings.Contains(err.Error(), "closed") {
 		t.Fatalf("failed initialization runtime remained open: %v", err)
 	}
-	if jobs.client != nil {
-		t.Fatal("failed configuration produced a host worker client")
+	var queued int
+	if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM public.river_job").Scan(&queued); err != nil || queued != 0 {
+		t.Fatalf("failed initialization started jobs: %d %v", queued, err)
 	}
 	if err := pool.Ping(t.Context()); err != nil {
 		t.Fatal("failed initialization closed host pool:", err)

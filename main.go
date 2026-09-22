@@ -82,16 +82,17 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 		return nil
 	}
 
-	billing, err := newBilling(ctx, config, jobs)
+	billing, err := newBilling(ctx, config, pool)
 	if err != nil {
 		return fmt.Errorf("initialize OpenRails: %w", err)
 	}
 	var postsBilling postBilling
 	if billing != nil {
 		defer billing.Close(context.Background())
-		if err := billing.initialize(ctx, config, jobs); err != nil {
+		if err := billing.initialize(ctx, config); err != nil {
 			return fmt.Errorf("initialize OpenRails: %w", err)
 		}
+		jobs.billing = billing
 		postsBilling = billing
 	} else {
 		log.Print("Stripe is not configured; post sales are disabled")
@@ -121,15 +122,8 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 	return app.Listen(fmt.Sprintf(":%d", config.Port))
 }
 
-func newApp(pool *pgxpool.Pool, authService *appAuth, billing postBilling, configs ...Config) (*fiber.App, error) {
+func newApp(pool *pgxpool.Pool, authService *appAuth, billing postBilling, cfg Config) (*fiber.App, error) {
 	app := fiber.New()
-	cfg := Config{}
-	if len(configs) > 1 {
-		return nil, fmt.Errorf("newApp accepts one configuration")
-	}
-	if len(configs) == 1 {
-		cfg = configs[0]
-	}
 	if err := validateDatabaseSchemas(cfg); err != nil {
 		return nil, err
 	}
