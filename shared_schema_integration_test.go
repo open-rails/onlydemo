@@ -164,7 +164,7 @@ func TestBillingConstructorPreservesHostPoolOnFailure(t *testing.T) {
 	}
 	canceled, cancel := context.WithCancel(t.Context())
 	cancel()
-	billing, err := newBilling(canceled, cfg, pool, nil, &blogTestStripe{})
+	billing, err := newBilling(canceled, cfg, pool, nil, billingOptions{StripeTransport: &blogTestStripe{}})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected constructor failure: %v", err)
 	}

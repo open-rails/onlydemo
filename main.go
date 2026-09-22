@@ -104,7 +104,7 @@ func serve(ctx context.Context) error {
 	}
 	defer authService.Close()
 
-	billing, err := newBilling(ctx, config, pool, authService)
+	billing, err := newBilling(ctx, config, pool, authService, billingOptions{})
 	if err != nil {
 		return fmt.Errorf("initialize OpenRails: %w", err)
 	}

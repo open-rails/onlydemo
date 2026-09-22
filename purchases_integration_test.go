@@ -80,7 +80,7 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 		}
 	})
 	stripe := &blogTestStripe{}
-	billing, err := newBilling(t.Context(), config, pool, service, stripe)
+	billing, err := newBilling(t.Context(), config, pool, service, billingOptions{StripeTransport: stripe})
 	if err != nil {
 		t.Fatalf("initialize OpenRails: %v", err)
 	}

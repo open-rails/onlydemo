@@ -50,10 +50,15 @@ func initializeBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool) erro
 	})
 }
 
+type billingOptions struct {
+	// StripeTransport replaces provider HTTP only in local integration tests.
+	// It is independent of sandbox credentials; nil uses the real Stripe sandbox.
+	StripeTransport http.RoundTripper
+}
+
 // newBilling is deliberately sandbox-only. A missing Stripe key leaves selling
 // disabled; supplying a key requires the host-owned account and webhook config.
-// transport is the supported OpenRails fake-Stripe seam for integration tests.
-func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth, transport ...http.RoundTripper) (_ *billingService, err error) {
+func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth, options billingOptions) (_ *billingService, err error) {
 	if cfg.StripeSecretKey == "" {
 		return nil, nil
 	}
@@ -66,9 +71,6 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 	publicURL, err := url.Parse(cfg.PublicURL)
 	if err != nil || publicURL.Host == "" || (publicURL.Scheme != "http" && publicURL.Scheme != "https") || publicURL.RawQuery != "" || publicURL.Fragment != "" || publicURL.User != nil {
 		return nil, errors.New("PUBLIC_URL must be an absolute HTTP(S) URL without credentials, query, or fragment")
-	}
-	if len(transport) > 1 {
-		return nil, errors.New("newBilling accepts at most one Stripe transport")
 	}
 	if pool == nil {
 		return nil, errors.New("billing requires the host PostgreSQL pool")
@@ -93,11 +95,9 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 			APIURL:                          strings.TrimRight(cfg.PublicURL, "/") + "/billing",
 			DB:                              &openrailsconfig.DBConfig{URL: cfg.DatabaseURL, Schema: cfg.BillingSchema},
 		},
-		PGXPool: pool,
-		River:   openrailsembed.RiverFromHost(),
-	}
-	if len(transport) == 1 {
-		opts.StripeTransport = transport[0]
+		PGXPool:         pool,
+		River:           openrailsembed.RiverFromHost(),
+		StripeTransport: options.StripeTransport,
 	}
 
 	runtime, err := openrailsembed.New(ctx, opts)
