@@ -96,12 +96,13 @@ Remote OpenRails consumers only need its remote client, with no local runtime or
 route bundle. AuthKit's client boundary permits a future remote transport; this
 demo uses its supported embedded runtime.
 
-This demo chooses one host-owned River fleet for both libraries. `jobs.go`
-initializes the host's River schema during migration. After both services and
-merchant configuration are ready, `riverkit.New` composes `auth.runtime.RiverJobs()` and
-`billing.runtime.RiverJobs()` into one unstarted client and binds producers automatically.
-Without billing, the same composer receives only AuthKit's contribution. The host starts and stops workers before closing
-library services, then closes its pool. OpenRails and River borrow that pool.
+This demo chooses one host-owned River fleet. `migrations.go` calls
+`riverkit.ApplyMigrations` to initialize its schema. After services and merchant
+configuration are ready, `jobs.go` calls `riverkit.New` with AuthKit, channel and
+optional OpenRails contributions. It returns one unstarted client with producers
+already bound. Without billing, AuthKit and channel jobs still share the fleet.
+The host starts and stops workers before closing library services, then closes
+its pool. OpenRails and River borrow that pool.
 AuthKit creates and owns a schema-bound pool from the same connection settings;
 closing it leaves the host pool open. A `MaxConns=1` host pool therefore does not
 limit the whole process to one database connection.
