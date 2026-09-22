@@ -109,18 +109,22 @@ login that owns its database also works; integration tests use that setup. There
 are no per-library logins or permission-group roles. Merchant authorization uses
 explicit scoped queries, independently of database-role flags.
 
-The changed library baseline requires a fresh database when upgrading from the
-old demo. Point `DATABASE_URL` at a new database to preserve an older one; startup
-does not rewrite historical migration checksums or drop existing databases.
-Post owners are opaque AuthKit IDs, with no foreign key into AuthKit's schema.
+The demo keeps one initial application migration. When upgrading from an older
+version of that schema, point `DATABASE_URL` at a new database to preserve the old
+one. Startup never rewrites historical checksums or drops databases; libraries
+apply their own forward migrations during normal upgrades.
+Channel and author references are opaque AuthKit IDs, with no foreign key into AuthKit's schema.
 `task db:down` removes the disposable development container and its databases.
 
 AuthKit uses development signing keys and memory-backed challenge/rate-limit
 storage. Email verification and MFA are disabled for this demo. Signing keys
 change on restart, so sign in again after restarting the app.
 AuthKit schedules PostgreSQL maintenance automatically through the shared River
-fleet. Its in-memory TTL caches retain local sweepers; account-erasure purge is
-separately opt-in and retains AuthKit's host-cleanup and retention requirements.
+fleet. Account deletion is recoverable for 30 days; AuthKit owns the durable
+deletion jobs and final identity cleanup. Its in-memory TTL caches retain local
+sweepers. The demo stores no additional account profile requiring a deletion
+callback: transferred channel content retains its opaque `author_id` attribution,
+and OpenRails retains financial history independently of the identity record.
 
 ## Users and admins
 
@@ -135,6 +139,14 @@ The response includes `token_set.access_token`. Login at
 includes `access_token`. Send `Authorization: Bearer <access_token>` on
 authenticated requests. `GET /api/v1/me` provides the current user's ID.
 
+`DELETE /api/v1/user` deletes the account after fresh authentication (or a
+`password` in the request body). First transfer or delete every channel it owns.
+During the 30-day recovery period, a correct password login returns 409 with
+`error.metadata.recovery.token` instead of a session. Explicitly confirm with
+`POST /api/v1/account/recovery/confirm` and `{"token":"<recovery-token>"}`, then
+log in again. Ordinary login never silently restores the account; recovery
+tokens are single-use and cannot authenticate normal API requests.
+
 Grant or revoke an existing user's admin role explicitly:
 
 ```sh
@@ -145,8 +157,7 @@ task admin:revoke USER_ID=<user-uuid>
 These operator commands use AuthKit's trusted `OperatorAssignGroupRole` and
 `OperatorUnassignGroupRole` client operations. Ordinary server startup
 does not restore revoked roles. The `admin` role is an AuthKit root permission
-group role granting `root:posts:read`, `root:posts:edit`, `root:posts:delete` and
-`root:channels:delete`.
+group role granting `root:posts:read`, `root:posts:edit` and `root:posts:delete`.
 The application checks those permissions through AuthKit on each request;
 there is no custom admin flag/table and no trust in token-carried role names.
 AuthKit's root owner also has these permissions through `root:*`.
@@ -175,6 +186,8 @@ AuthKit's native `/api/v1/channel/:slug` routes manage members, roles, invitatio
 and settings. Native channel creation/deletion is disabled so it cannot bypass
 the app's coordinated lifecycle. A channel must retain a valid owner; transfer
 ownership or delete it before deleting its owner's account.
+The demo's content/channel routes require native user access tokens. AuthKit's
+group API also supports remote-application owners managing or transferring roles.
 
 `DELETE /api/channels/:id` returns 202 after atomically marking deletion and
 enqueuing a River job. That job archives catalog products, removes posts, and
@@ -196,9 +209,9 @@ rejected concurrent edit cannot leave its title in billing.
 
 | Method | Route | Behavior |
 | --- | --- | --- |
-| POST | `/api/channels` | Create an AuthKit-owned collaborative channel |
+| POST | `/api/channels` | Create a channel and its AuthKit permission group |
 | GET | `/api/channels/:id` | Read an accessible channel |
-| DELETE | `/api/channels/:id` | Accept owner/admin deletion and queue durable cleanup |
+| DELETE | `/api/channels/:id` | Authorize through channel settings permission and queue durable cleanup |
 | GET | `/api/posts` | One page of public posts, sale previews, and accessible private posts (`limit=1..100`, default 50) |
 | GET | `/api/posts/:id` | Full content if allowed; a sale preview otherwise |
 | POST | `/api/posts` | Create a post in an authorized channel; record the author |
@@ -212,8 +225,8 @@ Purchased products use cursor pagination; payments, subscriptions and invoices
 have bounded pages. The group includes saved payment methods, payment recovery,
 subscription cancellation/resumption and existing-agreement management. The
 verified AuthKit user and configured merchant determine all ownership; request
-fields cannot select another customer. New checkout and plan changes remain on
-the application's selected-offer path. `/billing/v1/capabilities` describes the
+fields cannot select another customer. New checkout uses the application's
+selected-offer path; plan changes are not exposed. `/billing/v1/capabilities` describes the
 mounted route groups and provider-specific `features`.
 
 Create a paid post:

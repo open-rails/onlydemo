@@ -83,6 +83,8 @@ func TestBlogPostsIntegration(t *testing.T) {
 			{http.MethodDelete, "/api/posts/:id"},
 			{http.MethodPost, "/api/v1/register"},
 			{http.MethodPost, "/api/v1/password/login"},
+			{http.MethodPost, "/api/v1/account/recovery/confirm"},
+			{http.MethodPost, "/api/v1/admin/users/:user_id/restore"},
 			{http.MethodGet, "/api/v1/admin/users"},
 			{http.MethodDelete, "/api/v1/user/sessions/:id"},
 			{http.MethodGet, "/.well-known/jwks.json"},
@@ -95,7 +97,7 @@ func TestBlogPostsIntegration(t *testing.T) {
 				t.Errorf("homepage missing %s %s", route.method, route.path)
 			}
 		}
-		for _, path := range []string{"/api/v1/user/2fa", "/api/v1/delegated/token", "/api/v1/device-keys", "/*"} {
+		for _, path := range []string{"/api/v1/user/2fa", "/api/v1/delegated/token", "/api/v1/device-keys", "/api/v1/admin/erasure/backlog", "/*"} {
 			if strings.Contains(home, fmt.Sprintf(`data-path="%s"`, path)) {
 				t.Errorf("homepage listed disabled route or middleware catch-all %s", path)
 			}
@@ -346,6 +348,9 @@ func TestBlogPostsIntegration(t *testing.T) {
 		}, http.StatusUnauthorized)
 	})
 	// Await maintenance while the test context and host fleet are still alive.
+	t.Run("account deletion and explicit recovery", func(t *testing.T) {
+		assertAccountRecovery(t, app, service, pool, alice)
+	})
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	for {
