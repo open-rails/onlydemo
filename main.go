@@ -81,7 +81,7 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 		return nil
 	}
 
-	billing, err := newBilling(ctx, config, pool)
+	billing, err := newBilling(ctx, config, pool, authService)
 	if err != nil {
 		return fmt.Errorf("initialize OpenRails: %w", err)
 	}
@@ -94,6 +94,8 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 	} else {
 		log.Print("Stripe is not configured; post sales are disabled")
 	}
+	channels := newChannels(pool, authService, postsBilling, config)
+	jobs.channels = channels
 	defer func() {
 		stopCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
@@ -105,7 +107,7 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 		return fmt.Errorf("start application jobs: %w", err)
 	}
 
-	app, err := newApp(pool, authService, postsBilling, config)
+	app, err := newApp(pool, authService, postsBilling, config, channels)
 	if err != nil {
 		return fmt.Errorf("create application: %w", err)
 	}
@@ -119,12 +121,12 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 	return app.Listen(fmt.Sprintf(":%d", config.Port))
 }
 
-func newApp(pool *pgxpool.Pool, authService *appAuth, billing postBilling, cfg Config) (*fiber.App, error) {
+func newApp(pool *pgxpool.Pool, authService *appAuth, billing postBilling, cfg Config, channels *channelAPI) (*fiber.App, error) {
 	app := fiber.New()
 	if err := validateDatabaseSchemas(cfg); err != nil {
 		return nil, err
 	}
-	blogAPI := &blogAPI{pool: pool, auth: authService, billing: billing, table: pgx.Identifier{appSchema(cfg), "blog_posts"}.Sanitize()}
+	blogAPI := &blogAPI{pool: pool, auth: authService, billing: billing, channels: channels, table: pgx.Identifier{appSchema(cfg), "blog_posts"}.Sanitize()}
 
 	app.Get("/", homepage(app))
 
@@ -153,6 +155,7 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing postBilling, cfg C
 
 	optional := authkitfiber.Optional(authService.runtime.Verifier())
 	required := authkitfiber.Required(authService.runtime.Verifier())
+	channels.mount(app, required)
 	app.Get("/api/posts", optional, blogAPI.list)
 	app.Post("/api/posts", required, blogAPI.create)
 	app.Get("/api/posts/:id", optional, blogAPI.get)

@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails"
 	openrailsconfig "github.com/open-rails/openrails/config"
 	openrailsembed "github.com/open-rails/openrails/embed"
+	openrailsauthkit "github.com/open-rails/openrails/embed/authkit"
 )
 
 const (
@@ -29,6 +30,7 @@ const (
 type postBilling interface {
 	EnsurePostOffer(context.Context, string, string, string, int64) (string, string, error)
 	EnsurePostOfferAsAdmin(context.Context, string, string, string, int64) (string, string, error)
+	ArchiveChannelCatalog(context.Context, string) error
 	HasPostAccess(context.Context, string, string) (bool, error)
 	CheckPostAccess(context.Context, string, []string) (map[string]bool, error)
 	CreateCheckout(context.Context, string, string, string, string) (*openrails.CheckoutSession, error)
@@ -51,7 +53,7 @@ func initializeBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool) erro
 // newBilling is deliberately sandbox-only. A missing Stripe key leaves selling
 // disabled; supplying a key requires the host-owned account and webhook config.
 // transport is the supported OpenRails fake-Stripe seam for integration tests.
-func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, transport ...http.RoundTripper) (*billingService, error) {
+func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth, transport ...http.RoundTripper) (_ *billingService, err error) {
 	if cfg.StripeSecretKey == "" {
 		return nil, nil
 	}
@@ -72,7 +74,6 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, transport .
 		return nil, errors.New("billing requires the host PostgreSQL pool")
 	}
 	opts := openrailsembed.Options{
-		HTTP: &openrailsembed.HTTPConfig{},
 		Merchant: &openrailsembed.MerchantDeclaration{Slug: billingMerchantSlug, Config: openrailsembed.MerchantConfig{
 			DisplayName: "OpenRails Blog Demo",
 			PSPs: map[string]openrailsembed.PSPConfig{"stripe": {"stripe": {
@@ -103,9 +104,28 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, transport .
 	if err != nil {
 		return nil, fmt.Errorf("start OpenRails: %w", err)
 	}
+	defer func() {
+		if err != nil {
+			_ = runtime.Close(context.Background())
+		}
+	}()
 	client, err := runtime.Client()
 	if err != nil {
-		_ = runtime.Close(context.Background())
+		return nil, err
+	}
+	if auth == nil {
+		return nil, errors.New("billing customer routes require AuthKit")
+	}
+	// The provisioned merchant UUID is known only after construction. Configure
+	// HTTP once using that fixed authority and the host's existing verifier.
+	customerAuth, err := openrailsauthkit.NewDelegatedAuthenticator(auth.runtime.Verifier(), client.MerchantID().String(),
+		openrailsauthkit.WithRolePermissions(func([]string) []string { return nil }))
+	if err != nil {
+		return nil, err
+	}
+	if err := runtime.ConfigureHTTP(openrailsembed.HTTPConfig{CustomerExposures: []openrailsembed.CustomerHTTPConfig{{
+		Prefix: "/v1/me", Scope: openrailsembed.CustomerBillingManagement, DelegatedAuthenticator: customerAuth,
+	}}}); err != nil {
 		return nil, err
 	}
 	return &billingService{runtime: runtime, client: client, publicURL: strings.TrimRight(cfg.PublicURL, "/")}, nil
@@ -119,10 +139,10 @@ func (b *billingService) Ready(ctx context.Context) error {
 	return b.runtime.Ready(ctx)
 }
 
-// Author authority comes from the authenticated caller, independently of the
-// owner recorded on an existing post.
-func (b *billingService) EnsurePostOffer(ctx context.Context, authorID, billingKey, title string, priceCents int64) (string, string, error) {
-	client, err := b.client.ForCatalogOwner(authorID)
+// The handler verifies channel permissions through AuthKit before selecting
+// that channel's catalog. Post authorship does not confer catalog authority.
+func (b *billingService) EnsurePostOffer(ctx context.Context, catalogOwnerID, billingKey, title string, priceCents int64) (string, string, error) {
+	client, err := b.client.ForCatalogOwner(catalogOwnerID)
 	if err != nil {
 		return "", "", err
 	}
@@ -130,13 +150,44 @@ func (b *billingService) EnsurePostOffer(ctx context.Context, authorID, billingK
 }
 
 // The blog handler calls this path only after AuthKit grants moderation access.
-// It uses administrator authority explicitly while preserving the author's catalog.
+// It uses administrator authority explicitly while preserving the channel's catalog.
 func (b *billingService) EnsurePostOfferAsAdmin(ctx context.Context, ownerID, billingKey, title string, priceCents int64) (string, string, error) {
 	catalog, err := b.client.EnsureCatalogForOwner(ctx, ownerID)
 	if err != nil {
 		return "", "", err
 	}
 	return ensurePostOffer(ctx, b.client, catalog.ID.String(), []string{"stripe"}, billingKey, title, priceCents)
+}
+
+// ArchiveChannelCatalog preserves purchase history while retiring a channel's
+// offers. Exact owner lookup does not manufacture an empty catalog.
+func (b *billingService) ArchiveChannelCatalog(ctx context.Context, channelID string) error {
+	const pageSize = 100
+	catalog, err := b.client.GetCatalogForOwner(ctx, channelID)
+	if errors.Is(err, openrails.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("find channel catalog: %w", err)
+	}
+	active, archived := false, true
+	for {
+		products, err := b.client.Products.List(ctx, &openrails.ProductListParams{
+			PageOptions: openrails.PageOptions{Limit: pageSize}, CatalogID: catalog.ID.String(), Archived: &active,
+		})
+		if err != nil {
+			return fmt.Errorf("list channel offers: %w", err)
+		}
+		if len(products.Items) == 0 {
+			return nil
+		}
+		for _, product := range products.Items {
+			if _, err := b.client.Products.Update(ctx, product.ID, &openrails.ProductUpdateParams{Archived: &archived}); err != nil {
+				return fmt.Errorf("archive channel offer: %w", err)
+			}
+		}
+		// Repeat the first active page: archived products leave this set.
+	}
 }
 
 func ensurePostOffer(ctx context.Context, client *openrails.Client, catalogID string, providers []string, billingKey, title string, priceCents int64) (string, string, error) {

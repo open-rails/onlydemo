@@ -16,15 +16,17 @@ import (
 )
 
 type blogAPI struct {
-	pool    *pgxpool.Pool
-	auth    *appAuth
-	billing postBilling
-	table   string
+	pool     *pgxpool.Pool
+	auth     *appAuth
+	billing  postBilling
+	table    string
+	channels *channelAPI
 }
 
 type blogPost struct {
 	ID         int64     `json:"id"`
-	OwnerID    string    `json:"owner_id"`
+	AuthorID   string    `json:"author_id"`
+	ChannelID  string    `json:"channel_id"`
 	Slug       string    `json:"slug"`
 	Title      string    `json:"title"`
 	Body       string    `json:"body,omitempty"`
@@ -40,6 +42,7 @@ type blogPost struct {
 }
 
 type blogPostInput struct {
+	ChannelID  *string `json:"channel_id"`
 	Slug       *string `json:"slug"`
 	Title      *string `json:"title"`
 	Body       *string `json:"body"`
@@ -48,7 +51,7 @@ type blogPostInput struct {
 	PriceCents *int64 `json:"price_cents"`
 }
 
-const postColumns = `id, owner_id::text, billing_key::text, slug, title, body, visibility, price_cents,
+const postColumns = `id, author_id::text, channel_id::text, billing_key::text, slug, title, body, visibility, price_cents,
 	COALESCE(openrails_product_id, ''), COALESCE(openrails_price_id, ''), created_at, updated_at`
 
 // list returns one bounded page. Access checks cover only that page's products;
@@ -73,8 +76,8 @@ func (api *blogAPI) list(c fiber.Ctx) error {
 		}
 	}
 	rows, err := api.pool.Query(c.Context(), `SELECT `+postColumns+` FROM `+api.table+`
-  WHERE (visibility = 'public' OR owner_id::text = $1 OR price_cents IS NOT NULL
-   OR ($1 <> '' AND openrails_product_id IS NOT NULL) OR $2)
+  WHERE (visibility = 'public' OR price_cents IS NOT NULL OR $1 <> '' OR $2)
+   AND EXISTS(SELECT 1 FROM `+api.channels.table+` AS channel WHERE channel.id=channel_id AND channel.deleting_at IS NULL)
    AND ($3::bigint = 0 OR id < $3)
   ORDER BY id DESC LIMIT $4`, userID, admin, before, limit+1)
 	if err != nil {
@@ -99,9 +102,19 @@ func (api *blogAPI) list(c fiber.Ctx) error {
 		c.Set("X-Next-Cursor", strconv.FormatInt(posts[len(posts)-1].ID, 10))
 	}
 	products := make([]string, 0, len(posts))
+	channelAccess := make(map[string]bool)
 	for _, post := range posts {
-		if userID != "" && !admin && post.OwnerID != userID && post.Visibility != "public" && post.ProductID != "" {
-			products = append(products, post.ProductID)
+		if userID != "" && !admin && post.Visibility != "public" {
+			if _, checked := channelAccess[post.ChannelID]; !checked {
+				allowed, err := api.channels.allowed(c.Context(), userID, post.ChannelID, channelReadPermission)
+				if err != nil {
+					return clientError(c, http.StatusServiceUnavailable, "permission service is unavailable")
+				}
+				channelAccess[post.ChannelID] = allowed
+			}
+			if !channelAccess[post.ChannelID] && post.ProductID != "" {
+				products = append(products, post.ProductID)
+			}
 		}
 	}
 	access := map[string]bool{}
@@ -116,7 +129,7 @@ func (api *blogAPI) list(c fiber.Ctx) error {
 	}
 	visible := make([]blogPost, 0, len(posts))
 	for _, post := range posts {
-		readable := post.Visibility == "public" || post.OwnerID == userID || admin || access[post.ProductID]
+		readable := post.Visibility == "public" || channelAccess[post.ChannelID] || admin || access[post.ProductID]
 		if !readable && post.PriceCents == nil {
 			continue
 		}
@@ -136,14 +149,20 @@ func (api *blogAPI) get(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	post, err := scanBlogPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id = $1`, id))
+	post, err := scanBlogPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id = $1 AND EXISTS(SELECT 1 FROM `+api.channels.table+` AS channel WHERE channel.id=channel_id AND channel.deleting_at IS NULL)`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, http.StatusNotFound, "post not found")
 	}
 	if err != nil {
 		return databaseError(c, err)
 	}
-	canRead := post.Visibility == "public" || post.OwnerID == userID || admin
+	canRead := post.Visibility == "public" || admin
+	if !canRead && userID != "" {
+		canRead, err = api.channels.allowed(c.Context(), userID, post.ChannelID, channelReadPermission)
+		if err != nil {
+			return clientError(c, http.StatusServiceUnavailable, "permission service is unavailable")
+		}
+	}
 	if !canRead && userID != "" && post.ProductID != "" {
 		if api.billing == nil {
 			return billingUnavailable(c)
@@ -173,7 +192,26 @@ func (api *blogAPI) create(c fiber.Ctx) error {
 	if input.Slug == nil || input.Title == nil || input.Body == nil {
 		return clientError(c, http.StatusBadRequest, "slug, title, and body are required")
 	}
-	post := blogPost{OwnerID: user.UserID, Slug: *input.Slug, Title: *input.Title, Body: *input.Body, Visibility: "private", PriceCents: input.PriceCents}
+	if input.ChannelID == nil {
+		return clientError(c, http.StatusBadRequest, "channel_id is required")
+	}
+	channelID, err := channelID(*input.ChannelID)
+	if err != nil {
+		return clientError(c, http.StatusBadRequest, "invalid channel id")
+	}
+	release, err := api.channels.lock(c.Context(), channelID)
+	if err != nil {
+		return databaseError(c, err)
+	}
+	defer release()
+	allowed, err := api.channels.allowed(c.Context(), user.UserID, channelID, channelCreatePermission)
+	if err != nil {
+		return clientError(c, http.StatusServiceUnavailable, "permission service is unavailable")
+	}
+	if !allowed {
+		return clientError(c, http.StatusNotFound, "channel not found")
+	}
+	post := blogPost{AuthorID: user.UserID, ChannelID: channelID, Slug: *input.Slug, Title: *input.Title, Body: *input.Body, Visibility: "private", PriceCents: input.PriceCents}
 	if input.Visibility != nil {
 		post.Visibility = *input.Visibility
 	}
@@ -186,17 +224,16 @@ func (api *blogAPI) create(c fiber.Ctx) error {
 	// Publish the post after its offer exists. Holding an application
 	// transaction while billing borrows the same pool can exhaust that pool.
 	post.BillingKey = uuid.NewString()
-	var err error
 	if post.PriceCents != nil {
-		post.ProductID, post.PriceID, err = api.billing.EnsurePostOffer(c.Context(), user.UserID, post.BillingKey, post.Title, *post.PriceCents)
+		post.ProductID, post.PriceID, err = api.billing.EnsurePostOffer(c.Context(), post.ChannelID, post.BillingKey, post.Title, *post.PriceCents)
 		if err != nil {
 			return billingUnavailable(c)
 		}
 	}
 	post, err = scanBlogPost(api.pool.QueryRow(c.Context(), `INSERT INTO `+api.table+`
-        (owner_id, billing_key, slug, title, body, visibility, price_cents, openrails_product_id, openrails_price_id)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),NULLIF($9,'')) RETURNING `+postColumns,
-		post.OwnerID, post.BillingKey, post.Slug, post.Title, post.Body, post.Visibility, post.PriceCents, post.ProductID, post.PriceID))
+        (author_id, billing_key, slug, title, body, visibility, price_cents, openrails_product_id, openrails_price_id, channel_id)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),NULLIF($9,''),$10) RETURNING `+postColumns,
+		post.AuthorID, post.BillingKey, post.Slug, post.Title, post.Body, post.Visibility, post.PriceCents, post.ProductID, post.PriceID, post.ChannelID))
 	if err != nil {
 		return databaseError(c, err)
 	}
@@ -217,6 +254,9 @@ func (api *blogAPI) update(c fiber.Ctx) error {
 	if err := c.Bind().Body(&input); err != nil {
 		return clientError(c, http.StatusBadRequest, "invalid JSON body")
 	}
+	if input.ChannelID != nil {
+		return clientError(c, http.StatusBadRequest, "channel_id is fixed when a post is created")
+	}
 	admin, err := api.canModerate(c, user.UserID, postEditPermission)
 	if err != nil {
 		return clientError(c, http.StatusServiceUnavailable, "permission service is unavailable")
@@ -224,12 +264,28 @@ func (api *blogAPI) update(c fiber.Ctx) error {
 	// Use an optimistic revision check after billing work so simultaneous
 	// edits cannot overwrite each other or hold a shared-pool connection idle.
 	post, err := scanBlogPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+`
-        FROM `+api.table+` WHERE id=$1 AND (owner_id=$2 OR $3)`, id, user.UserID, admin))
+        FROM `+api.table+` WHERE id=$1`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, http.StatusNotFound, "post not found")
 	}
 	if err != nil {
 		return databaseError(c, err)
+	}
+	release, err := api.channels.lock(c.Context(), post.ChannelID)
+	if err != nil {
+		return databaseError(c, err)
+	}
+	defer release()
+	active, err := api.channels.active(c.Context(), post.ChannelID)
+	if err != nil {
+		return databaseError(c, err)
+	}
+	allowed, err := api.channels.allowed(c.Context(), user.UserID, post.ChannelID, channelEditPermission)
+	if err != nil {
+		return clientError(c, http.StatusServiceUnavailable, "permission service is unavailable")
+	}
+	if !active || (!allowed && !admin) {
+		return clientError(c, http.StatusNotFound, "post not found")
 	}
 	revision := post.UpdatedAt
 	if input.Slug != nil {
@@ -255,11 +311,11 @@ func (api *blogAPI) update(c fiber.Ctx) error {
 		if api.billing == nil {
 			return billingUnavailable(c)
 		}
-		if post.OwnerID == user.UserID {
-			post.ProductID, post.PriceID, err = api.billing.EnsurePostOffer(c.Context(), user.UserID, post.BillingKey, post.Title, *post.PriceCents)
+		if allowed {
+			post.ProductID, post.PriceID, err = api.billing.EnsurePostOffer(c.Context(), post.ChannelID, post.BillingKey, post.Title, *post.PriceCents)
 		} else {
 			// The row lookup above requires AuthKit's moderation grant here.
-			post.ProductID, post.PriceID, err = api.billing.EnsurePostOfferAsAdmin(c.Context(), post.OwnerID, post.BillingKey, post.Title, *post.PriceCents)
+			post.ProductID, post.PriceID, err = api.billing.EnsurePostOfferAsAdmin(c.Context(), post.ChannelID, post.BillingKey, post.Title, *post.PriceCents)
 		}
 		if err != nil {
 			return billingUnavailable(c)
@@ -268,8 +324,9 @@ func (api *blogAPI) update(c fiber.Ctx) error {
 	post, err = scanBlogPost(api.pool.QueryRow(c.Context(), `UPDATE `+api.table+`
 		SET slug=$1, title=$2, body=$3, visibility=$4, price_cents=$5,
 			openrails_product_id=NULLIF($6,''), openrails_price_id=NULLIF($7,''), updated_at=NOW()
-		WHERE id=$8 AND (owner_id=$9 OR $10) AND updated_at=$11 RETURNING `+postColumns,
-		post.Slug, post.Title, post.Body, post.Visibility, post.PriceCents, post.ProductID, post.PriceID, id, user.UserID, admin, revision))
+		WHERE id=$8 AND channel_id=$9 AND updated_at=$10
+		AND EXISTS(SELECT 1 FROM `+api.channels.table+` AS channel WHERE channel.id=channel_id AND channel.deleting_at IS NULL) RETURNING `+postColumns,
+		post.Slug, post.Title, post.Body, post.Visibility, post.PriceCents, post.ProductID, post.PriceID, id, post.ChannelID, revision))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, http.StatusConflict, "post changed while editing; fetch it again and retry")
 	}
@@ -293,7 +350,31 @@ func (api *blogAPI) delete(c fiber.Ctx) error {
 	if err != nil {
 		return clientError(c, http.StatusServiceUnavailable, "permission service is unavailable")
 	}
-	result, err := api.pool.Exec(c.Context(), `DELETE FROM `+api.table+` WHERE id=$1 AND (owner_id=$2 OR $3)`, id, user.UserID, admin)
+	var channel string
+	err = api.pool.QueryRow(c.Context(), `SELECT channel_id::text FROM `+api.table+` WHERE id=$1`, id).Scan(&channel)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return clientError(c, http.StatusNotFound, "post not found")
+	}
+	if err != nil {
+		return databaseError(c, err)
+	}
+	release, err := api.channels.lock(c.Context(), channel)
+	if err != nil {
+		return databaseError(c, err)
+	}
+	defer release()
+	active, err := api.channels.active(c.Context(), channel)
+	if err != nil {
+		return databaseError(c, err)
+	}
+	allowed, err := api.channels.allowed(c.Context(), user.UserID, channel, channelRemovePermission)
+	if err != nil {
+		return clientError(c, http.StatusServiceUnavailable, "permission service is unavailable")
+	}
+	if !active || (!allowed && !admin) {
+		return clientError(c, http.StatusNotFound, "post not found")
+	}
+	result, err := api.pool.Exec(c.Context(), `DELETE FROM `+api.table+` WHERE id=$1 AND channel_id=$2`, id, channel)
 	if err != nil {
 		return databaseError(c, err)
 	}
@@ -303,21 +384,13 @@ func (api *blogAPI) delete(c fiber.Ctx) error {
 	return c.SendStatus(http.StatusNoContent)
 }
 
-// AuthKit owns role membership and authorization. Elevated moderation access
-// also requires a live account; ordinary authors avoid this account lookup.
+// AuthKit owns live role membership. Account bans take effect at token refresh;
+// an already-issued access token remains valid until it expires.
 func (api *blogAPI) canModerate(c fiber.Ctx, userID, permission string) (bool, error) {
 	if userID == "" {
 		return false, nil
 	}
-	allowed, err := api.auth.client.Can(c.Context(), authkit.UserSubject(userID), authkit.RootGroup(), authkit.Perm(permission))
-	if err != nil || !allowed {
-		return false, err
-	}
-	live, err := api.auth.client.UserLivenessByIDs(c.Context(), []string{userID})
-	if err != nil {
-		return false, err
-	}
-	return live[userID].Allowed, nil
+	return api.auth.client.Can(c.Context(), authkit.UserSubject(userID), authkit.RootGroup(), authkit.Perm(permission))
 }
 
 func (api *blogAPI) readAccess(c fiber.Ctx) (string, bool, error) {
@@ -342,7 +415,7 @@ func (p *blogPost) setReadable(allowed bool) {
 
 func scanBlogPost(row interface{ Scan(...any) error }) (blogPost, error) {
 	var post blogPost
-	err := row.Scan(&post.ID, &post.OwnerID, &post.BillingKey, &post.Slug, &post.Title, &post.Body, &post.Visibility,
+	err := row.Scan(&post.ID, &post.AuthorID, &post.ChannelID, &post.BillingKey, &post.Slug, &post.Title, &post.Body, &post.Visibility,
 		&post.PriceCents, &post.ProductID, &post.PriceID, &post.CreatedAt, &post.UpdatedAt)
 	return post, err
 }

@@ -82,7 +82,7 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 	})
 	jobs.auth = service
 	stripe := &blogTestStripe{}
-	billing, err := newBilling(t.Context(), config, pool, stripe)
+	billing, err := newBilling(t.Context(), config, pool, service, stripe)
 	if err != nil {
 		t.Fatalf("initialize OpenRails: %v", err)
 	}
@@ -98,6 +98,8 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 	})
 
 	jobs.billing = billing
+	channels := newChannels(pool, service, billing, config)
+	jobs.channels = channels
 	if err := jobs.compose(t.Context()); err != nil {
 		t.Fatalf("compose jobs: %v", err)
 	}
@@ -106,7 +108,7 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 	if err := jobs.start(t.Context()); err != nil {
 		t.Fatalf("start host River: %v", err)
 	}
-	fiberApp, err := newApp(pool, service, billing, config)
+	fiberApp, err := newApp(pool, service, billing, config, channels)
 	if err != nil {
 		t.Fatalf("mount purchase API: %v", err)
 	}
@@ -121,6 +123,7 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 		{"slug": "above-maximum", "title": "Invalid", "body": "Invalid", "price_cents": 100_000_000},
 		{"slug": "public-paid", "title": "Invalid", "body": "Invalid", "price_cents": 100, "visibility": "public"},
 	} {
+		input["channel_id"] = alice.channelID
 		blogTestRequest(t, app, http.MethodPost, "/api/posts", alice.token, input, http.StatusBadRequest)
 	}
 	paid := createBlogTestPost(t, app, alice.token, map[string]any{
@@ -193,6 +196,7 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 	if err != nil || len(page.Data) != 1 || page.Data[0].EndsAt != nil {
 		t.Fatalf("expected one permanent purchase grant: page=%+v, err=%v", page, err)
 	}
+	assertCustomerBillingSurface(t, app, bob.id, bob.token, charlie.token, page.Data[0].ProductID)
 
 	for _, price := range []int{799, 0} {
 		blogTestRequest(t, app, http.MethodPatch, blogTestPath(paid.ID), alice.token, map[string]any{"price_cents": price}, http.StatusOK)
@@ -215,7 +219,7 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 		// A buyer is also an independent author. Supplied owner/catalog fields
 		// cannot move their new product into the original seller's catalog.
 		alicePost := blogTestStoredPost(t, pool, paid.ID, table)
-		aliceClient, err := billing.client.ForCatalogOwner(alice.id)
+		aliceClient, err := billing.client.ForCatalogOwner(alice.channelID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -225,14 +229,14 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 		}
 		otherPost := createBlogTestPost(t, bobApp, bob.token, map[string]any{
 			"slug": "second-author", "title": "Another author's work", "body": "Second purchased body",
-			"visibility": "private", "price_cents": 699, "owner_id": alice.id,
+			"visibility": "private", "price_cents": 699, "author_id": alice.id,
 			"catalog_id": aliceCatalog.ID.String(), "openrails_product_id": alicePost.ProductID,
 		})
 		bobPost := blogTestStoredPost(t, pool, otherPost.ID, table)
-		if bobPost.OwnerID != bob.id {
+		if bobPost.AuthorID != bob.id {
 			t.Fatal("request fields changed the authenticated post owner")
 		}
-		bobClient, err := billing.client.ForCatalogOwner(bob.id)
+		bobClient, err := billing.client.ForCatalogOwner(bob.channelID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -240,17 +244,17 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 		if err != nil {
 			t.Fatal(err)
 		}
-		if aliceCatalog.ID == bobCatalog.ID || bobCatalog.OwnerSubject == nil || *bobCatalog.OwnerSubject != bob.id {
+		if aliceCatalog.ID == bobCatalog.ID || bobCatalog.OwnerSubject == nil || *bobCatalog.OwnerSubject != bob.channelID {
 			t.Fatal("authors must have distinct OpenRails-owned catalogs")
 		}
 		aliceProduct, bobProduct := alicePost.ProductID, bobPost.ProductID
 		if _, err := bobClient.Products.Retrieve(t.Context(), aliceProduct); !errors.Is(err, openrails.ErrNotFound) {
 			t.Fatalf("another author could address the seller's product: %v", err)
 		}
-		if _, _, err := billing.EnsurePostOffer(t.Context(), bob.id, alicePost.BillingKey, "Foreign author", 999); err == nil {
+		if _, _, err := billing.EnsurePostOffer(t.Context(), bob.channelID, alicePost.BillingKey, "Foreign author", 999); err == nil {
 			t.Fatal("author billing path accepted another author's billing key")
 		}
-		if _, _, err := billing.EnsurePostOfferAsAdmin(t.Context(), bob.id, alicePost.BillingKey, "Wrong catalog", 999); err == nil {
+		if _, _, err := billing.EnsurePostOfferAsAdmin(t.Context(), bob.channelID, alicePost.BillingKey, "Wrong catalog", 999); err == nil {
 			t.Fatal("administrator path silently reassigned a product to another catalog")
 		}
 		blogTestRequest(t, app, http.MethodPatch, blogTestPath(otherPost.ID), alice.token, map[string]any{"price_cents": 999}, http.StatusNotFound)
@@ -262,13 +266,13 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 			t.Fatal(err)
 		}
 		blogTestRequest(t, app, http.MethodPatch, blogTestPath(otherPost.ID), moderator.token,
-			map[string]any{"price_cents": 1299, "title": "Moderated title", "owner_id": moderator.id}, http.StatusOK)
+			map[string]any{"price_cents": 1299, "title": "Moderated title", "author_id": moderator.id}, http.StatusOK)
 		after := blogTestStoredPost(t, pool, otherPost.ID, table)
 		product, err := bobClient.Products.Retrieve(t.Context(), bobProduct)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if after.Title != "Moderated title" || after.PriceCents == nil || *after.PriceCents != 1299 || after.OwnerID != bob.id || after.ProductID != bobPost.ProductID || product.CatalogID != bobCatalog.ID.String() || product.DisplayName != bobPost.Title {
+		if after.Title != "Moderated title" || after.PriceCents == nil || *after.PriceCents != 1299 || after.AuthorID != bob.id || after.ProductID != bobPost.ProductID || product.CatalogID != bobCatalog.ID.String() || product.DisplayName != bobPost.Title {
 			t.Fatal("moderator edit failed to preserve the product owner/title snapshot while updating the post and price")
 		}
 		if err := service.revokeAdmin(t.Context(), moderator.id); err != nil {
@@ -312,7 +316,7 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 			_, err := pool.Exec(ctx, "UPDATE "+table+" SET title=$1, updated_at=now() WHERE id=$2", "Concurrent content edit", paid.ID)
 			return err
 		}}
-		fiberApp, err := newApp(pool, service, observer, config)
+		fiberApp, err := newApp(pool, service, observer, config, channels)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -347,7 +351,7 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 		}
 		checked := make(chan []string, 2)
 		observer := postAccessCallbackBilling{postBilling: billing, check: func(ids []string) { checked <- append([]string(nil), ids...) }}
-		fiberApp, err := newApp(pool, service, observer, config)
+		fiberApp, err := newApp(pool, service, observer, config, channels)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -391,6 +395,141 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 		}
 		blogTestRequest(t, pagedApp, http.MethodGet, "/api/posts?limit=101", bob.token, nil, http.StatusBadRequest)
 		blogTestRequest(t, pagedApp, http.MethodGet, "/api/posts?before=invalid", bob.token, nil, http.StatusBadRequest)
+	})
+	// The shared leader must schedule both libraries, using one complete config.
+	t.Run("durable channel deletion serializes catalog writes", func(t *testing.T) {
+		var team channel
+		decodeBlogTestJSON(t, blogTestRequest(t, app, http.MethodPost, "/api/channels", alice.token, map[string]any{"slug": "retiring-publisher", "name": "Retiring publisher"}, http.StatusCreated), &team)
+		firstPost := createBlogTestPost(t, app, alice.token, map[string]any{"channel_id": team.ID, "slug": "retirement-purchase", "title": "Purchased before retirement", "body": "Purchased channel body", "price_cents": 99})
+		storedFirst := blogTestStoredPost(t, pool, firstPost.ID, table)
+		blogTestCheckout(t, app, firstPost.ID, bob.token, "retirement-purchase", nil)
+		purchase := stripe.latestSession(t)
+		blogTestStripeWebhook(t, app, purchase.event(t, "evt_retirement_paid", "checkout.session.completed", "complete", "paid"), blogTestStripeWebhookSecret, http.StatusOK)
+		assertBlogTestReadable(t, app, firstPost, bob.token, true)
+		if err := jobs.client.Stop(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		// The enqueue client remains usable while processing is stopped. A
+		// committed delete must survive until this same host fleet restarts.
+		ready, resume := make(chan struct{}, 1), make(chan struct{})
+		observer := postOfferCallbackBilling{postBilling: billing, after: func(ctx context.Context) error {
+			ready <- struct{}{}
+			select {
+			case <-resume:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}}
+		writerFiber, err := newApp(pool, service, observer, config, channels)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writerApp := newBlogTestServer(t, writerFiber)
+		type result struct {
+			status int
+			body   []byte
+			err    error
+		}
+		request := func(method, path string, body []byte) <-chan result {
+			out := make(chan result, 1)
+			go func() {
+				req, err := http.NewRequestWithContext(t.Context(), method, writerApp.url+path, bytes.NewReader(body))
+				if err != nil {
+					out <- result{err: err}
+					return
+				}
+				req.Header.Set("Authorization", "Bearer "+alice.token)
+				req.Header.Set("Content-Type", "application/json")
+				resp, err := writerApp.client.Do(req)
+				if err != nil {
+					out <- result{err: err}
+					return
+				}
+				defer resp.Body.Close()
+				raw, err := io.ReadAll(resp.Body)
+				out <- result{status: resp.StatusCode, body: raw, err: err}
+			}()
+			return out
+		}
+		body, _ := json.Marshal(map[string]any{"channel_id": team.ID, "slug": "last-channel-offer", "title": "Accepted before deletion", "body": "Last content", "price_cents": 199})
+		writing := request(http.MethodPost, "/api/posts", body)
+		select {
+		case <-ready:
+		case <-time.After(10 * time.Second):
+			t.Fatal("catalog write did not reach its guarded boundary")
+		}
+		deleting := request(http.MethodDelete, "/api/channels/"+team.ID, nil)
+		wait, cancel := context.WithTimeout(t.Context(), 4*time.Second)
+		for {
+			var blocked bool
+			err = pool.QueryRow(wait, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND NOT granted AND classid=hashtext(current_database())::oid AND objid=hashtext($1)::oid)`, "demo-channel:"+team.ID).Scan(&blocked)
+			if err != nil {
+				cancel()
+				close(resume)
+				t.Fatal("deletion did not wait for the accepted catalog write:", err)
+			}
+			if blocked {
+				break
+			}
+			select {
+			case <-wait.Done():
+				cancel()
+				close(resume)
+				t.Fatal("channel deletion was not serialized")
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+		cancel()
+		close(resume)
+		written, deleted := <-writing, <-deleting
+		if written.err != nil || written.status != http.StatusCreated {
+			t.Fatalf("last write: %+v body=%s", written, written.body)
+		}
+		if deleted.err != nil || deleted.status != http.StatusAccepted {
+			t.Fatalf("queued deletion: %+v body=%s", deleted, deleted.body)
+		}
+		var lastPost blogPost
+		decodeBlogTestJSON(t, written.body, &lastPost)
+		storedLast := blogTestStoredPost(t, pool, lastPost.ID, table)
+		var queued int
+		jobSchema := config.RiverSchema
+		if jobSchema == "" {
+			jobSchema = "public"
+		}
+		if err = pool.QueryRow(t.Context(), `SELECT count(*) FROM `+pgx.Identifier{jobSchema, "river_job"}.Sanitize()+` WHERE kind='demo_delete_channel' AND args->>'channel_id'=$1 AND state<>'completed'`, team.ID).Scan(&queued); err != nil || queued != 1 {
+			t.Fatalf("durable deletion queue rows=%d err=%v", queued, err)
+		}
+		blogTestRequest(t, app, http.MethodPost, "/api/posts", alice.token, map[string]any{"channel_id": team.ID, "slug": "too-late", "title": "Too late", "body": "Rejected", "price_cents": 299}, http.StatusNotFound)
+		if err = jobs.client.Start(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		deadline, stop := context.WithTimeout(t.Context(), 20*time.Second)
+		defer stop()
+		for {
+			var exists bool
+			if err = pool.QueryRow(deadline, `SELECT EXISTS(SELECT 1 FROM `+channels.table+` WHERE id=$1)`, team.ID).Scan(&exists); err != nil {
+				t.Fatal(err)
+			}
+			if !exists {
+				break
+			}
+			select {
+			case <-deadline.Done():
+				t.Fatal("restarted worker did not finish channel cleanup")
+			case <-time.After(25 * time.Millisecond):
+			}
+		}
+		for _, id := range []string{storedFirst.ProductID, storedLast.ProductID} {
+			product, err := billing.client.Products.Retrieve(t.Context(), id)
+			if err != nil || !product.Archived {
+				t.Fatalf("channel product was not archived: product=%+v err=%v", product, err)
+			}
+		}
+		if owned, err := billing.HasPostAccess(t.Context(), bob.id, storedFirst.ProductID); err != nil || !owned {
+			t.Fatalf("cleanup changed financial purchase history: access=%v err=%v", owned, err)
+		}
+		blogTestRequest(t, app, http.MethodGet, blogTestPath(firstPost.ID), bob.token, nil, http.StatusNotFound)
 	})
 	// The shared leader must schedule both libraries, using one complete config.
 	jobCtx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
@@ -579,7 +718,7 @@ func blogTestStripeWebhook(t *testing.T, app *blogTestServer, payload []byte, se
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write([]byte(timestamp + "."))
 	_, _ = mac.Write(payload)
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, app.url+"/billing/v1/merchants/openrails-demo/webhooks/stripe", bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, app.url+"/billing/v1/merchants/openrails-demo/webhooks/stripe/acct_demo_test", bytes.NewReader(payload))
 	if err != nil {
 		t.Fatal(err)
 	}

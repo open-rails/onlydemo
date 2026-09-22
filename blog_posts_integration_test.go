@@ -18,6 +18,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/authkit"
 )
 
 const blogPostsTable = "demo.blog_posts"
@@ -53,6 +54,8 @@ func TestBlogPostsIntegration(t *testing.T) {
 	})
 	jobs := newJobs(pool, config)
 	jobs.auth = service
+	channels := newChannels(pool, service, nil, config)
+	jobs.channels = channels
 	t.Cleanup(func() {
 		if err := jobs.close(context.Background()); err != nil {
 			t.Errorf("stop AuthKit-only host jobs: %v", err)
@@ -61,7 +64,7 @@ func TestBlogPostsIntegration(t *testing.T) {
 	if err := jobs.start(t.Context()); err != nil {
 		t.Fatalf("start AuthKit-only host jobs: %v", err)
 	}
-	fiberApp, err := newApp(pool, service, nil, config)
+	fiberApp, err := newApp(pool, service, nil, config, channels)
 	if err != nil {
 		t.Fatalf("mount AuthKit: %v", err)
 	}
@@ -114,15 +117,88 @@ func TestBlogPostsIntegration(t *testing.T) {
 	if err := service.grantAdmin(t.Context(), admin.id); err != nil {
 		t.Fatalf("grant AuthKit admin role: %v", err)
 	}
+	t.Run("channel collaboration and durable deletion", func(t *testing.T) {
+		// Reproduce a committed AuthKit group whose application-row write was
+		// interrupted. Only its owner may finish that application resource.
+		groupID, err := service.client.CreatePermissionGroup(t.Context(), authkit.CreatePermissionGroupRequest{Persona: channelPersona, InstanceSlug: "collaboration", DisplayName: "Collaborative publisher", OwnerSubjectID: alice.id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		blogTestRequest(t, app, http.MethodPost, "/api/channels", bob.token, map[string]any{"slug": "collaboration", "name": "Cannot adopt interrupted creation"}, http.StatusConflict)
+		raw := blogTestRequest(t, app, http.MethodPost, "/api/channels", alice.token, map[string]any{"slug": "collaboration", "name": "Collaborative publisher"}, http.StatusCreated)
+		var team channel
+		decodeBlogTestJSON(t, raw, &team)
+		if team.ID != groupID {
+			t.Fatal("retry changed the existing permission-group identity")
+		}
+		members := "/api/v1/channel/collaboration/members"
+		blogTestRequest(t, app, http.MethodDelete, members+"/"+alice.id, alice.token, nil, http.StatusConflict)
+		blogTestRequest(t, app, http.MethodPost, "/api/channels", bob.token, map[string]any{"slug": "collaboration", "name": "Do not adopt"}, http.StatusConflict)
+		assertSparseChannelFeed(t, app, alice, bob, team.ID)
+		blogTestRequest(t, app, http.MethodGet, "/api/channels/"+team.ID, bob.token, nil, http.StatusNotFound)
+		var invite struct {
+			Code string `json:"code"`
+		}
+		decodeBlogTestJSON(t, blogTestRequest(t, app, http.MethodPost, "/api/v1/channel/collaboration/invites/links", alice.token, map[string]any{"role": "editor"}, http.StatusCreated), &invite)
+		if invite.Code == "" {
+			t.Fatal("native AuthKit invite had no redeemable code")
+		}
+		blogTestRequest(t, app, http.MethodPost, "/api/v1/invites/redeem", bob.token, map[string]any{"code": invite.Code}, http.StatusOK)
+		blogTestRequest(t, app, http.MethodGet, "/api/channels/"+team.ID, bob.token, nil, http.StatusOK)
+		ownerPost := createBlogTestPost(t, app, alice.token, map[string]any{"channel_id": team.ID, "slug": "owner-authored", "title": "Owner draft", "body": "Team content"})
+		blogTestRequest(t, app, http.MethodPatch, blogTestPath(ownerPost.ID), bob.token, map[string]any{"title": "Editor revises owner content"}, http.StatusOK)
+		assertBlogPostAuthor(t, pool, ownerPost.ID, alice.id)
+		blogTestRequest(t, app, http.MethodDelete, blogTestPath(ownerPost.ID), bob.token, nil, http.StatusNoContent)
+		blogTestRequest(t, app, http.MethodPost, members, bob.token, map[string]any{"user_id": alice.id, "role": "editor"}, http.StatusForbidden)
+		post := createBlogTestPost(t, app, bob.token, map[string]any{"channel_id": team.ID, "slug": "coauthored", "title": "Editor draft", "body": "Private team body"})
+		if post.AuthorID != bob.id || post.ChannelID != team.ID {
+			t.Fatal("post lost channel ownership or creator attribution")
+		}
+		blogTestRequest(t, app, http.MethodGet, blogTestPath(post.ID), alice.token, nil, http.StatusOK)
+		blogTestRequest(t, app, http.MethodPatch, blogTestPath(post.ID), alice.token, map[string]any{"title": "Owner edit"}, http.StatusOK)
+		blogTestRequest(t, app, http.MethodPatch, blogTestPath(post.ID), bob.token, map[string]any{"title": "Editor edit"}, http.StatusOK)
+		blogTestRequest(t, app, http.MethodPatch, blogTestPath(post.ID), alice.token, map[string]any{"channel_id": alice.channelID}, http.StatusBadRequest)
+		blogTestRequest(t, app, http.MethodDelete, "/api/channels/"+team.ID, bob.token, nil, http.StatusNotFound)
+		blogTestRequest(t, app, http.MethodDelete, members+"/"+bob.id, alice.token, nil, http.StatusOK)
+		blogTestRequest(t, app, http.MethodGet, blogTestPath(post.ID), bob.token, nil, http.StatusNotFound)
+		blogTestRequest(t, app, http.MethodPatch, blogTestPath(post.ID), bob.token, map[string]any{"title": "Revoked author"}, http.StatusNotFound)
+		blogTestRequest(t, app, http.MethodDelete, blogTestPath(post.ID), bob.token, nil, http.StatusNotFound)
+		blogTestRequest(t, app, http.MethodPatch, blogTestPath(post.ID), admin.token, map[string]any{"title": "Platform moderation"}, http.StatusOK)
+		// Transfer ownership through AuthKit's native member API before removing the old owner.
+		blogTestRequest(t, app, http.MethodPost, members, alice.token, map[string]any{"user_id": bob.id, "role": "owner"}, http.StatusOK)
+		blogTestRequest(t, app, http.MethodDelete, members+"/"+alice.id, bob.token, nil, http.StatusOK)
+		blogTestRequest(t, app, http.MethodDelete, "/api/channels/"+team.ID, alice.token, nil, http.StatusNotFound)
+		blogTestRequest(t, app, http.MethodDelete, "/api/channels/"+team.ID, bob.token, nil, http.StatusAccepted)
+		deadline, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+		defer cancel()
+		for {
+			var exists bool
+			if err := pool.QueryRow(deadline, `SELECT EXISTS(SELECT 1 FROM demo.channels WHERE id=$1)`, team.ID).Scan(&exists); err != nil {
+				t.Fatal(err)
+			}
+			if !exists {
+				break
+			}
+			select {
+			case <-deadline.Done():
+				t.Fatal("durable channel cleanup did not complete")
+			case <-time.After(25 * time.Millisecond):
+			}
+		}
+		blogTestRequest(t, app, http.MethodGet, blogTestPath(post.ID), admin.token, nil, http.StatusNotFound)
+		if _, err := service.client.GroupInstanceByID(t.Context(), team.ID); err == nil {
+			t.Fatal("deleted channel retained its permission group")
+		}
+	})
 
 	private := createBlogTestPost(t, app, alice.token, map[string]any{
 		"slug": "alice-private", "title": "Private draft", "body": "Alice's private body",
-		"owner_id": bob.id,
+		"author_id": bob.id,
 	})
 	if private.Visibility != "private" {
 		t.Fatalf("omitted visibility = %q, want private", private.Visibility)
 	}
-	assertBlogPostOwner(t, pool, private.ID, alice.id)
+	assertBlogPostAuthor(t, pool, private.ID, alice.id)
 
 	public := createBlogTestPost(t, app, alice.token, map[string]any{
 		"slug": "alice-public", "title": "Public post", "body": "Alice's public body", "visibility": "public",
@@ -185,13 +261,13 @@ func TestBlogPostsIntegration(t *testing.T) {
 		// permission system rather than a role claim copied into a JWT.
 		blogTestRequest(t, app, http.MethodGet, blogTestPath(moderated.ID), admin.token, nil, http.StatusOK)
 		body := blogTestRequest(t, app, http.MethodPatch, blogTestPath(moderated.ID), admin.token,
-			map[string]any{"title": "Moderated title", "owner_id": admin.id}, http.StatusOK)
+			map[string]any{"title": "Moderated title", "author_id": admin.id}, http.StatusOK)
 		var edited blogPost
 		decodeBlogTestJSON(t, body, &edited)
 		if edited.Title != "Moderated title" {
 			t.Fatalf("admin edit returned title %q", edited.Title)
 		}
-		assertBlogPostOwner(t, pool, moderated.ID, alice.id)
+		assertBlogPostAuthor(t, pool, moderated.ID, alice.id)
 		if err := service.revokeAdmin(t.Context(), admin.id); err != nil {
 			t.Fatalf("revoke AuthKit admin role: %v", err)
 		}
@@ -205,14 +281,17 @@ func TestBlogPostsIntegration(t *testing.T) {
 		blogTestRequest(t, app, http.MethodDelete, blogTestPath(moderated.ID), admin.token, nil, http.StatusNoContent)
 		blogTestRequest(t, app, http.MethodGet, blogTestPath(moderated.ID), alice.token, nil, http.StatusNotFound)
 
+		blogTestRequest(t, app, http.MethodPost, "/api/v1/channel/moderator-channel/members", admin.token, map[string]any{"user_id": alice.id, "role": "owner"}, http.StatusOK)
 		if err := service.client.BanUser(t.Context(), admin.id, nil, nil, admin.id); err != nil {
 			t.Fatalf("ban moderator: %v", err)
 		}
-		// A valid token retains ordinary author access, but no elevated authority.
-		blogTestRequest(t, app, http.MethodGet, blogTestPath(private.ID), admin.token, nil, http.StatusNotFound)
+		// Role authority remains live, but banning does not invalidate an already-issued JWT.
+		blogTestRequest(t, app, http.MethodGet, blogTestPath(private.ID), admin.token, nil, http.StatusOK)
 		blogTestRequest(t, app, http.MethodPatch, blogTestPath(private.ID), admin.token,
-			map[string]any{"title": "Banned moderator edit"}, http.StatusNotFound)
-		blogTestRequest(t, app, http.MethodDelete, blogTestPath(private.ID), admin.token, nil, http.StatusNotFound)
+			map[string]any{"title": "Banned moderator edit"}, http.StatusOK)
+		lazyDelete := createBlogTestPost(t, app, alice.token, map[string]any{"channel_id": alice.channelID, "slug": "lazy-ban-delete", "title": "Delete during token lifetime", "body": "Still authorized"})
+		blogTestRequest(t, app, http.MethodDelete, blogTestPath(lazyDelete.ID), admin.token, nil, http.StatusNoContent)
+		blogTestRequest(t, app, http.MethodPost, "/api/v1/token", "", map[string]any{"grant_type": "refresh_token", "refresh_token": admin.refreshToken}, http.StatusUnauthorized)
 		own := createBlogTestPost(t, app, admin.token, map[string]any{
 			"slug": "moderator-own-draft", "title": "Own draft", "body": "Ordinary author access",
 		})
@@ -231,14 +310,14 @@ func TestBlogPostsIntegration(t *testing.T) {
 	blogTestRequest(t, app, http.MethodGet, blogTestPath(public.ID), "not-a-token", nil, http.StatusUnauthorized)
 
 	updatedBody := blogTestRequest(t, app, http.MethodPatch, blogTestPath(private.ID), alice.token, map[string]any{
-		"title": "Edited draft", "body": "Edited private body", "owner_id": bob.id,
+		"title": "Edited draft", "body": "Edited private body", "author_id": bob.id,
 	}, http.StatusOK)
 	var updated blogPost
 	decodeBlogTestJSON(t, updatedBody, &updated)
 	if updated.Title != "Edited draft" || updated.Body != "Edited private body" || updated.Visibility != "private" || updated.Slug != private.Slug {
 		t.Fatalf("partial update returned unexpected post: %+v", updated)
 	}
-	assertBlogPostOwner(t, pool, private.ID, alice.id)
+	assertBlogPostAuthor(t, pool, private.ID, alice.id)
 	blogTestRequest(t, app, http.MethodGet, blogTestPath(private.ID), bob.token, nil, http.StatusNotFound)
 
 	blogTestRequest(t, app, http.MethodPatch, blogTestPath(private.ID), alice.token, map[string]any{"visibility": "public"}, http.StatusOK)
@@ -253,6 +332,7 @@ func TestBlogPostsIntegration(t *testing.T) {
 	assertBlogPostIDs(t, app, bob.token, bobPublic.ID)
 
 	t.Run("account bans apply on refresh", func(t *testing.T) {
+		blogTestRequest(t, app, http.MethodPost, "/api/v1/channel/writerbob-channel/members", bob.token, map[string]any{"user_id": alice.id, "role": "owner"}, http.StatusOK)
 		if err := service.client.BanUser(t.Context(), bob.id, nil, nil, admin.id); err != nil {
 			t.Fatalf("ban user: %v", err)
 		}
@@ -330,6 +410,55 @@ type blogTestUser struct {
 	id           string
 	token        string
 	refreshToken string
+	channelID    string
+}
+
+func assertSparseChannelFeed(t *testing.T, app *blogTestServer, owner, outsider blogTestUser, channelID string) {
+	t.Helper()
+	visible := createBlogTestPost(t, app, owner.token, map[string]any{"channel_id": channelID, "slug": "sparse-visible", "title": "Visible after private candidates", "body": "Public content", "visibility": "public"})
+	ids := []int64{visible.ID}
+	for i := 0; i < 5; i++ {
+		post := createBlogTestPost(t, app, owner.token, map[string]any{"channel_id": channelID, "slug": fmt.Sprintf("sparse-private-%d", i), "title": "Private candidate", "body": "Never expose this"})
+		ids = append(ids, post.ID)
+	}
+	seen := map[int64]bool{}
+	cursor := ""
+	for page := 0; page < 3; page++ {
+		req, err := http.NewRequest(http.MethodGet, app.url+"/api/posts?limit=2&before="+cursor, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+outsider.token)
+		response, err := app.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var posts []blogPost
+		err = json.NewDecoder(response.Body).Decode(&posts)
+		response.Body.Close()
+		if err != nil || response.StatusCode != http.StatusOK {
+			t.Fatalf("sparse feed: status=%d err=%v", response.StatusCode, err)
+		}
+		if page < 2 && len(posts) != 0 {
+			t.Fatal("inaccessible private candidates leaked into feed")
+		}
+		for _, post := range posts {
+			if post.ID != visible.ID || !post.CanRead || seen[post.ID] {
+				t.Fatalf("unexpected sparse-page result: %+v", post)
+			}
+			seen[post.ID] = true
+		}
+		cursor = response.Header.Get("X-Next-Cursor")
+		if page < 2 && cursor == "" {
+			t.Fatal("empty candidate page lost its next cursor")
+		}
+	}
+	if len(seen) != 1 || cursor != "" {
+		t.Fatalf("sparse traversal did not reach exactly the public post: seen=%v cursor=%q", seen, cursor)
+	}
+	for _, id := range ids {
+		blogTestRequest(t, app, http.MethodDelete, blogTestPath(id), owner.token, nil, http.StatusNoContent)
+	}
 }
 
 func registerBlogTestUser(t *testing.T, app *blogTestServer, auth *appAuth, username string) blogTestUser {
@@ -370,11 +499,30 @@ func registerBlogTestUser(t *testing.T, app *blogTestServer, auth *appAuth, user
 		t.Fatalf("find registered user: %v", err)
 	}
 	user.id = registered.ID
+	created := blogTestRequest(t, app, http.MethodPost, "/api/channels", user.token, map[string]any{"slug": username + "-channel", "name": username + " publisher"}, http.StatusCreated)
+	var ch channel
+	decodeBlogTestJSON(t, created, &ch)
+	user.channelID = ch.ID
 	return user
 }
 
 func createBlogTestPost(t *testing.T, app *blogTestServer, token string, input map[string]any) blogPost {
 	t.Helper()
+	if _, ok := input["channel_id"]; !ok {
+		var groups struct {
+			Data []struct {
+				ID      string `json:"group_id"`
+				Persona string `json:"persona"`
+			} `json:"data"`
+		}
+		decodeBlogTestJSON(t, blogTestRequest(t, app, http.MethodGet, "/api/v1/me/groups", token, nil, http.StatusOK), &groups)
+		for _, group := range groups.Data {
+			if group.Persona == "channel" {
+				input["channel_id"] = group.ID
+				break
+			}
+		}
+	}
 	body := blogTestRequest(t, app, http.MethodPost, "/api/posts", token, input, http.StatusCreated)
 	var post blogPost
 	decodeBlogTestJSON(t, body, &post)
@@ -384,10 +532,10 @@ func createBlogTestPost(t *testing.T, app *blogTestServer, token string, input m
 	return post
 }
 
-func assertBlogPostOwner(t *testing.T, pool *pgxpool.Pool, postID int64, expected string) {
+func assertBlogPostAuthor(t *testing.T, pool *pgxpool.Pool, postID int64, expected string) {
 	t.Helper()
 	var owner string
-	if err := pool.QueryRow(t.Context(), "SELECT owner_id::text FROM "+blogPostsTable+" WHERE id = $1", postID).Scan(&owner); err != nil {
+	if err := pool.QueryRow(t.Context(), "SELECT author_id::text FROM "+blogPostsTable+" WHERE id = $1", postID).Scan(&owner); err != nil {
 		t.Fatalf("read post owner: %v", err)
 	}
 	if owner != expected {

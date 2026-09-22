@@ -13,9 +13,14 @@ import (
 )
 
 const (
-	postReadPermission   = "root:posts:read"
-	postEditPermission   = "root:posts:edit"
-	postDeletePermission = "root:posts:delete"
+	postReadPermission                      = "root:posts:read"
+	postEditPermission                      = "root:posts:edit"
+	postDeletePermission                    = "root:posts:delete"
+	channelPersona          authkit.Persona = "channel"
+	channelReadPermission   authkit.Perm    = "channel:posts:read"
+	channelCreatePermission authkit.Perm    = "channel:posts:create"
+	channelEditPermission   authkit.Perm    = "channel:posts:edit"
+	channelRemovePermission authkit.Perm    = "channel:posts:delete"
 )
 
 type appAuth struct {
@@ -35,7 +40,11 @@ func newAuth(ctx context.Context, config Config, pool *pgxpool.Pool) (*appAuth, 
 		RBAC: []embedded.PersonaDef{embedded.IntrinsicRootPersona(embedded.RoleDef{
 			Name:        "admin",
 			Permissions: []string{postReadPermission, postEditPermission, postDeletePermission},
-		})},
+		}), {
+			Name: channelPersona, Parent: embedded.RootPersona,
+			Catalog: []string{string(channelReadPermission), string(channelCreatePermission), string(channelEditPermission), string(channelRemovePermission)},
+			Roles:   []embedded.RoleDef{{Name: "editor", Permissions: []string{string(channelReadPermission), string(channelCreatePermission), string(channelEditPermission), string(channelRemovePermission), "channel:settings:read", "channel:members:read", "channel:roles:read"}}},
+		}},
 		Token: embedded.TokenConfig{
 			Issuer:              config.AuthIssuer,
 			IssuedAudiences:     []string{config.AuthAudience},

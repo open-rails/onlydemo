@@ -31,15 +31,20 @@ func (api *blogAPI) checkout(c fiber.Ctx) error {
 	// Later price edits create a new offer; this checkout retains these terms.
 	// Request JSON never selects a customer or price.
 	post, err := scanBlogPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+`
-        FROM `+api.table+` WHERE id=$1 AND visibility='private' AND price_cents IS NOT NULL`, id))
+        FROM `+api.table+` WHERE id=$1 AND visibility='private' AND price_cents IS NOT NULL
+        AND EXISTS(SELECT 1 FROM `+api.channels.table+` AS channel WHERE channel.id=channel_id AND channel.deleting_at IS NULL)`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, http.StatusNotFound, "post is not for sale")
 	}
 	if err != nil {
 		return databaseError(c, err)
 	}
-	if post.OwnerID == user.UserID {
-		return clientError(c, http.StatusConflict, "you already own this post")
+	member, err := api.channels.allowed(c.Context(), user.UserID, post.ChannelID, channelReadPermission)
+	if err != nil {
+		return clientError(c, http.StatusServiceUnavailable, "permission service is unavailable")
+	}
+	if member {
+		return clientError(c, http.StatusConflict, "you already have channel access to this post")
 	}
 	if post.ProductID == "" || post.PriceID == "" {
 		return billingUnavailable(c)

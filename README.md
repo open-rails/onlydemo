@@ -36,7 +36,7 @@ task stripe:listen
 Copy the displayed `whsec_...` value into `STRIPE_WEBHOOK_SECRET` in `.env`,
 then run `task run`. Keep the listener running. Restricted keys additionally
 need **Debugging Tools: Write** to use `stripe listen`. The webhook URL is
-`/billing/v1/merchants/openrails-demo/webhooks/stripe`.
+`/billing/v1/merchants/openrails-demo/webhooks/stripe/<STRIPE_ACCOUNT_ID>`.
 
 Open [localhost:3000](http://localhost:3000/) for a searchable route directory.
 It reads Fiber's live route table, including the configured native AuthKit and OpenRails
@@ -145,32 +145,46 @@ task admin:revoke USER_ID=<user-uuid>
 These operator commands use AuthKit's trusted `OperatorAssignGroupRole` and
 `OperatorUnassignGroupRole` client operations. Ordinary server startup
 does not restore revoked roles. The `admin` role is an AuthKit root permission
-group role granting `root:posts:read`, `root:posts:edit` and `root:posts:delete`.
+group role granting `root:posts:read`, `root:posts:edit`, `root:posts:delete` and
+`root:channels:delete`.
 The application checks those permissions through AuthKit on each request;
 there is no custom admin flag/table and no trust in token-carried role names.
 AuthKit's root owner also has these permissions through `root:*`.
 
 Admins may read, edit or delete any post through the same routes as authors.
-Ordinary users can edit/delete only their own posts. Writes use `Required` and
+Channel owners and editors manage their channel's posts. Writes use `Required` and
 require a local user; reads use `Optional`. Access tokens are verified without
-a per-request account-status lookup. Bans prevent token refresh, while issued
-tokens remain usable until their 15-minute expiry. `RequiredLive` is available
-for routes that explicitly need immediate account-status checks. Moderation
-permissions are still checked through AuthKit, so admin role revocation takes
-effect immediately. Using those elevated permissions also requires a live
-account: a ban immediately removes moderation access without adding an account
-lookup for ordinary authors. This is based on permissions, not a special role
-name.
+a per-request account-status lookup, including for moderation. Bans prevent new
+login and token refresh, while issued tokens remain usable until their 15-minute
+expiry. `RequiredLive` is available when an application explicitly opts into
+immediate account-status checks. Group and moderation permissions are checked
+through AuthKit on each request, so role revocation takes effect immediately.
 
 ## Posts and purchases
 
 The application is one OpenRails merchant with one Stripe collection account.
-Each author has an OpenRails catalog bound to their authenticated subject. Author
-writes use `client.ForCatalogOwner(authorID)`; a separately authorized moderator uses the merchant
-client while preserving the author's catalog ownership. OpenRails enforces these
-catalog boundaries; the demo retains content access checks and product/price
-references. Creator payouts and Stripe Connect are separate from catalog ownership
-and are not configured by this demo.
+Each collaborative channel is an AuthKit permission group whose immutable ID
+owns an OpenRails catalog. AuthKit owns its name, slug, owners, editors, invitations
+and permissions. The app stores channel lifecycle state and content; it has no
+parallel ACL or owner flag. `author_id` records who created a post, while
+`channel_id` determines authority and catalog scope.
+
+Create a channel with `POST /api/channels` and `{"slug":"our-channel","name":"Our channel"}`.
+The authenticated creator becomes its owner. `GET /api/channels/:id` reads it;
+AuthKit's native `/api/v1/channel/:slug` routes manage members, roles, invitations
+and settings. Native channel creation/deletion is disabled so it cannot bypass
+the app's coordinated lifecycle. A channel must retain a valid owner; transfer
+ownership or delete it before deleting its owner's account.
+
+`DELETE /api/channels/:id` returns 202 after atomically marking deletion and
+enqueuing a River job. That job archives catalog products, removes posts, and
+removes the AuthKit group and application metadata. Retries are durable; payment
+history and purchased-access records remain in OpenRails. No automatic refund
+or provider subscription cancellation is performed.
+
+Channel writes use `client.ForCatalogOwner(channelID)` after a live AuthKit
+permission check. Root moderation uses the merchant client while preserving the
+channel catalog. Creator payouts and Stripe Connect are separate features.
 
 Catalog/provider work runs outside blog database transactions so a shared pool
 cannot deadlock waiting for itself. Post updates use an atomic revision check;
@@ -182,18 +196,31 @@ rejected concurrent edit cannot leave its title in billing.
 
 | Method | Route | Behavior |
 | --- | --- | --- |
+| POST | `/api/channels` | Create an AuthKit-owned collaborative channel |
+| GET | `/api/channels/:id` | Read an accessible channel |
+| DELETE | `/api/channels/:id` | Accept owner/admin deletion and queue durable cleanup |
 | GET | `/api/posts` | One page of public posts, sale previews, and accessible private posts (`limit=1..100`, default 50) |
 | GET | `/api/posts/:id` | Full content if allowed; a sale preview otherwise |
-| POST | `/api/posts` | Create a post owned by the authenticated user |
-| PATCH | `/api/posts/:id` | Author or admin edits, including price/listing changes |
-| DELETE | `/api/posts/:id` | Author or admin deletes |
+| POST | `/api/posts` | Create a post in an authorized channel; record the author |
+| PATCH | `/api/posts/:id` | Channel owner/editor or root moderator edits |
+| DELETE | `/api/posts/:id` | Channel owner/editor or root moderator deletes |
 | POST | `/api/posts/:id/checkout` | Start one-time Stripe Checkout; `Idempotency-Key` required |
 | GET | `/api/checkouts/:id` | Read only the authenticated buyer's checkout |
+
+OpenRails also exposes its native customer billing group under `/billing/v1/me`.
+Purchased products use cursor pagination; payments, subscriptions and invoices
+have bounded pages. The group includes saved payment methods, payment recovery,
+subscription cancellation/resumption and existing-agreement management. The
+verified AuthKit user and configured merchant determine all ownership; request
+fields cannot select another customer. New checkout and plan changes remain on
+the application's selected-offer path. `/billing/v1/capabilities` describes the
+mounted route groups and provider-specific `features`.
 
 Create a paid post:
 
 ```json
 {
+  "channel_id": "<channel-group-uuid>",
   "slug": "my-paid-article",
   "title": "My paid article",
   "body": "The complete article is visible after purchase.",
@@ -205,10 +232,11 @@ Create a paid post:
 Amounts are integer USD cents: `499` means **$4.99**. This demo accepts
 50–99,999,999 cents. A public post cannot have a price. Omit `price_cents` for
 an unlisted private post; PATCH with `price_cents: 0` removes a sale listing.
-PATCH omission leaves the price unchanged. Ownership always comes from AuthKit.
+PATCH omission leaves the price unchanged. `channel_id` is required on creation
+and cannot be changed by PATCH. Authority always comes from AuthKit.
 
-Sale previews include title, owner, price and `can_read: false`, but omit the
-body. Unlisted private posts return 404 to unauthorized viewers. Owners and
+Sale previews include title, channel, author, price and `can_read: false`, but omit the
+body. Unlisted private posts return 404 to unauthorized viewers. Channel readers and
 admins can read them; buyers can read purchased posts even after repricing or
 delisting. A purchase does not grant editing rights. Deleting the post removes
 the content, while OpenRails retains its billing records.
@@ -234,7 +262,7 @@ unpaid, expired or forged events grant no access. Repeated delivery does not
 duplicate the grant. Prices do not renew and access has no expiration; refunds
 and disputes remain subject to OpenRails' billing/access policy.
 
-This demo uses one Stripe storefront. Authors choose prices; separate seller
+This demo uses one Stripe storefront. Authorized channel publishers choose prices; separate seller
 accounts, commissions and payouts are outside this example.
 
 Direct admin commands use the same application environment:

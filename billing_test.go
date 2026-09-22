@@ -25,7 +25,7 @@ func TestBillingRejectsUnsafeConfigurationBeforeConnecting(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := valid
 			tc.mutate(&cfg)
-			billing, err := newBilling(context.Background(), cfg, nil)
+			billing, err := newBilling(context.Background(), cfg, nil, nil)
 			if err == nil || billing != nil {
 				t.Fatalf("unsafe configuration accepted: billing=%v error=%v", billing, err)
 			}

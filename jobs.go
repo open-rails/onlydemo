@@ -19,11 +19,12 @@ import (
 // This app owns one River fleet shared by AuthKit and OpenRails. Every replica
 // registers both libraries' workers and schedules before constructing River.
 type appJobs struct {
-	pool    *pgxpool.Pool
-	schema  string
-	auth    *appAuth
-	billing *billingService
-	client  *river.Client[pgx.Tx]
+	pool     *pgxpool.Pool
+	schema   string
+	auth     *appAuth
+	billing  *billingService
+	channels *channelAPI
+	client   *river.Client[pgx.Tx]
 }
 
 func newJobs(pool *pgxpool.Pool, cfg Config) *appJobs {
@@ -69,6 +70,9 @@ func (j *appJobs) compose(ctx context.Context) error {
 		return errors.New("AuthKit must be constructed before composing jobs")
 	}
 	contributions := []riverkit.Contribution{j.auth.runtime.RiverJobs()}
+	if j.channels != nil {
+		contributions = append(contributions, j.channels.RiverJobs())
+	}
 	queues := map[string]river.QueueConfig{}
 	if j.billing != nil {
 		contributions = append(contributions, j.billing.runtime.RiverJobs())

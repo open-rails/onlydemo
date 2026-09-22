@@ -133,7 +133,7 @@ func TestAllPublicCLICommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer service.Close()
-	app, err := newApp(pool, service, nil, cfg)
+	app, err := newApp(pool, service, nil, cfg, newChannels(pool, service, nil, cfg))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestBillingConstructorPreservesHostPoolOnFailure(t *testing.T) {
 	}
 	canceled, cancel := context.WithCancel(t.Context())
 	cancel()
-	billing, err := newBilling(canceled, cfg, pool, &blogTestStripe{})
+	billing, err := newBilling(canceled, cfg, pool, nil, &blogTestStripe{})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected constructor failure: %v", err)
 	}
