@@ -9,8 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	riverkit "github.com/open-rails/helpers/river"
 	openrailsembed "github.com/open-rails/openrails/embed"
-	"github.com/open-rails/riverkit"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"

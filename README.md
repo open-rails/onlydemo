@@ -142,7 +142,7 @@ task admin:grant USER_ID=<user-uuid>
 task admin:revoke USER_ID=<user-uuid>
 ```
 
-These operator commands use AuthKit's bootstrap API. Ordinary server startup
+These operator commands use AuthKit's trusted client operations. Ordinary server startup
 does not restore revoked roles. The `admin` role is an AuthKit root permission
 group role granting `root:posts:read`, `root:posts:edit` and `root:posts:delete`.
 The application checks those permissions through AuthKit on each request;
@@ -165,7 +165,7 @@ name.
 
 The application is one OpenRails merchant with one Stripe collection account.
 Each author has an OpenRails catalog bound to their authenticated subject. Author
-writes use `CatalogClient`; a separately authorized moderator uses the merchant
+writes use `client.ForCatalogOwner(authorID)`; a separately authorized moderator uses the merchant
 client while preserving the author's catalog ownership. OpenRails enforces these
 catalog boundaries; the demo retains content access checks and product/price
 references. Creator payouts and Stripe Connect are separate from catalog ownership
@@ -181,7 +181,7 @@ rejected concurrent edit cannot leave its title in billing.
 
 | Method | Route | Behavior |
 | --- | --- | --- |
-| GET | `/api/posts` | Public posts, sale previews, and the viewer's accessible private posts |
+| GET | `/api/posts` | One page of public posts, sale previews, and accessible private posts (`limit=1..100`, default 50) |
 | GET | `/api/posts/:id` | Full content if allowed; a sale preview otherwise |
 | POST | `/api/posts` | Create a post owned by the authenticated user |
 | PATCH | `/api/posts/:id` | Author or admin edits, including price/listing changes |
@@ -267,3 +267,5 @@ Stripe HTTP transport seam. Coverage also includes owner/buyer isolation, hidden
 bodies, server-selected checkout terms, signed payment confirmation, replay,
 repricing and delisting. CI never contacts Stripe. A real sandbox checkout additionally
 requires account credentials, a running webhook listener and browser payment.
+
+The feed checks purchase access only for products in the selected page. When `X-Next-Cursor` is present, request the next page with `?before=<cursor>`; a page may contain fewer visible posts after private posts are filtered. Checkout return URLs are navigation only. The signed Stripe webhook establishes access.

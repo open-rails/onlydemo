@@ -96,9 +96,7 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 			t.Errorf("stop host jobs: %v", err)
 		}
 	})
-	if err := billing.initialize(t.Context(), config); err != nil {
-		t.Fatalf("initialize billing: %v", err)
-	}
+
 	jobs.billing = billing
 	if err := jobs.compose(t.Context()); err != nil {
 		t.Fatalf("compose jobs: %v", err)
@@ -158,8 +156,8 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 	if retried.ID != checkout.ID || stripe.latestSession(t).id != first.id {
 		t.Fatal("repeated checkout key created a second payment attempt")
 	}
-	blogTestRequest(t, app, http.MethodGet, "/api/checkouts/"+checkout.ID.String(), charlie.token, nil, http.StatusNotFound)
-	blogTestRequest(t, app, http.MethodGet, "/api/checkouts/"+checkout.ID.String(), bob.token, nil, http.StatusOK)
+	blogTestRequest(t, app, http.MethodGet, "/api/checkouts/"+checkout.ID, charlie.token, nil, http.StatusNotFound)
+	blogTestRequest(t, app, http.MethodGet, "/api/checkouts/"+checkout.ID, bob.token, nil, http.StatusOK)
 	// Redirect query strings are presentation only; visiting either grants nothing.
 	blogTestRequest(t, app, http.MethodGet, "/?checkout=success", bob.token, nil, http.StatusOK)
 	blogTestRequest(t, app, http.MethodGet, "/?checkout=canceled", bob.token, nil, http.StatusOK)
@@ -191,14 +189,11 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 
 	// Replayed Stripe delivery is idempotent. Grant terms remain permanent.
 	blogTestStripeWebhook(t, app, settled, blogTestStripeWebhookSecret, http.StatusOK)
-	buyerID, err := openrails.ParseCustomerID(bob.id)
-	if err != nil {
-		t.Fatal(err)
+	page, err := billing.client.ProductAccess.List(t.Context(), &openrails.ProductAccessListParams{CustomerID: bob.id})
+	if err != nil || len(page.Data) != 1 || page.Data[0].EndsAt != nil {
+		t.Fatalf("expected one permanent purchase grant: page=%+v, err=%v", page, err)
 	}
-	grants, err := billing.client.ListProductAccess(t.Context(), buyerID)
-	if err != nil || len(grants) != 1 || grants[0].EndsAt != nil {
-		t.Fatalf("expected one permanent purchase grant: grants=%+v, err=%v", grants, err)
-	}
+
 	for _, price := range []int{799, 0} {
 		blogTestRequest(t, app, http.MethodPatch, blogTestPath(paid.ID), alice.token, map[string]any{"price_cents": price}, http.StatusOK)
 		assertBlogTestReadable(t, app, paid, bob.token, true)
@@ -220,7 +215,7 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 		// A buyer is also an independent author. Supplied owner/catalog fields
 		// cannot move their new product into the original seller's catalog.
 		alicePost := blogTestStoredPost(t, pool, paid.ID, table)
-		aliceClient, err := billing.runtime.CatalogClient(alice.id)
+		aliceClient, err := billing.client.ForCatalogOwner(alice.id)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -237,7 +232,7 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 		if bobPost.OwnerID != bob.id {
 			t.Fatal("request fields changed the authenticated post owner")
 		}
-		bobClient, err := billing.runtime.CatalogClient(bob.id)
+		bobClient, err := billing.client.ForCatalogOwner(bob.id)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -248,15 +243,8 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 		if aliceCatalog.ID == bobCatalog.ID || bobCatalog.OwnerSubject == nil || *bobCatalog.OwnerSubject != bob.id {
 			t.Fatal("authors must have distinct OpenRails-owned catalogs")
 		}
-		aliceProduct, err := openrails.ParseProductID(alicePost.ProductID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		bobProduct, err := openrails.ParseProductID(bobPost.ProductID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := bobClient.GetProduct(t.Context(), aliceProduct); !errors.Is(err, openrails.ErrNotFound) {
+		aliceProduct, bobProduct := alicePost.ProductID, bobPost.ProductID
+		if _, err := bobClient.Products.Retrieve(t.Context(), aliceProduct); !errors.Is(err, openrails.ErrNotFound) {
 			t.Fatalf("another author could address the seller's product: %v", err)
 		}
 		if _, _, err := billing.EnsurePostOffer(t.Context(), bob.id, alicePost.BillingKey, "Foreign author", 999); err == nil {
@@ -276,11 +264,11 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 		blogTestRequest(t, app, http.MethodPatch, blogTestPath(otherPost.ID), moderator.token,
 			map[string]any{"price_cents": 1299, "title": "Moderated title", "owner_id": moderator.id}, http.StatusOK)
 		after := blogTestStoredPost(t, pool, otherPost.ID, table)
-		product, err := bobClient.GetProduct(t.Context(), bobProduct)
+		product, err := bobClient.Products.Retrieve(t.Context(), bobProduct)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if after.Title != "Moderated title" || after.PriceCents == nil || *after.PriceCents != 1299 || after.OwnerID != bob.id || after.ProductID != bobPost.ProductID || product.CatalogID != bobCatalog.ID || product.DisplayName != bobPost.Title {
+		if after.Title != "Moderated title" || after.PriceCents == nil || *after.PriceCents != 1299 || after.OwnerID != bob.id || after.ProductID != bobPost.ProductID || product.CatalogID != bobCatalog.ID.String() || product.DisplayName != bobPost.Title {
 			t.Fatal("moderator edit failed to preserve the product owner/title snapshot while updating the post and price")
 		}
 		if err := service.revokeAdmin(t.Context(), moderator.id); err != nil {
@@ -310,11 +298,8 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 	})
 	t.Run("concurrent content edit survives completed billing work", func(t *testing.T) {
 		before := blogTestStoredPost(t, pool, paid.ID, table)
-		productID, err := openrails.ParseProductID(before.ProductID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		productBefore, err := billing.client.GetProduct(t.Context(), productID)
+		productID := before.ProductID
+		productBefore, err := billing.client.Products.Retrieve(t.Context(), productID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -338,7 +323,7 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 		if after.Title != "Concurrent content edit" || after.PriceCents != nil || after.PriceID != before.PriceID || after.ProductID != before.ProductID {
 			t.Fatal("a stale pricing edit overwrote the committed content revision")
 		}
-		productAfter, err := billing.client.GetProduct(t.Context(), productID)
+		productAfter, err := billing.client.Products.Retrieve(t.Context(), productID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -356,6 +341,57 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 	if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{schema, "merchant_secrets"}.Sanitize()).Scan(&secrets); err != nil || secrets != 0 {
 		t.Fatalf("host provider credentials were persisted: rows=%d err=%v", secrets, err)
 	}
+	t.Run("feed checks one bounded page", func(t *testing.T) {
+		for i := 0; i < 4; i++ {
+			createBlogTestPost(t, app, alice.token, map[string]any{"slug": fmt.Sprintf("page-%d", i), "title": "Paged offer", "body": "Purchased content", "visibility": "private", "price_cents": 99})
+		}
+		checked := make(chan []string, 2)
+		observer := postAccessCallbackBilling{postBilling: billing, check: func(ids []string) { checked <- append([]string(nil), ids...) }}
+		fiberApp, err := newApp(pool, service, observer, config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pagedApp := newBlogTestServer(t, fiberApp)
+		cursor := ""
+		seen := map[int64]bool{}
+		for range 2 {
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, pagedApp.url+"/api/posts?limit=2&before="+cursor, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Authorization", "Bearer "+bob.token)
+			resp, err := pagedApp.client.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var page []blogPost
+			err = json.NewDecoder(resp.Body).Decode(&page)
+			resp.Body.Close()
+			if err != nil || resp.StatusCode != http.StatusOK || len(page) != 2 {
+				t.Fatalf("page failed: status=%d posts=%d error=%v", resp.StatusCode, len(page), err)
+			}
+			for _, post := range page {
+				if seen[post.ID] || post.CanRead || post.Body != "" {
+					t.Fatal("feed repeated a row or exposed purchased content")
+				}
+				seen[post.ID] = true
+			}
+			select {
+			case ids := <-checked:
+				if len(ids) != 2 {
+					t.Fatalf("access checked %d products for a 2-row page", len(ids))
+				}
+			default:
+				t.Fatal("feed did not perform a bounded batch access check")
+			}
+			cursor = resp.Header.Get("X-Next-Cursor")
+			if cursor == "" {
+				t.Fatal("missing next-page cursor")
+			}
+		}
+		blogTestRequest(t, pagedApp, http.MethodGet, "/api/posts?limit=101", bob.token, nil, http.StatusBadRequest)
+		blogTestRequest(t, pagedApp, http.MethodGet, "/api/posts?before=invalid", bob.token, nil, http.StatusBadRequest)
+	})
 	// The shared leader must schedule both libraries, using one complete config.
 	jobCtx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
@@ -661,4 +697,14 @@ func assertAllPublicStorage(t *testing.T, pool *pgxpool.Pool) {
 	if err := pool.QueryRow(t.Context(), "SHOW search_path").Scan(&searchPath); err != nil || searchPath != `"$user", public` {
 		t.Fatalf("shared pool search_path changed: %q %v", searchPath, err)
 	}
+}
+
+type postAccessCallbackBilling struct {
+	postBilling
+	check func([]string)
+}
+
+func (b postAccessCallbackBilling) CheckPostAccess(ctx context.Context, userID string, productIDs []string) (map[string]bool, error) {
+	b.check(productIDs)
+	return b.postBilling.CheckPostAccess(ctx, userID, productIDs)
 }

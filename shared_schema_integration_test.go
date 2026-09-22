@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,7 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit/embedded"
 	openrailsembed "github.com/open-rails/openrails/embed"
-	"github.com/open-rails/riverkit"
 )
 
 func TestAllPublicInitializerOrderAndConcurrentReplay(t *testing.T) {
@@ -156,30 +154,24 @@ func TestAllPublicCLICommands(t *testing.T) {
 	assertAllPublicStorage(t, pool)
 }
 
-func TestBillingCallerClosesAfterInitializationFailure(t *testing.T) {
+func TestBillingConstructorPreservesHostPoolOnFailure(t *testing.T) {
 	admin := newBlogTestDatabase(t)
 	pool, dsn := newBlogTestOwnerPool(t, admin, 1)
 	cfg := Config{DatabaseURL: dsn, PublicURL: "http://localhost:3000", AppSchema: "public", AuthSchema: "public", BillingSchema: "public", RiverSchema: "public", StripeSecretKey: "sk_test_cleanup", StripeAccountID: "acct_cleanup", StripeWebhookSecret: "whsec_cleanup"}
 	if err := initializeDatabase(t.Context(), cfg, pool); err != nil {
 		t.Fatal(err)
 	}
-	var billing *billingService
-	err := func() error {
-		var err error
-		billing, err = newBilling(t.Context(), cfg, pool, &blogTestStripe{})
-		if err != nil {
-			return err
-		}
-		defer billing.Close(context.Background())
-		canceled, cancel := context.WithCancel(t.Context())
-		cancel()
-		return billing.initialize(canceled, cfg)
-	}()
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+	billing, err := newBilling(canceled, cfg, pool, &blogTestStripe{})
 	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("expected initialization failure: %v", err)
+		t.Fatalf("expected constructor failure: %v", err)
 	}
-	if _, err := riverkit.New(t.Context(), pool, nil, billing.runtime.RiverJobs()); err == nil || !strings.Contains(err.Error(), "closed") {
-		t.Fatalf("failed initialization runtime remained open: %v", err)
+	if billing != nil {
+		t.Fatal("failed constructor returned a runtime")
+	}
+	if err := pool.Ping(t.Context()); err != nil {
+		t.Fatalf("constructor closed borrowed pool: %v", err)
 	}
 	var queued int
 	if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM public.river_job").Scan(&queued); err != nil || queued != 0 {

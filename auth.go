@@ -31,6 +31,7 @@ func newAuth(ctx context.Context, config Config, pool *pgxpool.Pool) (*appAuth, 
 	ownership := embedded.RiverFromHost()
 	runtime, err := embedded.New(embedded.Config{
 		Schema: strings.TrimSpace(config.AuthSchema),
+		HTTP:   authhttp.Config{DirectPeerIP: true},
 		RBAC: []embedded.PersonaDef{embedded.IntrinsicRootPersona(embedded.RoleDef{
 			Name:        "admin",
 			Permissions: []string{postReadPermission, postEditPermission, postDeletePermission},
@@ -58,10 +59,6 @@ func newAuth(ctx context.Context, config Config, pool *pgxpool.Pool) (*appAuth, 
 	if err != nil {
 		return nil, err
 	}
-	if err := runtime.ConfigureHTTP(authhttp.Config{DirectPeerIP: true}); err != nil {
-		runtime.Close()
-		return nil, err
-	}
 	return &appAuth{runtime: runtime, client: runtime.Client()}, nil
 }
 
@@ -79,7 +76,7 @@ func (a *appAuth) grantAdmin(ctx context.Context, userID string) error {
 	if user == nil {
 		return errors.New("admin user does not exist; register the user first")
 	}
-	return a.runtime.Genesis().AssignRoleBySlug(ctx, userID, "admin")
+	return a.client.AdminAssignGroupRole(ctx, authkit.RootGroup(), authkit.UserSubject(userID), authkit.Role("admin"))
 }
 
 // revokeAdmin is the matching explicit operator command; ordinary requests
@@ -89,5 +86,5 @@ func (a *appAuth) revokeAdmin(ctx context.Context, userID string) error {
 	if userID == "" {
 		return errors.New("a registered user ID is required")
 	}
-	return a.runtime.Genesis().RemoveRoleBySlug(ctx, userID, "admin")
+	return a.client.AdminUnassignGroupRole(ctx, authkit.RootGroup(), authkit.UserSubject(userID), authkit.Role("admin"))
 }

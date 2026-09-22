@@ -88,9 +88,7 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 	var postsBilling postBilling
 	if billing != nil {
 		defer billing.Close(context.Background())
-		if err := billing.initialize(ctx, config); err != nil {
-			return fmt.Errorf("initialize OpenRails: %w", err)
-		}
+
 		jobs.billing = billing
 		postsBilling = billing
 	} else {

@@ -51,46 +51,80 @@ type blogPostInput struct {
 const postColumns = `id, owner_id::text, billing_key::text, slug, title, body, visibility, price_cents,
 	COALESCE(openrails_product_id, ''), COALESCE(openrails_price_id, ''), created_at, updated_at`
 
+// list returns one bounded page. Access checks cover only that page's products;
+// a buyer's complete purchase history is never loaded to render the feed.
 func (api *blogAPI) list(c fiber.Ctx) error {
 	userID, admin, err := api.readAccess(c)
 	if err != nil {
 		return err
 	}
+	limit := 50
+	if raw := c.Query("limit"); raw != "" {
+		limit, err = strconv.Atoi(raw)
+		if err != nil || limit < 1 || limit > 100 {
+			return clientError(c, http.StatusBadRequest, "limit must be between 1 and 100")
+		}
+	}
+	var before int64
+	if raw := c.Query("before"); raw != "" {
+		before, err = strconv.ParseInt(raw, 10, 64)
+		if err != nil || before < 1 {
+			return clientError(c, http.StatusBadRequest, "invalid post cursor")
+		}
+	}
+	rows, err := api.pool.Query(c.Context(), `SELECT `+postColumns+` FROM `+api.table+`
+  WHERE (visibility = 'public' OR owner_id::text = $1 OR price_cents IS NOT NULL
+   OR ($1 <> '' AND openrails_product_id IS NOT NULL) OR $2)
+   AND ($3::bigint = 0 OR id < $3)
+  ORDER BY id DESC LIMIT $4`, userID, admin, before, limit+1)
+	if err != nil {
+		return databaseError(c, err)
+	}
+	posts := make([]blogPost, 0, limit+1)
+	for rows.Next() {
+		post, scanErr := scanBlogPost(rows)
+		if scanErr != nil {
+			rows.Close()
+			return databaseError(c, scanErr)
+		}
+		posts = append(posts, post)
+	}
+	rowsErr := rows.Err()
+	rows.Close() // Release the host connection before OpenRails borrows it.
+	if rowsErr != nil {
+		return databaseError(c, rowsErr)
+	}
+	if len(posts) > limit {
+		posts = posts[:limit]
+		c.Set("X-Next-Cursor", strconv.FormatInt(posts[len(posts)-1].ID, 10))
+	}
+	products := make([]string, 0, len(posts))
+	for _, post := range posts {
+		if userID != "" && !admin && post.OwnerID != userID && post.Visibility != "public" && post.ProductID != "" {
+			products = append(products, post.ProductID)
+		}
+	}
 	access := map[string]bool{}
-	if userID != "" && api.billing != nil {
-		access, err = api.billing.ListProductAccess(c.Context(), userID)
+	if len(products) != 0 {
+		if api.billing == nil {
+			return billingUnavailable(c)
+		}
+		access, err = api.billing.CheckPostAccess(c.Context(), userID, products)
 		if err != nil {
 			return billingUnavailable(c)
 		}
 	}
-	products := make([]string, 0, len(access))
-	for product, allowed := range access {
-		if allowed {
-			products = append(products, product)
+	visible := make([]blogPost, 0, len(posts))
+	for _, post := range posts {
+		readable := post.Visibility == "public" || post.OwnerID == userID || admin || access[post.ProductID]
+		if !readable && post.PriceCents == nil {
+			continue
 		}
-	}
-	rows, err := api.pool.Query(c.Context(), `SELECT `+postColumns+` FROM `+api.table+`
-		WHERE visibility = 'public' OR owner_id::text = $1 OR price_cents IS NOT NULL
-			OR openrails_product_id = ANY($2::text[]) OR $3
-		ORDER BY created_at DESC`, userID, products, admin)
-	if err != nil {
-		return databaseError(c, err)
-	}
-	defer rows.Close()
-	posts := make([]blogPost, 0)
-	for rows.Next() {
-		post, err := scanBlogPost(rows)
-		if err != nil {
-			return databaseError(c, err)
-		}
-		post.setReadable(post.Visibility == "public" || post.OwnerID == userID || admin || access[post.ProductID])
-		posts = append(posts, post)
-	}
-	if err := rows.Err(); err != nil {
-		return databaseError(c, err)
+		post.setReadable(readable)
+		visible = append(visible, post)
 	}
 	c.Set("Cache-Control", "no-store")
-	return c.JSON(posts)
+	return c.JSON(visible)
 }
 
 func (api *blogAPI) get(c fiber.Ctx) error {
@@ -279,9 +313,11 @@ func (api *blogAPI) canModerate(c fiber.Ctx, userID, permission string) (bool, e
 	if err != nil || !allowed {
 		return false, err
 	}
-	claims, _ := authkitfiber.Claims(c)
-	live, _, err := api.auth.runtime.Verifier().IsLive(c.Context(), claims)
-	return live, err
+	live, err := api.auth.client.UserLivenessByIDs(c.Context(), []string{userID})
+	if err != nil {
+		return false, err
+	}
+	return live[userID].Allowed, nil
 }
 
 func (api *blogAPI) readAccess(c fiber.Ctx) (string, bool, error) {

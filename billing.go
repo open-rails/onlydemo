@@ -30,7 +30,7 @@ type postBilling interface {
 	EnsurePostOffer(context.Context, string, string, string, int64) (string, string, error)
 	EnsurePostOfferAsAdmin(context.Context, string, string, string, int64) (string, string, error)
 	HasPostAccess(context.Context, string, string) (bool, error)
-	ListProductAccess(context.Context, string) (map[string]bool, error)
+	CheckPostAccess(context.Context, string, []string) (map[string]bool, error)
 	CreateCheckout(context.Context, string, string, string, string) (*openrails.CheckoutSession, error)
 	GetCheckout(context.Context, string, string) (*openrails.CheckoutSession, error)
 }
@@ -73,6 +73,15 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, transport .
 	}
 	opts := openrailsembed.Options{
 		HTTP: &openrailsembed.HTTPConfig{},
+		Merchant: &openrailsembed.MerchantDeclaration{Slug: billingMerchantSlug, Config: openrailsembed.MerchantConfig{
+			DisplayName: "OpenRails Blog Demo",
+			PSPs: map[string]openrailsembed.PSPConfig{"stripe": {"stripe": {
+				AccountID: cfg.StripeAccountID,
+				Secrets: map[string]string{
+					"secret_key":             cfg.StripeSecretKey,
+					"webhook_signing_secret": cfg.StripeWebhookSecret,
+				},
+			}}}}},
 		Config: &openrailsconfig.Config{
 			Env:                             "development",
 			TestMode:                        openrailsconfig.CredentialPostureSandbox,
@@ -94,32 +103,12 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, transport .
 	if err != nil {
 		return nil, fmt.Errorf("start OpenRails: %w", err)
 	}
-	return &billingService{runtime: runtime, publicURL: strings.TrimRight(cfg.PublicURL, "/")}, nil
-}
-
-// The caller defers Close immediately after construction, before this fallible
-// configuration. The same defer covers initialization failure and normal shutdown.
-func (billing *billingService) initialize(ctx context.Context, cfg Config) error {
-	runtime := billing.runtime
-	_, err := runtime.UpsertMerchantConfig(ctx, billingMerchantSlug, openrailsembed.MerchantConfig{
-		DisplayName: "OpenRails Blog Demo",
-		PSPs: map[string]openrailsembed.PSPConfig{"stripe": {"stripe": {
-			AccountID: cfg.StripeAccountID,
-			Secrets: map[string]string{
-				"secret_key":             cfg.StripeSecretKey,
-				"webhook_signing_secret": cfg.StripeWebhookSecret,
-			},
-		}}},
-	})
+	client, err := runtime.Client()
 	if err != nil {
-		return fmt.Errorf("configure billing merchant: %w", err)
+		_ = runtime.Close(context.Background())
+		return nil, err
 	}
-	billing.client, err = runtime.Client()
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return &billingService{runtime: runtime, client: client, publicURL: strings.TrimRight(cfg.PublicURL, "/")}, nil
 }
 
 func (b *billingService) Close(ctx context.Context) error {
@@ -133,15 +122,11 @@ func (b *billingService) Ready(ctx context.Context) error {
 // Author authority comes from the authenticated caller, independently of the
 // owner recorded on an existing post.
 func (b *billingService) EnsurePostOffer(ctx context.Context, authorID, billingKey, title string, priceCents int64) (string, string, error) {
-	client, err := b.runtime.CatalogClient(authorID)
+	client, err := b.client.ForCatalogOwner(authorID)
 	if err != nil {
 		return "", "", err
 	}
-	catalog, err := client.EnsureOwnCatalog(ctx)
-	if err != nil {
-		return "", "", err
-	}
-	return ensurePostOffer(ctx, client, catalog.ID, nil, billingKey, title, priceCents)
+	return ensurePostOffer(ctx, client, "", nil, billingKey, title, priceCents)
 }
 
 // The blog handler calls this path only after AuthKit grants moderation access.
@@ -151,10 +136,10 @@ func (b *billingService) EnsurePostOfferAsAdmin(ctx context.Context, ownerID, bi
 	if err != nil {
 		return "", "", err
 	}
-	return ensurePostOffer(ctx, b.client, catalog.ID, []string{"stripe"}, billingKey, title, priceCents)
+	return ensurePostOffer(ctx, b.client, catalog.ID.String(), []string{"stripe"}, billingKey, title, priceCents)
 }
 
-func ensurePostOffer(ctx context.Context, client *openrails.Client, catalogID openrails.CatalogID, providers []string, billingKey, title string, priceCents int64) (string, string, error) {
+func ensurePostOffer(ctx context.Context, client *openrails.Client, catalogID string, providers []string, billingKey, title string, priceCents int64) (string, string, error) {
 	id, err := uuid.Parse(billingKey)
 	if err != nil || id == uuid.Nil || id.String() != billingKey {
 		return "", "", errors.New("invalid post billing key")
@@ -163,26 +148,13 @@ func ensurePostOffer(ctx context.Context, client *openrails.Client, catalogID op
 		return "", "", errors.New("post price must be between 50 and 99999999 USD cents")
 	}
 	key := "post-" + billingKey
-	product, err := client.GetProductByKey(ctx, key)
-	if errors.Is(err, openrails.ErrNotFound) {
-		product, err = client.CreateProduct(ctx, openrails.CreateProductRequest{Key: key, DisplayName: title, CatalogID: catalogID})
-		if errors.Is(err, openrails.ErrConflict) {
-			product, err = client.GetProductByKey(ctx, key)
-		}
-	}
-	if err != nil {
-		return "", "", fmt.Errorf("ensure post product: %w", err)
-	}
-	if product.CatalogID != catalogID {
-		return "", "", errors.New("post product belongs to another catalog")
-	}
 	// The product label is the first-listing title snapshot. Preparing an offer
 	// must not change it before the blog's revision check accepts the edit.
 	// Each amount has an immutable offer. Leave previous offers intact: the
 	// later post write or revision check can fail after this catalog write.
 	// Only the price selected by the post row is exposed by our checkout route.
-	price, err := client.CreatePrice(ctx, openrails.CreatePriceRequest{
-		ProductID:           product.ID,
+	price, err := client.Prices.Create(ctx, &openrails.PriceCreateParams{
+		ProductData:         &openrails.PriceCreateProductDataParams{CatalogID: catalogID, Key: key, DisplayName: title},
 		Key:                 key + "-usd-" + strconv.FormatInt(priceCents, 10),
 		UnitAmount:          priceCents * 10_000, // OpenRails fiat amounts are micros.
 		Currency:            "USD",
@@ -193,50 +165,22 @@ func ensurePostOffer(ctx context.Context, client *openrails.Client, catalogID op
 	if err != nil {
 		return "", "", fmt.Errorf("ensure post price: %w", err)
 	}
-	return product.ID.String(), price.ID.String(), nil
+	return price.ProductID, price.ID, nil
 }
 
 func (b *billingService) HasPostAccess(ctx context.Context, userID, productID string) (bool, error) {
-	customer, err := openrails.ParseCustomerID(userID)
+	result, err := b.client.ProductAccess.Check(ctx, &openrails.ProductAccessCheckParams{CustomerID: userID, ProductID: productID})
 	if err != nil {
 		return false, err
 	}
-	product, err := openrails.ParseProductID(productID)
-	if err != nil {
-		return false, err
-	}
-	return b.client.HasProductAccess(ctx, customer, product)
+	return result.HasAccess, nil
 }
 
-func (b *billingService) ListProductAccess(ctx context.Context, userID string) (map[string]bool, error) {
-	customer, err := openrails.ParseCustomerID(userID)
-	if err != nil {
-		return nil, err
-	}
-	grants, err := b.client.ListProductAccess(ctx, customer)
-	if err != nil {
-		return nil, err
-	}
-	products := make(map[string]bool, len(grants))
-	for _, grant := range grants {
-		products[grant.ProductID.String()] = true
-	}
-	return products, nil
+func (b *billingService) CheckPostAccess(ctx context.Context, userID string, productIDs []string) (map[string]bool, error) {
+	return b.client.ProductAccess.CheckMany(ctx, &openrails.ProductAccessCheckManyParams{CustomerID: userID, ProductIDs: productIDs})
 }
 
 func (b *billingService) CreateCheckout(ctx context.Context, userID, productID, priceID, idempotencyKey string) (*openrails.CheckoutSession, error) {
-	customer, err := openrails.ParseCustomerID(userID)
-	if err != nil {
-		return nil, err
-	}
-	product, err := openrails.ParseProductID(productID)
-	if err != nil {
-		return nil, err
-	}
-	price, err := openrails.ParsePriceID(priceID)
-	if err != nil {
-		return nil, err
-	}
 	if strings.TrimSpace(idempotencyKey) == "" || len(idempotencyKey) > 200 {
 		return nil, errors.New("Idempotency-Key must contain between 1 and 200 characters")
 	}
@@ -244,27 +188,21 @@ func (b *billingService) CreateCheckout(ctx context.Context, userID, productID, 
 	// second buyer cannot collide with or retrieve someone else's checkout.
 	digest := sha256.Sum256([]byte(userID + "\x00" + productID + "\x00" + idempotencyKey))
 	return b.client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{
-		Customer:       openrails.CheckoutCustomerIdentity{ID: customer},
-		PriceID:        price,
-		Mode:           "one_off",
-		Payment:        openrails.CheckoutPayment{Rail: "stripe"},
+		Customer:       openrails.CheckoutCustomerIdentity{ID: userID},
+		PriceID:        priceID,
+		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "stripe"},
 		IdempotencyKey: "post-" + hex.EncodeToString(digest[:]),
-		Metadata:       map[string]string{"product_id": product.String()},
-		SuccessURL:     b.publicURL + "/?checkout=success",
-		CancelURL:      b.publicURL + "/?checkout=canceled",
+		Metadata:       map[string]string{"product_id": productID},
+		SuccessURL:     b.publicURL + "/",
+		CancelURL:      b.publicURL + "/",
 	})
 }
 
 func (b *billingService) GetCheckout(ctx context.Context, userID, checkoutID string) (*openrails.CheckoutSession, error) {
-	customer, err := openrails.ParseCustomerID(userID)
-	if err != nil {
-		return nil, err
-	}
-	checkout, err := openrails.ParseCheckoutSessionID(checkoutID)
-	if err != nil {
+	result, err := b.client.GetCheckoutSession(ctx, userID, checkoutID)
+	if errors.Is(err, openrails.ErrInvalid) {
 		return nil, fmt.Errorf("%w: invalid checkout ID", openrails.ErrNotFound)
 	}
-	result, err := b.client.GetCheckoutSession(ctx, customer, checkout)
 	if errors.Is(err, openrails.ErrDenied) {
 		return nil, openrails.ErrNotFound
 	}
