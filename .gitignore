@@ -4,3 +4,4 @@
 .worktree-owner.md
 openrails-demo
 *.test
+.playwright-mcp/

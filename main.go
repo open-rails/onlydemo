@@ -5,17 +5,16 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/gofiber/fiber/v3/middleware/adaptor"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	authkitfiber "github.com/open-rails/authkit/adapters/fiber"
+	openrailsfiber "github.com/open-rails/openrails/adapters/fiber"
 )
 
 func main() {
@@ -154,8 +153,8 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing postBilling, cfg C
 		})
 	})
 
-	optional := authkitfiber.Optional(authService.Verifier())
-	required := authkitfiber.Required(authService.Verifier())
+	optional := authkitfiber.Optional(authService.runtime.Verifier())
+	required := authkitfiber.Required(authService.runtime.Verifier())
 	app.Get("/api/posts", optional, blogAPI.list)
 	app.Post("/api/posts", required, blogAPI.create)
 	app.Get("/api/posts/:id", optional, blogAPI.get)
@@ -163,12 +162,22 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing postBilling, cfg C
 	app.Delete("/api/posts/:id", required, blogAPI.delete)
 	app.Post("/api/posts/:id/checkout", required, blogAPI.checkout)
 	app.Get("/api/checkouts/:id", required, blogAPI.getCheckout)
-	if hooks, ok := billing.(interface{ WebhookHandler() http.Handler }); ok {
-		app.Post(billingWebhookPath, adaptor.HTTPHandler(hooks.WebhookHandler()))
+	if billing, ok := billing.(*billingService); ok && billing != nil {
+		routes, err := openrailsfiber.Routes(billing.runtime)
+		if err != nil {
+			return nil, err
+		}
+		if err := routes.Mount(app.Group("/billing")); err != nil {
+			return nil, err
+		}
 	}
 
 	// Register AuthKit endpoints on Fiber so they appear in its route table.
-	if err := authkitfiber.Mount(app, authService.Service); err != nil {
+	authRoutes, err := authkitfiber.Routes(authService.runtime)
+	if err != nil {
+		return nil, err
+	}
+	if err := authRoutes.Mount(app); err != nil {
 		return nil, err
 	}
 	return app, nil

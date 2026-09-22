@@ -5,6 +5,10 @@ OpenRails billing through Stripe's test environment. Authors can sell private
 posts for a one-time USD payment. OpenRails owns checkout, payment confirmation
 and access grants; the app owns posts and their catalog references.
 
+The current integration pins published OpenRails release candidates while its
+final release checks finish. All dependencies resolve through ordinary Go modules;
+no local workspace or `replace` directive is needed.
+
 ## Run locally
 
 Install Go 1.26.6+, Docker, [Task](https://taskfile.dev) and the
@@ -35,8 +39,8 @@ need **Debugging Tools: Write** to use `stripe listen`. The webhook URL is
 `/billing/v1/merchants/openrails-demo/webhooks/stripe`.
 
 Open [localhost:3000](http://localhost:3000/) for a searchable route directory.
-It reads Fiber's live route table, including native AuthKit routes and the
-OpenRails webhook. There is no manually maintained endpoint list in the HTML.
+It reads Fiber's live route table, including the configured native AuthKit and OpenRails
+route bundles. There is no manually maintained endpoint list in the HTML.
 The homepage is an API directory; use the API examples below to create posts
 and open the returned Stripe Checkout URL to pay with a
 [Stripe test card](https://docs.stripe.com/testing).
@@ -75,10 +79,22 @@ The connected user owns the objects it creates and already has access to them.
 The libraries also support optional separate runtime credentials for deployments
 that want them, but this demo keeps one pool.
 
+AuthKit and OpenRails use the same host boundary: a local runtime owns resources,
+HTTP configuration and background jobs; its client exposes typed business calls.
+`auth.go` and `billing.go` retain those separately. After provisioning and River
+composition, `main.go` obtains `authkitfiber.Routes(auth.runtime)` and
+`openrailsfiber.Routes(billing.runtime)` and mounts each bundle once. OpenRails
+selects its provider callbacks from its configuration; the demo has no separate
+webhook handler or handwritten callback registrations. AuthKit's identity routes
+mount at their configured root anchors; this demo mounts billing under `/billing`.
+Remote OpenRails consumers only need its remote client, with no local runtime or
+route bundle. AuthKit's client boundary permits a future remote transport; this
+demo uses its supported embedded runtime.
+
 This demo chooses one host-owned River fleet for both libraries. `jobs.go`
 initializes the host's River schema during migration. After both services and
-merchant configuration are ready, `riverkit.New` composes `auth.RiverJobs()` and
-`billing.RiverJobs()` into one unstarted client and binds producers automatically.
+merchant configuration are ready, `riverkit.New` composes `auth.runtime.RiverJobs()` and
+`billing.runtime.RiverJobs()` into one unstarted client and binds producers automatically.
 Without billing, the same composer receives only AuthKit's contribution. The host starts and stops workers before closing
 library services, then closes its pool. OpenRails and River borrow that pool.
 AuthKit creates and owns a schema-bound pool from the same connection settings;

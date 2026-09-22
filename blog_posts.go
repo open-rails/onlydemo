@@ -280,7 +280,7 @@ func (api *blogAPI) canModerate(c fiber.Ctx, userID, permission string) (bool, e
 		return false, err
 	}
 	claims, _ := authkitfiber.Claims(c)
-	live, _, err := api.auth.Verifier().IsLive(c.Context(), claims)
+	live, _, err := api.auth.runtime.Verifier().IsLive(c.Context(), claims)
 	return live, err
 }
 

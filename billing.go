@@ -20,7 +20,6 @@ import (
 
 const (
 	billingMerchantSlug       = "openrails-demo"
-	billingWebhookPath        = "/billing/v1/merchants/" + billingMerchantSlug + "/webhooks/stripe"
 	minPostPriceCents   int64 = 50
 	maxPostPriceCents   int64 = 99_999_999
 )
@@ -39,7 +38,6 @@ type postBilling interface {
 type billingService struct {
 	runtime   *openrailsembed.Runtime
 	client    *openrails.Client
-	webhook   http.Handler
 	publicURL string
 }
 
@@ -74,6 +72,7 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, transport .
 		return nil, errors.New("billing requires the host PostgreSQL pool")
 	}
 	opts := openrailsembed.Options{
+		HTTP: &openrailsembed.HTTPConfig{},
 		Config: &openrailsconfig.Config{
 			Env:                             "development",
 			TestMode:                        openrailsconfig.CredentialPostureSandbox,
@@ -119,22 +118,13 @@ func (billing *billingService) initialize(ctx context.Context, cfg Config) error
 	if err != nil {
 		return err
 	}
-	billing.webhook, err = runtime.Handler(openrailsembed.MountOptions{
-		MountPrefix:    "/billing",
-		RouteSets:      []openrailsembed.RouteSet{openrailsembed.RouteSetWebhooks},
-		ProviderRoutes: &openrailsembed.ProviderRoutes{Webhooks: true},
-	})
-	if err != nil {
-		return err
-	}
+
 	return nil
 }
 
 func (b *billingService) Close(ctx context.Context) error {
 	return b.runtime.Close(ctx)
 }
-
-func (b *billingService) WebhookHandler() http.Handler { return b.webhook }
 
 func (b *billingService) Ready(ctx context.Context) error {
 	return b.runtime.Ready(ctx)

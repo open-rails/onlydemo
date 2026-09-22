@@ -68,7 +68,7 @@ func (j *appJobs) compose(ctx context.Context) error {
 	if j.auth == nil {
 		return errors.New("AuthKit must be constructed before composing jobs")
 	}
-	contributions := []riverkit.Contribution{j.auth.client.RiverJobs()}
+	contributions := []riverkit.Contribution{j.auth.runtime.RiverJobs()}
 	queues := map[string]river.QueueConfig{}
 	if j.billing != nil {
 		contributions = append(contributions, j.billing.runtime.RiverJobs())
@@ -85,7 +85,7 @@ func (j *appJobs) start(ctx context.Context) error {
 			return err
 		}
 	}
-	if err := j.auth.client.Start(ctx); err != nil {
+	if err := j.auth.runtime.Start(ctx); err != nil {
 		return err
 	}
 	return j.client.Start(ctx)

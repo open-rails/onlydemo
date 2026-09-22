@@ -10,6 +10,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	authkitfiber "github.com/open-rails/authkit/adapters/fiber"
+	openrailsfiber "github.com/open-rails/openrails/adapters/fiber"
 )
 
 type routeInfo struct {
@@ -37,17 +38,23 @@ func homepage(app *fiber.App) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		var appRoutes []routeInfo
 		var mountedAuthRoutes []routeInfo
-		// Both app and AuthKit endpoints come from Fiber's live route table.
+		var mountedBillingRoutes []routeInfo
+		// Application and library endpoints come from Fiber's live route table.
 		for _, route := range app.GetRoutes(true) {
 			info := routeInfo{Method: route.Method, Path: route.Path}
 			if strings.HasPrefix(route.Name, authkitfiber.RouteNamePrefix) {
 				mountedAuthRoutes = append(mountedAuthRoutes, info)
 				continue
 			}
+			if strings.HasPrefix(route.Name, openrailsfiber.RouteNamePrefix) {
+				mountedBillingRoutes = append(mountedBillingRoutes, info)
+				continue
+			}
 			appRoutes = append(appRoutes, info)
 		}
 		sections := []routeSection{
 			{ID: "application", Name: "Application routes", Description: "Routes registered by this demo, including the homepage and blog API.", Routes: sortedRoutes(appRoutes)},
+			{ID: "openrails", Name: "OpenRails routes", Description: "Routes enabled by the billing runtime configuration, including verified provider callbacks.", Routes: sortedRoutes(mountedBillingRoutes)},
 			{ID: "authkit", Name: "AuthKit routes", Description: "Routes enabled by the current AuthKit configuration. Disabled features are omitted.", Routes: sortedRoutes(mountedAuthRoutes)},
 		}
 		var body bytes.Buffer
