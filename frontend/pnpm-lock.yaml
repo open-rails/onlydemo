@@ -24,19 +24,8 @@ importers:
         specifier: https://github.com/open-rails/auth-ui/releases/download/v0.3.1/openrails-auth-ui-0.3.1.tgz
         version: https://github.com/open-rails/auth-ui/releases/download/v0.3.1/openrails-auth-ui-0.3.1.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@openrails/billing-ui':
-<<<<<<< Updated upstream
-        specifier: https://github.com/open-rails/billing-ui/releases/download/v0.7.0/openrails-billing-ui-0.7.0.tgz
-        version: https://github.com/open-rails/billing-ui/releases/download/v0.7.0/openrails-billing-ui-0.7.0.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@stripe/react-stripe-js':
-        specifier: ^6.11.0
-        version: 6.11.0(@stripe/stripe-js@9.17.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@stripe/stripe-js':
-        specifier: ^9.17.0
-        version: 9.17.0
-=======
         specifier: https://github.com/open-rails/billing-ui/releases/download/v0.8.0/openrails-billing-ui-0.8.0.tgz
         version: https://github.com/open-rails/billing-ui/releases/download/v0.8.0/openrails-billing-ui-0.8.0.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
->>>>>>> Stashed changes
       '@tanstack/react-query':
         specifier: ^5.100.11
         version: 5.103.2(react@19.3.0)
@@ -448,15 +437,9 @@ packages:
       '@solana/wallet-adapter-react':
         optional: true
 
-<<<<<<< Updated upstream
-  '@openrails/billing-ui@https://github.com/open-rails/billing-ui/releases/download/v0.7.0/openrails-billing-ui-0.7.0.tgz':
-    resolution: {integrity: sha512-SBHZYT3uEEL3HqiCEFX+0fdVrTsPaGxto+CI+GYX8hVzJZ4Cl9TaSEzB3MuzxQACKcaGd95JbpQV65GcA3EMMQ==, tarball: https://github.com/open-rails/billing-ui/releases/download/v0.7.0/openrails-billing-ui-0.7.0.tgz}
-    version: 0.7.0
-=======
   '@openrails/billing-ui@https://github.com/open-rails/billing-ui/releases/download/v0.8.0/openrails-billing-ui-0.8.0.tgz':
     resolution: {integrity: sha512-87lNQk9UefQx3crr+otwE2zJvhTKS0OceulufLMvPAxyYYm81DgfiE7GJWZId1Bx9ZjjG6O/UTuwJJ4IPAQ4Fw==, tarball: https://github.com/open-rails/billing-ui/releases/download/v0.8.0/openrails-billing-ui-0.8.0.tgz}
     version: 0.8.0
->>>>>>> Stashed changes
     engines: {node: '>=22.12.0'}
     peerDependencies:
       react: '>=19 <20'
@@ -2783,11 +2766,7 @@ snapshots:
       - '@types/react'
       - date-fns
 
-<<<<<<< Updated upstream
-  '@openrails/billing-ui@https://github.com/open-rails/billing-ui/releases/download/v0.7.0/openrails-billing-ui-0.7.0.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
-=======
   '@openrails/billing-ui@https://github.com/open-rails/billing-ui/releases/download/v0.8.0/openrails-billing-ui-0.8.0.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
->>>>>>> Stashed changes
     dependencies:
       '@base-ui/react': 1.8.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@hugeicons/core-free-icons': 4.3.5
