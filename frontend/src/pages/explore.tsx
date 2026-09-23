@@ -1,0 +1,18 @@
+import { useQuery } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
+import { request } from '../api'
+import type { Channel, Post } from '../models'
+import { Button, EmptyState, ErrorState, Icon, Loading } from '../components/ui'
+import { ChannelCard, PostCard } from '../components/cards'
+import { useAuth } from '../auth'
+
+function usePosts() { return useQuery({ queryKey: ['posts'], queryFn: () => request<Post[]>('/api/v1/posts', {}, false) }) }
+function useChannels() { return useQuery({ queryKey: ['channels'], queryFn: () => request<Channel[]>('/api/v1/channels', {}, false) }) }
+export function HomePage() {
+  const posts = usePosts(); const auth = useAuth()
+  return <><section className="hero"><div className="hero-copy"><span className="eyebrow">Independent publishing, direct support</span><h1>Read something <em>worth keeping.</em></h1><p>Discover thoughtful channels, follow the people behind them, and buy the stories you want to keep forever.</p><div className="hero-actions"><a className="button button-primary" href="#latest">Explore latest <Icon name="arrow" size={17} /></a>{auth.user ? <Link className="button button-secondary" to="/me">Open my library</Link> : <Button variant="secondary" onClick={auth.openRegister}>Start reading free</Button>}</div><p className="hero-note">Free posts stay free. Paid posts clearly show what you get before you buy.</p></div><div className="hero-panel"><div className="hero-panel-top"><span className="badge badge-success"><Icon name="check" size={11} /> Reader-first</span><span>OpenRails editorial</span></div><h2>Small channels. Long shelf life.</h2><p>Membership access and one-time purchases are kept separate, so your library remains yours.</p><div className="hero-panel-bottom"><span className="hero-monogram">OR</span><span className="muted">Built for independent voices.</span></div></div></section><section id="latest"><div className="section-heading"><div><span className="eyebrow">From the shelf</span><h2 style={{ marginTop: 8 }}>Latest stories</h2><p>New writing from channels worth following.</p></div><Link className="text-button" to="/channels">Browse channels <span aria-hidden="true">↗</span></Link></div>{posts.isPending ? <Loading cards /> : posts.error ? <ErrorState error={posts.error} retry={() => void posts.refetch()} /> : posts.data?.length ? <div className="card-grid">{posts.data.map((post) => <PostCard key={post.id} post={post} />)}</div> : <EmptyState icon="book" title="The shelf is quiet." action={<Link to="/channels" className="button button-secondary">Find a channel</Link>}>New stories will appear here as creators publish them.</EmptyState>}</section></>
+}
+export function ChannelsPage() {
+  const channels = useChannels(); const auth = useAuth()
+  return <><div className="page-heading"><span className="eyebrow">Find your people</span><h1>Channels</h1><p>Each channel has its own voice, archive, and way to support the work. Read free posts first, then decide what belongs in your library.</p></div>{auth.user && <div className="toolbar"><Link className="button button-primary" to="/channels/new"><Icon name="plus" size={16} />Create a channel</Link></div>}{channels.isPending ? <Loading cards /> : channels.error ? <ErrorState error={channels.error} retry={() => void channels.refetch()} /> : channels.data?.length ? <div className="channel-grid">{channels.data.map((channel) => <ChannelCard channel={channel} key={channel.id} />)}</div> : <EmptyState icon="users" title="No channels yet." action={!auth.user ? <Button onClick={auth.openRegister}>Create an account</Button> : undefined}>Be the first to start an independent channel.</EmptyState>}</>
+}
