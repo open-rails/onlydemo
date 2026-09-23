@@ -191,7 +191,7 @@ export function AppLayout() {
           <SuggestedCreators />
           <div className="rail-footer">
             <Badge variant="outline" className="text-warning">
-              Stripe test environment
+              Sandbox payments only
             </Badge>
             <a href="/dev/routes">
               Developer routes

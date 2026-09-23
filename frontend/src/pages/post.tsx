@@ -263,7 +263,7 @@ export function PostPage() {
           <div className="purchase-note">
             <HugeiconsIcon icon={SquareLock02Icon} size={14} />
             <span>
-              Stripe test payments. Access is granted only after verified
+              Sandbox test payments. Access is granted only after verified
               payment confirmation.
             </span>
           </div>

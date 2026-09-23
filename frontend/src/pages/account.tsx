@@ -565,7 +565,7 @@ function Billing() {
         <CardHeader>
           <CardTitle>Saved payment methods</CardTitle>
           <CardDescription>
-            Card details are stored by Stripe. This site only receives a
+            Card details are stored by the payment provider. This site only receives a
             verified reference.
           </CardDescription>
         </CardHeader>
