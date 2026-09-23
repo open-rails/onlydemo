@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 
@@ -28,10 +27,14 @@ const (
 	maxPostPriceCents   int64 = 99_999_999
 )
 
+type postCheckout struct {
+	UserID, ProductID, PriceID, IdempotencyKey string
+	SuccessURL, CancelURL                      string
+}
+
 type billingService struct {
-	runtime   *openrailsembed.Runtime
-	client    *openrails.Client
-	publicURL string
+	runtime *openrailsembed.Runtime
+	client  *openrails.Client
 }
 
 func initializeBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool) error {
@@ -59,10 +62,6 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 	if !strings.HasPrefix(cfg.StripeAccountID, "acct_") || !strings.HasPrefix(cfg.StripeWebhookSecret, "whsec_") {
 		return nil, errors.New("billing requires STRIPE_ACCOUNT_ID and STRIPE_WEBHOOK_SECRET")
 	}
-	publicURL, err := url.Parse(cfg.PublicURL)
-	if err != nil || publicURL.Host == "" || (publicURL.Scheme != "http" && publicURL.Scheme != "https") || publicURL.RawQuery != "" || publicURL.Fragment != "" || publicURL.User != nil {
-		return nil, errors.New("PUBLIC_URL must be an absolute HTTP(S) URL without credentials, query, or fragment")
-	}
 	if pool == nil {
 		return nil, errors.New("billing requires the host PostgreSQL pool")
 	}
@@ -88,14 +87,10 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 				},
 			}}}}},
 		Config: &openrailsconfig.Config{
-			Env:                             "development",
-			TestMode:                        openrailsconfig.CredentialPostureSandbox,
-			ProviderWriteMode:               openrailsconfig.ProviderWriteModeFull,
-			MerchantConfigSource:            openrailsconfig.MerchantConfigSourceManifest,
-			NewSubscriptionCollectionPolicy: "engine",
-			AllowCatalogUpdates:             true,
-			APIURL:                          strings.TrimRight(cfg.PublicURL, "/") + "/billing",
-			DB:                              &openrailsconfig.DBConfig{URL: cfg.DatabaseURL, Schema: cfg.BillingSchema},
+			TestMode:            openrailsconfig.CredentialPostureSandbox,
+			ProviderWriteMode:   openrailsconfig.ProviderWriteModeFull,
+			AllowCatalogUpdates: true,
+			DB:                  &openrailsconfig.DBConfig{URL: cfg.DatabaseURL, Schema: cfg.BillingSchema},
 		},
 		PGXPool:         pool,
 		River:           openrailsembed.RiverFromHost(),
@@ -115,7 +110,7 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 	if err != nil {
 		return nil, err
 	}
-	return &billingService{runtime: runtime, client: client, publicURL: strings.TrimRight(cfg.PublicURL, "/")}, nil
+	return &billingService{runtime: runtime, client: client}, nil
 }
 
 func (b *billingService) RiverJobs() riverkit.Contribution { return b.runtime.RiverJobs() }
@@ -228,21 +223,21 @@ func (b *billingService) CheckPostAccess(ctx context.Context, userID string, pro
 	return b.client.ProductAccess.CheckMany(ctx, &openrails.ProductAccessCheckManyParams{CustomerID: userID, ProductIDs: productIDs})
 }
 
-func (b *billingService) CreateCheckout(ctx context.Context, userID, productID, priceID, idempotencyKey string) (*openrails.CheckoutSession, error) {
-	if strings.TrimSpace(idempotencyKey) == "" || len(idempotencyKey) > 200 {
+func (b *billingService) CreateCheckout(ctx context.Context, request postCheckout) (*openrails.CheckoutSession, error) {
+	if strings.TrimSpace(request.IdempotencyKey) == "" || len(request.IdempotencyKey) > 200 {
 		return nil, errors.New("Idempotency-Key must contain between 1 and 200 characters")
 	}
 	// Namespace the caller's retry key by authenticated buyer and product. A
 	// second buyer cannot collide with or retrieve someone else's checkout.
-	digest := sha256.Sum256([]byte(userID + "\x00" + productID + "\x00" + idempotencyKey))
+	digest := sha256.Sum256([]byte(request.UserID + "\x00" + request.ProductID + "\x00" + request.IdempotencyKey))
 	return b.client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{
-		Customer:       openrails.CheckoutCustomerIdentity{ID: userID},
-		PriceID:        priceID,
+		Customer:       openrails.CheckoutCustomerIdentity{ID: request.UserID},
+		PriceID:        request.PriceID,
 		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "stripe"},
 		IdempotencyKey: "post-" + hex.EncodeToString(digest[:]),
-		Metadata:       map[string]string{"product_id": productID},
-		SuccessURL:     b.publicURL + "/",
-		CancelURL:      b.publicURL + "/",
+		Metadata:       map[string]string{"product_id": request.ProductID},
+		SuccessURL:     request.SuccessURL,
+		CancelURL:      request.CancelURL,
 	})
 }
 

@@ -327,7 +327,7 @@ func (s *smokeStripe) settle(ctx context.Context, base string) error {
 	mac := hmac.New(sha256.New, []byte(smokeWebhookSecret))
 	mac.Write([]byte(timestamp + "."))
 	mac.Write(payload)
-	req, err := http.NewRequestWithContext(ctx, "POST", base+"/billing/v1/merchants/openrails-demo/webhooks/stripe/acct_demo_test", bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, "POST", base+"/billing/v1/webhooks/stripe/acct_demo_test", bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}

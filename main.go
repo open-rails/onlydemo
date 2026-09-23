@@ -163,7 +163,9 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, c
 	app.Get("/api/v1/posts/:id", optional, blogAPI.get)
 	app.Patch("/api/v1/posts/:id", required, blogAPI.update)
 	app.Delete("/api/v1/posts/:id", required, blogAPI.delete)
-	app.Post("/api/v1/posts/:id/checkout", required, blogAPI.checkout)
+	app.Post("/api/v1/posts/:id/checkout", required, func(c fiber.Ctx) error {
+		return blogAPI.checkout(c, cfg.PublicURL+"/", cfg.PublicURL+"/")
+	})
 	app.Get("/api/v1/checkouts/:id", required, blogAPI.getCheckout)
 	if err := billing.Mount(app.Group("/billing")); err != nil {
 		return nil, err

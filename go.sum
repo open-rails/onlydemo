@@ -259,6 +259,8 @@ github.com/open-rails/migratekit v1.0.4 h1:i/azuFFLY3Si5nUz3hKAIqngynAGa5TIMUe+G
 github.com/open-rails/migratekit v1.0.4/go.mod h1:ONDMUycRcwAB+eKlPvho6mnNAZf9gf9+yqwCKDRuO9g=
 github.com/open-rails/openrails v0.156.0 h1:hjWPmM+2tWnD3hz8eHzrUY5Jz2xzHDzjksEudOIrXi0=
 github.com/open-rails/openrails v0.156.0/go.mod h1:UGo4jHZ8oRfJICEsTU6AFfOJfI85VfE4tUpcE4OLN3Q=
+github.com/open-rails/openrails v0.157.0 h1:eaB9lJ5y82y9NnY1T4/uacpXg4Mytjku6yb4+i6h0cs=
+github.com/open-rails/openrails v0.157.0/go.mod h1:UGo4jHZ8oRfJICEsTU6AFfOJfI85VfE4tUpcE4OLN3Q=
 github.com/open-rails/openrails/adapters/fiber v0.151.0 h1:e9uy4ZxR3wKb8H+y81QJ0YOxorPBfemSYjdIYxeWVxw=
 github.com/open-rails/openrails/adapters/fiber v0.151.0/go.mod h1:O7zg/lED8/O2a7GT2xyOeqXP0rv2pxpy42fp9Njl/aw=
 github.com/opencontainers/go-digest v1.0.0 h1:apOUWs51W5PlhuyGyz9FCeeBIOUDA/6nW8Oi/yOhh5U=

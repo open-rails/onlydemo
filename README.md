@@ -36,7 +36,7 @@ task stripe:listen
 Copy the displayed `whsec_...` value into `STRIPE_WEBHOOK_SECRET` in `.env`,
 then run `task run`. Keep the listener running. Restricted keys additionally
 need **Debugging Tools: Write** to use `stripe listen`. The webhook URL is
-`/billing/v1/merchants/openrails-demo/webhooks/stripe/<STRIPE_ACCOUNT_ID>`.
+`/billing/v1/webhooks/stripe/<STRIPE_ACCOUNT_ID>`.
 
 Open [localhost:3000](http://localhost:3000/) for a searchable route directory.
 It reads Fiber's live route table, including the configured native AuthKit and OpenRails
@@ -94,6 +94,9 @@ webhook handler or handwritten callback registrations. Application routes use
 AuthKit's protocol endpoints retain their canonical anchors: JWKS at
 `/.well-known/jwks.json` and browser OIDC under `/oidc` when configured. The token
 issuer remains the origin so discovery and signed request verification stay aligned.
+The billing runtime uses host-owned snapshot credentials and explicit sandbox/write
+policies. `PUBLIC_URL` supplies checkout success and cancellation destinations from
+the application handler; it is not a billing API URL or a runtime dependency.
 Remote OpenRails consumers only need its remote client, with no local runtime or
 route bundle. AuthKit's client boundary permits a future remote transport; this
 demo uses its supported embedded runtime.
@@ -117,10 +120,11 @@ login that owns its database also works; the manual walkthrough creates its own 
 are no per-library logins or permission-group roles. Merchant authorization uses
 explicit scoped queries, independently of database-role flags.
 
-The demo keeps one initial application migration. When upgrading from an older
-version of that schema, point `DATABASE_URL` at a new database to preserve the old
-one. Startup never rewrites historical checksums or drops databases; libraries
-apply their own forward migrations during normal upgrades.
+The demo and OpenRails use fresh pre-v1 schema baselines. When upgrading from an
+older baseline, point `DATABASE_URL` at a new database to preserve the old one;
+this release has no legacy billing upgrade or backfill path. Startup verifies
+migration checksums and never rewrites historical checksums or drops databases.
+AuthKit and River retain their own migration ownership.
 Channel and author references are opaque AuthKit IDs, with no foreign key into AuthKit's schema.
 `task db:down` removes the disposable development container and its databases.
 

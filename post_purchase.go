@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails"
 )
 
-func (api *blogAPI) checkout(c fiber.Ctx) error {
+func (api *blogAPI) checkout(c fiber.Ctx, successURL, cancelURL string) error {
 	user, ok := authkitfiber.UserClaims(c)
 	if !ok {
 		return clientError(c, http.StatusUnauthorized, "a user access token is required")
@@ -53,7 +53,7 @@ func (api *blogAPI) checkout(c fiber.Ctx) error {
 	if owned {
 		return clientError(c, http.StatusConflict, "you already have access to this post")
 	}
-	session, err := api.billing.CreateCheckout(c.Context(), user.UserID, post.ProductID, post.PriceID, key)
+	session, err := api.billing.CreateCheckout(c.Context(), postCheckout{UserID: user.UserID, ProductID: post.ProductID, PriceID: post.PriceID, IdempotencyKey: key, SuccessURL: successURL, CancelURL: cancelURL})
 	if errors.Is(err, openrails.ErrConflict) || errors.Is(err, openrails.ErrIdempotencyKeyReused) {
 		return clientError(c, http.StatusConflict, "checkout conflicts with an earlier request")
 	}

@@ -11,7 +11,7 @@ require (
 	github.com/open-rails/authkit v0.127.0
 	github.com/open-rails/authkit/adapters/fiber v0.117.0
 	github.com/open-rails/migratekit v1.0.4
-	github.com/open-rails/openrails v0.156.0
+	github.com/open-rails/openrails v0.157.0
 	github.com/riverqueue/river v0.47.0
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.47.0 // indirect
 )
