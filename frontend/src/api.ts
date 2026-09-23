@@ -29,6 +29,10 @@ let tokens: Tokens | null = (() => {
     return null;
   }
 })();
+let sessionGeneration = 0;
+export function getSessionGeneration() {
+  return sessionGeneration;
+}
 const listeners = new Set<() => void>();
 export function getSession() {
   return tokens;
@@ -40,6 +44,10 @@ export function subscribeSession(listener: () => void) {
   };
 }
 export function setSession(next: Tokens | null) {
+  sessionGeneration++;
+  applySession(next);
+}
+function applySession(next: Tokens | null) {
   tokens = next;
   try {
     if (next) sessionStorage.setItem(storageKey, JSON.stringify(next));
@@ -79,8 +87,17 @@ async function readResponse<T>(response: Response): Promise<T> {
   }
   return body as T;
 }
-let refreshing: Promise<boolean> | undefined;
-async function refreshSession(): Promise<boolean> {
+let refreshing: { generation: number; promise: Promise<boolean> } | undefined;
+function assertSession(expected: number) {
+  if (sessionGeneration !== expected)
+    throw new APIError(
+      "Your account changed while this request was running. Review its status before trying again.",
+      409,
+      "session_changed",
+    );
+}
+async function refreshSession(expected: number): Promise<boolean> {
+  assertSession(expected);
   if (!tokens?.refresh_token) {
     setSession(null);
     return false;
@@ -94,17 +111,19 @@ async function refreshSession(): Promise<boolean> {
       refresh_token: oldRefresh,
     }),
   });
+  assertSession(expected);
   if (response.status === 400 || response.status === 401) {
     setSession(null);
     return false;
   }
   const next = await readResponse<Tokens>(response);
+  assertSession(expected);
   if (!next.access_token)
     throw new APIError(
       "Your session could not be refreshed. Please sign in again.",
       401,
     );
-  setSession({ ...next, refresh_token: next.refresh_token || oldRefresh });
+  applySession({ ...next, refresh_token: next.refresh_token || oldRefresh });
   return true;
 }
 export async function request<T>(
@@ -113,27 +132,42 @@ export async function request<T>(
   authenticated = true,
   inspectHeaders?: (headers: Headers) => void,
 ): Promise<T> {
-  const send = () =>
-    fetch(path, {
+  const expected = sessionGeneration;
+  const originalAccess = tokens?.access_token;
+  const send = (accessToken?: string) => {
+    if (authenticated) assertSession(expected);
+    return fetch(path, {
       ...init,
       headers: {
         ...(init.body ? { "Content-Type": "application/json" } : {}),
-        ...(authenticated && tokens
-          ? { Authorization: `Bearer ${tokens.access_token}` }
+        ...(authenticated && accessToken
+          ? { Authorization: `Bearer ${accessToken}` }
           : {}),
         ...init.headers,
       },
     });
-  let response = await send();
-  if (response.status === 401 && authenticated && tokens) {
-    refreshing ??= refreshSession().finally(() => {
-      refreshing = undefined;
-    });
-    if (await refreshing) response = await send();
+  };
+  let response = await send(originalAccess);
+  if (authenticated) assertSession(expected);
+  if (response.status === 401 && authenticated && originalAccess) {
+    if (!refreshing || refreshing.generation !== expected) {
+      const entry = { generation: expected, promise: Promise.resolve(false) };
+      entry.promise = refreshSession(expected).finally(() => {
+        if (refreshing === entry) refreshing = undefined;
+      });
+      refreshing = entry;
+    }
+    const refreshed = await refreshing.promise;
+    assertSession(expected);
+    if (refreshed) response = await send(tokens?.access_token);
   }
-  if (response.ok) inspectHeaders?.(response.headers);
-  return readResponse<T>(response);
+  if (authenticated) assertSession(expected);
+  const body = await readResponse<T>(response);
+  if (authenticated) assertSession(expected);
+  inspectHeaders?.(response.headers);
+  return body;
 }
+
 export const authAPI = {
   me: () => request<User>("/auth/v1/me"),
   login: (identifier: string, password: string) =>
@@ -151,7 +185,17 @@ export const authAPI = {
       },
       false,
     ),
-  logout: () => request<void>("/auth/v1/logout", { method: "DELETE" }),
+  logout: () =>
+    request<void>(
+      "/auth/v1/logout",
+      {
+        method: "DELETE",
+        headers: tokens
+          ? { Authorization: `Bearer ${tokens.access_token}` }
+          : {},
+      },
+      false,
+    ),
   recover: (token: string) =>
     request<void>(
       "/auth/v1/account/recovery/confirm",

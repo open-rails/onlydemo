@@ -9,6 +9,7 @@ import {
   APIError,
   authAPI,
   getSession,
+  getSessionGeneration,
   setSession,
   subscribeSession,
 } from "./api";
@@ -19,7 +20,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const session = useSyncExternalStore(subscribeSession, getSession);
   const client = useQueryClient();
   const profile = useQuery({
-    queryKey: ["auth", "me", session?.access_token],
+    queryKey: ["auth", "me", getSessionGeneration()],
     queryFn: authAPI.me,
     enabled: !!session,
     retry: false,
@@ -27,12 +28,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
   const [dialog, setDialog] = useState<"login" | "register" | null>(null);
   const logout = async () => {
-    try {
-      await authAPI.logout();
-    } finally {
-      setSession(null);
-      client.clear();
-    }
+    const revocation = authAPI.logout();
+    setSession(null);
+    client.clear();
+    await revocation;
   };
   return (
     <AuthContext.Provider
