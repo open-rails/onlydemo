@@ -123,7 +123,7 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 		{"slug": "public-paid", "title": "Invalid", "body": "Invalid", "price_cents": 100, "visibility": "public"},
 	} {
 		input["channel_id"] = alice.channelID
-		blogTestRequest(t, app, http.MethodPost, "/api/posts", alice.token, input, http.StatusBadRequest)
+		blogTestRequest(t, app, http.MethodPost, "/api/v1/posts", alice.token, input, http.StatusBadRequest)
 	}
 	paid := createBlogTestPost(t, app, alice.token, map[string]any{
 		"slug": "paid-post", "title": "Article for sale", "body": "The complete purchased article",
@@ -135,7 +135,7 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 	}
 	assertBlogTestReadable(t, app, paid, alice.token, true)
 	// Discovery lists the offer but cannot leak its protected body.
-	listed := blogTestRequest(t, app, http.MethodGet, "/api/posts", "", nil, http.StatusOK)
+	listed := blogTestRequest(t, app, http.MethodGet, "/api/v1/posts", "", nil, http.StatusOK)
 	if bytes.Contains(listed, []byte(paid.Body)) || !bytes.Contains(listed, []byte(`"price_cents":499`)) {
 		t.Fatalf("sale listing leaked content or omitted the offer: %s", listed)
 	}
@@ -158,8 +158,8 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 	if retried.ID != checkout.ID || stripe.latestSession(t).id != first.id {
 		t.Fatal("repeated checkout key created a second payment attempt")
 	}
-	blogTestRequest(t, app, http.MethodGet, "/api/checkouts/"+checkout.ID, charlie.token, nil, http.StatusNotFound)
-	blogTestRequest(t, app, http.MethodGet, "/api/checkouts/"+checkout.ID, bob.token, nil, http.StatusOK)
+	blogTestRequest(t, app, http.MethodGet, "/api/v1/checkouts/"+checkout.ID, charlie.token, nil, http.StatusNotFound)
+	blogTestRequest(t, app, http.MethodGet, "/api/v1/checkouts/"+checkout.ID, bob.token, nil, http.StatusOK)
 	// Redirect query strings are presentation only; visiting either grants nothing.
 	blogTestRequest(t, app, http.MethodGet, "/?checkout=success", bob.token, nil, http.StatusOK)
 	blogTestRequest(t, app, http.MethodGet, "/?checkout=canceled", bob.token, nil, http.StatusOK)
@@ -358,7 +358,7 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 		cursor := ""
 		seen := map[int64]bool{}
 		for range 2 {
-			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, pagedApp.url+"/api/posts?limit=2&before="+cursor, nil)
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, pagedApp.url+"/api/v1/posts?limit=2&before="+cursor, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -392,8 +392,8 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 				t.Fatal("missing next-page cursor")
 			}
 		}
-		blogTestRequest(t, pagedApp, http.MethodGet, "/api/posts?limit=101", bob.token, nil, http.StatusBadRequest)
-		blogTestRequest(t, pagedApp, http.MethodGet, "/api/posts?before=invalid", bob.token, nil, http.StatusBadRequest)
+		blogTestRequest(t, pagedApp, http.MethodGet, "/api/v1/posts?limit=101", bob.token, nil, http.StatusBadRequest)
+		blogTestRequest(t, pagedApp, http.MethodGet, "/api/v1/posts?before=invalid", bob.token, nil, http.StatusBadRequest)
 	})
 	// Observe both libraries before the restart proof below. River closes its
 	// event subscription when stopped; buffered events cannot prove a new fleet.
@@ -414,7 +414,7 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 	}
 	t.Run("durable channel deletion serializes catalog writes", func(t *testing.T) {
 		var team channel
-		decodeBlogTestJSON(t, blogTestRequest(t, app, http.MethodPost, "/api/channels", alice.token, map[string]any{"slug": "retiring-publisher", "name": "Retiring publisher"}, http.StatusCreated), &team)
+		decodeBlogTestJSON(t, blogTestRequest(t, app, http.MethodPost, "/api/v1/channels", alice.token, map[string]any{"slug": "retiring-publisher", "name": "Retiring publisher"}, http.StatusCreated), &team)
 		firstPost := createBlogTestPost(t, app, alice.token, map[string]any{"channel_id": team.ID, "slug": "retirement-purchase", "title": "Purchased before retirement", "body": "Purchased channel body", "price_cents": 99})
 		storedFirst := blogTestStoredPost(t, pool, firstPost.ID, table)
 		blogTestCheckout(t, app, firstPost.ID, bob.token, "retirement-purchase", nil)
@@ -468,13 +468,13 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 			return out
 		}
 		body, _ := json.Marshal(map[string]any{"channel_id": team.ID, "slug": "last-channel-offer", "title": "Accepted before deletion", "body": "Last content", "price_cents": 199})
-		writing := request(http.MethodPost, "/api/posts", body)
+		writing := request(http.MethodPost, "/api/v1/posts", body)
 		select {
 		case <-ready:
 		case <-time.After(10 * time.Second):
 			t.Fatal("catalog write did not reach its guarded boundary")
 		}
-		deleting := request(http.MethodDelete, "/api/channels/"+team.ID, nil)
+		deleting := request(http.MethodDelete, "/api/v1/channels/"+team.ID, nil)
 		wait, cancel := context.WithTimeout(t.Context(), 4*time.Second)
 		for {
 			var blocked bool
@@ -515,7 +515,7 @@ func runPostPurchasesIntegration(t *testing.T, billingSchema, riverSchema string
 		if err = pool.QueryRow(t.Context(), `SELECT count(*) FROM `+pgx.Identifier{jobSchema, "river_job"}.Sanitize()+` WHERE kind='demo_delete_channel' AND args->>'channel_id'=$1 AND state<>'completed'`, team.ID).Scan(&queued); err != nil || queued != 1 {
 			t.Fatalf("durable deletion queue rows=%d err=%v", queued, err)
 		}
-		blogTestRequest(t, app, http.MethodPost, "/api/posts", alice.token, map[string]any{"channel_id": team.ID, "slug": "too-late", "title": "Too late", "body": "Rejected", "price_cents": 299}, http.StatusNotFound)
+		blogTestRequest(t, app, http.MethodPost, "/api/v1/posts", alice.token, map[string]any{"channel_id": team.ID, "slug": "too-late", "title": "Too late", "body": "Rejected", "price_cents": 299}, http.StatusNotFound)
 		if err = jobs.Start(t.Context()); err != nil {
 			t.Fatal(err)
 		}

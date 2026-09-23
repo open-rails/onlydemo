@@ -83,14 +83,14 @@ func TestBlogPostsIntegration(t *testing.T) {
 		for _, route := range []struct{ method, path string }{
 			{http.MethodGet, "/"},
 			{http.MethodGet, "/health"},
-			{http.MethodPost, "/api/posts"},
-			{http.MethodDelete, "/api/posts/:id"},
-			{http.MethodPost, "/api/v1/register"},
-			{http.MethodPost, "/api/v1/password/login"},
-			{http.MethodPost, "/api/v1/account/recovery/confirm"},
-			{http.MethodPost, "/api/v1/admin/users/:user_id/restore"},
-			{http.MethodGet, "/api/v1/admin/users"},
-			{http.MethodDelete, "/api/v1/user/sessions/:id"},
+			{http.MethodPost, "/api/v1/posts"},
+			{http.MethodDelete, "/api/v1/posts/:id"},
+			{http.MethodPost, "/auth/v1/register"},
+			{http.MethodPost, "/auth/v1/password/login"},
+			{http.MethodPost, "/auth/v1/account/recovery/confirm"},
+			{http.MethodPost, "/auth/v1/admin/users/:user_id/restore"},
+			{http.MethodGet, "/auth/v1/admin/users"},
+			{http.MethodDelete, "/auth/v1/user/sessions/:id"},
 			{http.MethodGet, "/.well-known/jwks.json"},
 			{http.MethodHead, "/.well-known/jwks.json"},
 		} {
@@ -101,7 +101,7 @@ func TestBlogPostsIntegration(t *testing.T) {
 				t.Errorf("homepage missing %s %s", route.method, route.path)
 			}
 		}
-		for _, path := range []string{"/api/v1/user/2fa", "/api/v1/delegated/token", "/api/v1/device-keys", "/api/v1/admin/erasure/backlog", "/*"} {
+		for _, path := range []string{"/auth/v1/user/2fa", "/auth/v1/delegated/token", "/auth/v1/device-keys", "/auth/v1/admin/erasure/backlog", "/*"} {
 			if strings.Contains(home, fmt.Sprintf(`data-path="%s"`, path)) {
 				t.Errorf("homepage listed disabled route or middleware catch-all %s", path)
 			}
@@ -109,9 +109,14 @@ func TestBlogPostsIntegration(t *testing.T) {
 		if !strings.Contains(home, "Application routes") || !strings.Contains(home, "AuthKit routes") {
 			t.Error("homepage missing route origins")
 		}
+		// The JSON API has no alias at its retired root prefix. Protocol JWKS stays at its issuer anchor.
+		blogTestRequest(t, app, http.MethodPost, "/api/v1/register", "", map[string]any{}, http.StatusNotFound)
+		blogTestRequest(t, app, http.MethodGet, "/api/posts", "", nil, http.StatusNotFound)
+		blogTestRequest(t, app, http.MethodGet, "/api/channels/retired", "", nil, http.StatusNotFound)
+		blogTestRequest(t, app, http.MethodGet, "/.well-known/jwks.json", "", nil, http.StatusOK)
 		// The directory advertises these paths without bypassing their guards.
-		blogTestRequest(t, app, http.MethodGet, "/api/v1/admin/users", "", nil, http.StatusUnauthorized)
-		blogTestRequest(t, app, http.MethodDelete, "/api/v1/user/sessions/example-id", "", nil, http.StatusUnauthorized)
+		blogTestRequest(t, app, http.MethodGet, "/auth/v1/admin/users", "", nil, http.StatusUnauthorized)
+		blogTestRequest(t, app, http.MethodDelete, "/auth/v1/user/sessions/example-id", "", nil, http.StatusUnauthorized)
 	})
 
 	alice := registerBlogTestUser(t, app, service, "writeralice")
@@ -130,27 +135,27 @@ func TestBlogPostsIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		blogTestRequest(t, app, http.MethodPost, "/api/channels", bob.token, map[string]any{"slug": "collaboration", "name": "Cannot adopt interrupted creation"}, http.StatusConflict)
-		raw := blogTestRequest(t, app, http.MethodPost, "/api/channels", alice.token, map[string]any{"slug": "collaboration", "name": "Collaborative publisher"}, http.StatusCreated)
+		blogTestRequest(t, app, http.MethodPost, "/api/v1/channels", bob.token, map[string]any{"slug": "collaboration", "name": "Cannot adopt interrupted creation"}, http.StatusConflict)
+		raw := blogTestRequest(t, app, http.MethodPost, "/api/v1/channels", alice.token, map[string]any{"slug": "collaboration", "name": "Collaborative publisher"}, http.StatusCreated)
 		var team channel
 		decodeBlogTestJSON(t, raw, &team)
 		if team.ID != groupID {
 			t.Fatal("retry changed the existing permission-group identity")
 		}
-		members := "/api/v1/channel/collaboration/members"
+		members := "/auth/v1/channel/collaboration/members"
 		blogTestRequest(t, app, http.MethodDelete, members+"/"+alice.id, alice.token, nil, http.StatusConflict)
-		blogTestRequest(t, app, http.MethodPost, "/api/channels", bob.token, map[string]any{"slug": "collaboration", "name": "Do not adopt"}, http.StatusConflict)
+		blogTestRequest(t, app, http.MethodPost, "/api/v1/channels", bob.token, map[string]any{"slug": "collaboration", "name": "Do not adopt"}, http.StatusConflict)
 		assertSparseChannelFeed(t, app, alice, bob, team.ID)
-		blogTestRequest(t, app, http.MethodGet, "/api/channels/"+team.ID, bob.token, nil, http.StatusNotFound)
+		blogTestRequest(t, app, http.MethodGet, "/api/v1/channels/"+team.ID, bob.token, nil, http.StatusNotFound)
 		var invite struct {
 			Code string `json:"code"`
 		}
-		decodeBlogTestJSON(t, blogTestRequest(t, app, http.MethodPost, "/api/v1/channel/collaboration/invites/links", alice.token, map[string]any{"role": "editor"}, http.StatusCreated), &invite)
+		decodeBlogTestJSON(t, blogTestRequest(t, app, http.MethodPost, "/auth/v1/channel/collaboration/invites/links", alice.token, map[string]any{"role": "editor"}, http.StatusCreated), &invite)
 		if invite.Code == "" {
 			t.Fatal("native AuthKit invite had no redeemable code")
 		}
-		blogTestRequest(t, app, http.MethodPost, "/api/v1/invites/redeem", bob.token, map[string]any{"code": invite.Code}, http.StatusOK)
-		blogTestRequest(t, app, http.MethodGet, "/api/channels/"+team.ID, bob.token, nil, http.StatusOK)
+		blogTestRequest(t, app, http.MethodPost, "/auth/v1/invites/redeem", bob.token, map[string]any{"code": invite.Code}, http.StatusOK)
+		blogTestRequest(t, app, http.MethodGet, "/api/v1/channels/"+team.ID, bob.token, nil, http.StatusOK)
 		ownerPost := createBlogTestPost(t, app, alice.token, map[string]any{"channel_id": team.ID, "slug": "owner-authored", "title": "Owner draft", "body": "Team content"})
 		blogTestRequest(t, app, http.MethodPatch, blogTestPath(ownerPost.ID), bob.token, map[string]any{"title": "Editor revises owner content"}, http.StatusOK)
 		assertBlogPostAuthor(t, pool, ownerPost.ID, alice.id)
@@ -164,7 +169,7 @@ func TestBlogPostsIntegration(t *testing.T) {
 		blogTestRequest(t, app, http.MethodPatch, blogTestPath(post.ID), alice.token, map[string]any{"title": "Owner edit"}, http.StatusOK)
 		blogTestRequest(t, app, http.MethodPatch, blogTestPath(post.ID), bob.token, map[string]any{"title": "Editor edit"}, http.StatusOK)
 		blogTestRequest(t, app, http.MethodPatch, blogTestPath(post.ID), alice.token, map[string]any{"channel_id": alice.channelID}, http.StatusBadRequest)
-		blogTestRequest(t, app, http.MethodDelete, "/api/channels/"+team.ID, bob.token, nil, http.StatusNotFound)
+		blogTestRequest(t, app, http.MethodDelete, "/api/v1/channels/"+team.ID, bob.token, nil, http.StatusNotFound)
 		blogTestRequest(t, app, http.MethodDelete, members+"/"+bob.id, alice.token, nil, http.StatusOK)
 		blogTestRequest(t, app, http.MethodGet, blogTestPath(post.ID), bob.token, nil, http.StatusNotFound)
 		blogTestRequest(t, app, http.MethodPatch, blogTestPath(post.ID), bob.token, map[string]any{"title": "Revoked author"}, http.StatusNotFound)
@@ -173,8 +178,8 @@ func TestBlogPostsIntegration(t *testing.T) {
 		// Transfer ownership through AuthKit's native member API before removing the old owner.
 		blogTestRequest(t, app, http.MethodPost, members, alice.token, map[string]any{"user_id": bob.id, "role": "owner"}, http.StatusOK)
 		blogTestRequest(t, app, http.MethodDelete, members+"/"+alice.id, bob.token, nil, http.StatusOK)
-		blogTestRequest(t, app, http.MethodDelete, "/api/channels/"+team.ID, alice.token, nil, http.StatusNotFound)
-		blogTestRequest(t, app, http.MethodDelete, "/api/channels/"+team.ID, bob.token, nil, http.StatusAccepted)
+		blogTestRequest(t, app, http.MethodDelete, "/api/v1/channels/"+team.ID, alice.token, nil, http.StatusNotFound)
+		blogTestRequest(t, app, http.MethodDelete, "/api/v1/channels/"+team.ID, bob.token, nil, http.StatusAccepted)
 		deadline, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 		defer cancel()
 		for {
@@ -287,7 +292,7 @@ func TestBlogPostsIntegration(t *testing.T) {
 		blogTestRequest(t, app, http.MethodDelete, blogTestPath(moderated.ID), admin.token, nil, http.StatusNoContent)
 		blogTestRequest(t, app, http.MethodGet, blogTestPath(moderated.ID), alice.token, nil, http.StatusNotFound)
 
-		blogTestRequest(t, app, http.MethodPost, "/api/v1/channel/moderator-channel/members", admin.token, map[string]any{"user_id": alice.id, "role": "owner"}, http.StatusOK)
+		blogTestRequest(t, app, http.MethodPost, "/auth/v1/channel/moderator-channel/members", admin.token, map[string]any{"user_id": alice.id, "role": "owner"}, http.StatusOK)
 		if err := service.client.BanUser(t.Context(), admin.id, nil, nil, admin.id); err != nil {
 			t.Fatalf("ban moderator: %v", err)
 		}
@@ -297,7 +302,7 @@ func TestBlogPostsIntegration(t *testing.T) {
 			map[string]any{"title": "Banned moderator edit"}, http.StatusOK)
 		lazyDelete := createBlogTestPost(t, app, alice.token, map[string]any{"channel_id": alice.channelID, "slug": "lazy-ban-delete", "title": "Delete during token lifetime", "body": "Still authorized"})
 		blogTestRequest(t, app, http.MethodDelete, blogTestPath(lazyDelete.ID), admin.token, nil, http.StatusNoContent)
-		blogTestRequest(t, app, http.MethodPost, "/api/v1/token", "", map[string]any{"grant_type": "refresh_token", "refresh_token": admin.refreshToken}, http.StatusUnauthorized)
+		blogTestRequest(t, app, http.MethodPost, "/auth/v1/token", "", map[string]any{"grant_type": "refresh_token", "refresh_token": admin.refreshToken}, http.StatusUnauthorized)
 		own := createBlogTestPost(t, app, admin.token, map[string]any{
 			"slug": "moderator-own-draft", "title": "Own draft", "body": "Ordinary author access",
 		})
@@ -306,13 +311,13 @@ func TestBlogPostsIntegration(t *testing.T) {
 			t.Fatalf("unban moderator: %v", err)
 		}
 	})
-	blogTestRequest(t, app, http.MethodPost, "/api/posts", "", map[string]any{"slug": "anonymous", "title": "Anonymous", "body": "No owner"}, http.StatusUnauthorized)
+	blogTestRequest(t, app, http.MethodPost, "/api/v1/posts", "", map[string]any{"slug": "anonymous", "title": "Anonymous", "body": "No owner"}, http.StatusUnauthorized)
 	blogTestRequest(t, app, http.MethodPatch, blogTestPath(public.ID), "", map[string]any{"title": "Anonymous edit"}, http.StatusUnauthorized)
 	blogTestRequest(t, app, http.MethodDelete, blogTestPath(public.ID), "", nil, http.StatusUnauthorized)
 
 	// Optional authentication must reject an invalid supplied credential, even
 	// when the same read would be allowed without an Authorization header.
-	blogTestRequest(t, app, http.MethodGet, "/api/posts", "not-a-token", nil, http.StatusUnauthorized)
+	blogTestRequest(t, app, http.MethodGet, "/api/v1/posts", "not-a-token", nil, http.StatusUnauthorized)
 	blogTestRequest(t, app, http.MethodGet, blogTestPath(public.ID), "not-a-token", nil, http.StatusUnauthorized)
 
 	updatedBody := blogTestRequest(t, app, http.MethodPatch, blogTestPath(private.ID), alice.token, map[string]any{
@@ -338,7 +343,7 @@ func TestBlogPostsIntegration(t *testing.T) {
 	assertBlogPostIDs(t, app, bob.token, bobPublic.ID)
 
 	t.Run("account bans apply on refresh", func(t *testing.T) {
-		blogTestRequest(t, app, http.MethodPost, "/api/v1/channel/writerbob-channel/members", bob.token, map[string]any{"user_id": alice.id, "role": "owner"}, http.StatusOK)
+		blogTestRequest(t, app, http.MethodPost, "/auth/v1/channel/writerbob-channel/members", bob.token, map[string]any{"user_id": alice.id, "role": "owner"}, http.StatusOK)
 		if err := service.client.BanUser(t.Context(), bob.id, nil, nil, admin.id); err != nil {
 			t.Fatalf("ban user: %v", err)
 		}
@@ -347,7 +352,7 @@ func TestBlogPostsIntegration(t *testing.T) {
 		blogTestRequest(t, app, http.MethodGet, blogTestPath(bobPublic.ID), bob.token, nil, http.StatusOK)
 		blogTestRequest(t, app, http.MethodPatch, blogTestPath(bobPublic.ID), bob.token,
 			map[string]any{"title": "Existing token is still valid"}, http.StatusOK)
-		blogTestRequest(t, app, http.MethodPost, "/api/v1/token", "", map[string]any{
+		blogTestRequest(t, app, http.MethodPost, "/auth/v1/token", "", map[string]any{
 			"grant_type": "refresh_token", "refresh_token": bob.refreshToken,
 		}, http.StatusUnauthorized)
 	})
@@ -433,7 +438,7 @@ func assertSparseChannelFeed(t *testing.T, app *blogTestServer, owner, outsider 
 	seen := map[int64]bool{}
 	cursor := ""
 	for page := 0; page < 3; page++ {
-		req, err := http.NewRequest(http.MethodGet, app.url+"/api/posts?limit=2&before="+cursor, nil)
+		req, err := http.NewRequest(http.MethodGet, app.url+"/api/v1/posts?limit=2&before="+cursor, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -474,7 +479,7 @@ func registerBlogTestUser(t *testing.T, app *blogTestServer, auth *appAuth, user
 	t.Helper()
 	email := username + "@example.com"
 	const password = "Local-demo-test-password-42!"
-	body := blogTestRequest(t, app, http.MethodPost, "/api/v1/register", "", map[string]any{
+	body := blogTestRequest(t, app, http.MethodPost, "/auth/v1/register", "", map[string]any{
 		"identifier": email, "username": username, "password": password,
 	}, http.StatusAccepted)
 	var registration struct {
@@ -486,9 +491,9 @@ func registerBlogTestUser(t *testing.T, app *blogTestServer, auth *appAuth, user
 	if registration.TokenSet.AccessToken == "" {
 		t.Fatal("registration returned no access token")
 	}
-	blogTestRequest(t, app, http.MethodGet, "/api/posts", registration.TokenSet.AccessToken, nil, http.StatusOK)
+	blogTestRequest(t, app, http.MethodGet, "/api/v1/posts", registration.TokenSet.AccessToken, nil, http.StatusOK)
 
-	body = blogTestRequest(t, app, http.MethodPost, "/api/v1/password/login", "", map[string]any{
+	body = blogTestRequest(t, app, http.MethodPost, "/auth/v1/password/login", "", map[string]any{
 		"identifier": email, "password": password,
 	}, http.StatusOK)
 	var login struct {
@@ -508,7 +513,7 @@ func registerBlogTestUser(t *testing.T, app *blogTestServer, auth *appAuth, user
 		t.Fatalf("find registered user: %v", err)
 	}
 	user.id = registered.ID
-	created := blogTestRequest(t, app, http.MethodPost, "/api/channels", user.token, map[string]any{"slug": username + "-channel", "name": username + " publisher"}, http.StatusCreated)
+	created := blogTestRequest(t, app, http.MethodPost, "/api/v1/channels", user.token, map[string]any{"slug": username + "-channel", "name": username + " publisher"}, http.StatusCreated)
 	var ch channel
 	decodeBlogTestJSON(t, created, &ch)
 	user.channelID = ch.ID
@@ -524,7 +529,7 @@ func createBlogTestPost(t *testing.T, app *blogTestServer, token string, input m
 				Persona string `json:"persona"`
 			} `json:"data"`
 		}
-		decodeBlogTestJSON(t, blogTestRequest(t, app, http.MethodGet, "/api/v1/me/groups", token, nil, http.StatusOK), &groups)
+		decodeBlogTestJSON(t, blogTestRequest(t, app, http.MethodGet, "/auth/v1/me/groups", token, nil, http.StatusOK), &groups)
 		for _, group := range groups.Data {
 			if group.Persona == "channel" {
 				input["channel_id"] = group.ID
@@ -532,7 +537,7 @@ func createBlogTestPost(t *testing.T, app *blogTestServer, token string, input m
 			}
 		}
 	}
-	body := blogTestRequest(t, app, http.MethodPost, "/api/posts", token, input, http.StatusCreated)
+	body := blogTestRequest(t, app, http.MethodPost, "/api/v1/posts", token, input, http.StatusCreated)
 	var post blogPost
 	decodeBlogTestJSON(t, body, &post)
 	if post.ID == 0 {
@@ -554,7 +559,7 @@ func assertBlogPostAuthor(t *testing.T, pool *pgxpool.Pool, postID int64, expect
 
 func assertBlogPostIDs(t *testing.T, app *blogTestServer, token string, expected ...int64) {
 	t.Helper()
-	body := blogTestRequest(t, app, http.MethodGet, "/api/posts", token, nil, http.StatusOK)
+	body := blogTestRequest(t, app, http.MethodGet, "/api/v1/posts", token, nil, http.StatusOK)
 	var posts []blogPost
 	decodeBlogTestJSON(t, body, &posts)
 	actual := make([]int64, 0, len(posts))
@@ -568,7 +573,7 @@ func assertBlogPostIDs(t *testing.T, app *blogTestServer, token string, expected
 	}
 }
 
-func blogTestPath(id int64) string { return fmt.Sprintf("/api/posts/%d", id) }
+func blogTestPath(id int64) string { return fmt.Sprintf("/api/v1/posts/%d", id) }
 
 func blogTestRequest(t *testing.T, app *blogTestServer, method, path, token string, input any, status int, headers ...http.Header) []byte {
 	t.Helper()

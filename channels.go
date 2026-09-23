@@ -38,9 +38,9 @@ func newChannels(pool *pgxpool.Pool, auth *appAuth, billing postBilling, cfg Con
 }
 
 func (api *channelAPI) mount(app fiber.Router, required fiber.Handler) {
-	app.Post("/api/channels", required, api.create)
-	app.Get("/api/channels/:id", required, api.get)
-	app.Delete("/api/channels/:id", required, api.delete)
+	app.Post("/api/v1/channels", required, api.create)
+	app.Get("/api/v1/channels/:id", required, api.get)
+	app.Delete("/api/v1/channels/:id", required, api.delete)
 }
 
 func (api *channelAPI) create(c fiber.Ctx) error {

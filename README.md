@@ -90,8 +90,11 @@ HTTP configuration and background jobs; its client exposes typed business calls.
 composition, `main.go` obtains `authkitfiber.Routes(auth.runtime)` and
 `openrailsfiber.Routes(billing.runtime)` and mounts each bundle once. OpenRails
 selects its provider callbacks from its configuration; the demo has no separate
-webhook handler or handwritten callback registrations. AuthKit's identity routes
-mount at their configured root anchors; this demo mounts billing under `/billing`.
+webhook handler or handwritten callback registrations. Application routes use
+`/api/v1`, AuthKit's JSON API uses `/auth/v1`, and billing uses `/billing/v1`.
+AuthKit's protocol endpoints retain their canonical anchors: JWKS at
+`/.well-known/jwks.json` and browser OIDC under `/oidc` when configured. The token
+issuer remains the origin so discovery and signed request verification stay aligned.
 Remote OpenRails consumers only need its remote client, with no local runtime or
 route bundle. AuthKit's client boundary permits a future remote transport; this
 demo uses its supported embedded runtime.
@@ -134,22 +137,22 @@ and OpenRails retains financial history independently of the identity record.
 
 ## Users and admins
 
-Register with `POST /api/v1/register`:
+Register with `POST /auth/v1/register`:
 
 ```json
 {"identifier":"writer@example.com","username":"writer","password":"a long example password"}
 ```
 
 The response includes `token_set.access_token`. Login at
-`POST /api/v1/password/login` using `identifier` and `password`; that response
+`POST /auth/v1/password/login` using `identifier` and `password`; that response
 includes `access_token`. Send `Authorization: Bearer <access_token>` on
-authenticated requests. `GET /api/v1/me` provides the current user's ID.
+authenticated requests. `GET /auth/v1/me` provides the current user's ID.
 
-`DELETE /api/v1/user` deletes the account after fresh authentication (or a
+`DELETE /auth/v1/user` deletes the account after fresh authentication (or a
 `password` in the request body). First transfer or delete every channel it owns.
 During the 30-day recovery period, a correct password login returns 409 with
 `error.metadata.recovery.token` instead of a session. Explicitly confirm with
-`POST /api/v1/account/recovery/confirm` and `{"token":"<recovery-token>"}`, then
+`POST /auth/v1/account/recovery/confirm` and `{"token":"<recovery-token>"}`, then
 log in again. Ordinary login never silently restores the account; recovery
 tokens are single-use and cannot authenticate normal API requests.
 
@@ -186,16 +189,16 @@ and permissions. The app stores channel lifecycle state and content; it has no
 parallel ACL or owner flag. `author_id` records who created a post, while
 `channel_id` determines authority and catalog scope.
 
-Create a channel with `POST /api/channels` and `{"slug":"our-channel","name":"Our channel"}`.
-The authenticated creator becomes its owner. `GET /api/channels/:id` reads it;
-AuthKit's native `/api/v1/channel/:slug` routes manage members, roles, invitations
+Create a channel with `POST /api/v1/channels` and `{"slug":"our-channel","name":"Our channel"}`.
+The authenticated creator becomes its owner. `GET /api/v1/channels/:id` reads it;
+AuthKit's native `/auth/v1/channel/:slug` routes manage members, roles, invitations
 and settings. Native channel creation/deletion is disabled so it cannot bypass
 the app's coordinated lifecycle. A channel must retain a valid owner; transfer
 ownership or delete it before deleting its owner's account.
 The demo's content/channel routes require native user access tokens. AuthKit's
 group API also supports remote-application owners managing or transferring roles.
 
-`DELETE /api/channels/:id` returns 202 after atomically marking deletion and
+`DELETE /api/v1/channels/:id` returns 202 after atomically marking deletion and
 enqueuing a River job. That job archives catalog products, removes posts, and
 removes the AuthKit group and application metadata. Retries are durable; payment
 history and purchased-access records remain in OpenRails. No automatic refund
@@ -220,16 +223,16 @@ rejected concurrent edit cannot leave its title in billing.
 
 | Method | Route | Behavior |
 | --- | --- | --- |
-| POST | `/api/channels` | Create a channel and its AuthKit permission group |
-| GET | `/api/channels/:id` | Read an accessible channel |
-| DELETE | `/api/channels/:id` | Authorize through channel settings permission and queue durable cleanup |
-| GET | `/api/posts` | One page of public posts, sale previews, and accessible private posts (`limit=1..100`, default 50) |
-| GET | `/api/posts/:id` | Full content if allowed; a sale preview otherwise |
-| POST | `/api/posts` | Create a post in an authorized channel; record the author |
-| PATCH | `/api/posts/:id` | Channel owner/editor or root moderator edits |
-| DELETE | `/api/posts/:id` | Channel owner/editor or root moderator deletes |
-| POST | `/api/posts/:id/checkout` | Start one-time Stripe Checkout; `Idempotency-Key` required |
-| GET | `/api/checkouts/:id` | Read only the authenticated buyer's checkout |
+| POST | `/api/v1/channels` | Create a channel and its AuthKit permission group |
+| GET | `/api/v1/channels/:id` | Read an accessible channel |
+| DELETE | `/api/v1/channels/:id` | Authorize through channel settings permission and queue durable cleanup |
+| GET | `/api/v1/posts` | One page of public posts, sale previews, and accessible private posts (`limit=1..100`, default 50) |
+| GET | `/api/v1/posts/:id` | Full content if allowed; a sale preview otherwise |
+| POST | `/api/v1/posts` | Create a post in an authorized channel; record the author |
+| PATCH | `/api/v1/posts/:id` | Channel owner/editor or root moderator edits |
+| DELETE | `/api/v1/posts/:id` | Channel owner/editor or root moderator deletes |
+| POST | `/api/v1/posts/:id/checkout` | Start one-time Stripe Checkout; `Idempotency-Key` required |
+| GET | `/api/v1/checkouts/:id` | Read only the authenticated buyer's checkout |
 
 OpenRails also exposes its native customer billing group under `/billing/v1/me`.
 `billing.go` supplies native AuthKit identity and the customer route policy to the
@@ -271,7 +274,7 @@ the content, while OpenRails retains its billing records.
 As a different user, request checkout:
 
 ```sh
-curl -X POST http://localhost:3000/api/posts/1/checkout \
+curl -X POST http://localhost:3000/api/v1/posts/1/checkout \
   -H "Authorization: Bearer $BUYER_TOKEN" \
   -H 'Idempotency-Key: purchase-attempt-1'
 ```
