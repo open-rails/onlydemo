@@ -118,11 +118,26 @@ func (b *billingService) archiveResource(ctx context.Context, resource string) e
 	return err
 }
 
-// archivePostProduct retires a deleted post's product. It never deletes the
-// product, so purchase history and entitlements stay intact; host refund
-// policy for deleted content belongs here.
-func (b *billingService) archivePostProduct(ctx context.Context, resource string) error {
-	return b.archiveResource(ctx, resource)
+// archivePostProduct archives a deleted post's product (never deletes it) and
+// applies the host's refund policy to purchases made within the window before
+// deletedAt. The key is derived from the post and policy, so the inline attempt
+// and the job replay one operation; each call is capped, so replay until done.
+func (b *billingService) archivePostProduct(ctx context.Context, resource string, deletedAt time.Time) error {
+	policy := b.postDeletion
+	params := openrails.ArchiveProductParams{ProductKey: resource, Action: policy.Action, Reason: "post deleted",
+		IdempotencyKey: fmt.Sprintf("post-archive:%s:%s:%s", resource, policy.Action, policy.Window)}
+	if policy.Action != openrails.PurchaseActionNone {
+		params.PurchasedSince = deletedAt.Add(-policy.Window)
+	}
+	for {
+		archive, err := b.client.ArchiveProduct(ctx, params)
+		if errors.Is(err, openrails.ErrNotFound) {
+			return nil
+		}
+		if err != nil || archive.Complete {
+			return err
+		}
+	}
 }
 func (b *billingService) ArchiveChannelCatalog(ctx context.Context, id string) error {
 	catalog, err := b.client.GetCatalogForOwner(ctx, id)

@@ -70,6 +70,7 @@ Do not put executable paths or obsolete billing encryption keys in `.env`.
 | `AUTH_KEYS_PATH` | Dev signing and TOTP key directory (default `.runtime/auth`), so sessions and authenticator apps survive restarts |
 | `AUTH_SCHEMA`, `APP_SCHEMA`, `BILLING_SCHEMA`, `RIVER_SCHEMA` | Optional independent schema names; shared `public` is supported |
 | `BILLING_PSPS` | Enabled providers: `stripe`, `nmi` or both (default `stripe`) |
+| `POST_DELETION_REFUND`, `POST_DELETION_REFUND_WINDOW` | Deleting a paid post: `refund` (default), `review` or `none` for one-time purchases made within the window before deletion (default `720h`). A post that becomes free refunds nothing |
 | `CONTENT_SCHEMA` | ContentKit baseline schema (default `content`); holds the upload limiter's counters |
 | `MEDIA_S3_*` | Media bucket: `ENDPOINT`, `PUBLIC_ENDPOINT` (browser presign host), `BUCKET`, `REGION`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY` |
 | `MEDIA_URL`, `MEDIA_DELIVERY`, `MEDIA_COOKIE_DOMAIN` | media-access origin; `cookie` (default) or `url` delivery |

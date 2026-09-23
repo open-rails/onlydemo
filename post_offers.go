@@ -100,6 +100,7 @@ func (api *postAPI) syncOffer(ctx context.Context, args postOfferArgs) error {
 	if !live || revision != args.Revision {
 		return nil
 	}
+	// A post that became free keeps its buyers' access; nothing is refunded.
 	if args.Price == nil {
 		return api.billing.archiveResource(ctx, postResource(key))
 	}
@@ -115,18 +116,18 @@ func (api *postAPI) syncOffer(ctx context.Context, args postOfferArgs) error {
 
 func (api *postAPI) archivePost(ctx context.Context, id int64) error {
 	var key string
-	var deleted bool
-	err := api.pool.QueryRow(ctx, `SELECT billing_key::text,deleted_at IS NOT NULL FROM `+api.table+` WHERE id=$1`, id).Scan(&key, &deleted)
+	var deletedAt *time.Time
+	err := api.pool.QueryRow(ctx, `SELECT billing_key::text,deleted_at FROM `+api.table+` WHERE id=$1`, id).Scan(&key, &deletedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	if !deleted {
+	if deletedAt == nil {
 		return errors.New("post deletion was not accepted")
 	}
-	return api.billing.archivePostProduct(ctx, postResource(key))
+	return api.billing.archivePostProduct(ctx, postResource(key), *deletedAt)
 }
 
 // inline runs a committed job's work in the request, bounded; failure is left

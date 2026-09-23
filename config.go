@@ -6,10 +6,12 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/knadh/koanf/providers/env/v2"
 	"github.com/knadh/koanf/v2"
+	"github.com/open-rails/openrails"
 )
 
 type Config struct {
@@ -35,6 +37,13 @@ type Config struct {
 	NMIWebhookSecret      string
 	ContentSchema         string
 	Media                 mediaConfig
+	PostDeletion          postDeletionPolicy
+}
+
+// postDeletionPolicy is what deleting a paid post does to its recent purchases.
+type postDeletionPolicy struct {
+	Action openrails.PurchaseAction
+	Window time.Duration
 }
 
 func loadConfig() (Config, error) {
@@ -55,7 +64,7 @@ func loadConfig() (Config, error) {
 			case "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_KEYS_PATH", "AUTH_SCHEMA", "APP_SCHEMA", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA", "BILLING_PSPS", "STRIPE_PUBLISHABLE_KEY", "STRIPE_SECRET_KEY", "STRIPE_ACCOUNT_ID", "STRIPE_WEBHOOK_SECRET", "NMI_ACCOUNT_ID", "NMI_SANDBOX_SECURITY_KEY", "NMI_TOKENIZATION_KEY", "NMI_TOKENIZATION_URL", "NMI_WEBHOOK_SIGNING_SECRET":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
 			default:
-				if key == "CONTENT_SCHEMA" || strings.HasPrefix(key, "MEDIA_") {
+				if key == "CONTENT_SCHEMA" || key == "POST_DELETION_REFUND" || key == "POST_DELETION_REFUND_WINDOW" || strings.HasPrefix(key, "MEDIA_") {
 					return strings.ToLower(key), value
 				}
 				return "", nil
@@ -125,6 +134,9 @@ func loadConfig() (Config, error) {
 		NMIWebhookSecret:      k.String("nmi.webhook.signing.secret"),
 		ContentSchema:         strings.TrimSpace(k.String("content_schema")),
 	}
+	if cfg.PostDeletion, err = parsePostDeletionPolicy(k.String("post_deletion_refund"), k.String("post_deletion_refund_window")); err != nil {
+		return Config{}, err
+	}
 	if cfg.Media, err = loadMediaConfig(k.String); err != nil {
 		return Config{}, err
 	}
@@ -151,6 +163,26 @@ func parseBillingPSPs(raw string) ([]string, error) {
 		psps = append(psps, name)
 	}
 	return psps, nil
+}
+
+// parsePostDeletionPolicy defaults to refunding purchases from the last 30 days.
+func parsePostDeletionPolicy(action, window string) (postDeletionPolicy, error) {
+	policy := postDeletionPolicy{Action: openrails.PurchaseActionRefund, Window: 720 * time.Hour}
+	switch a := openrails.PurchaseAction(strings.ToLower(strings.TrimSpace(action))); a {
+	case "":
+	case openrails.PurchaseActionRefund, openrails.PurchaseActionReview, openrails.PurchaseActionNone:
+		policy.Action = a
+	default:
+		return policy, fmt.Errorf("POST_DELETION_REFUND must be refund, review or none")
+	}
+	if window = strings.TrimSpace(window); window != "" {
+		d, err := time.ParseDuration(window)
+		if err != nil || d <= 0 {
+			return policy, fmt.Errorf("POST_DELETION_REFUND_WINDOW must be a positive duration such as 720h")
+		}
+		policy.Window = d
+	}
+	return policy, nil
 }
 
 // Libraries own distinct relation names and can share a schema. Validate
