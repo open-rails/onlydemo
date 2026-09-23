@@ -26,6 +26,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/authkit"
+	"github.com/open-rails/openrails"
 	"github.com/riverqueue/river"
 )
 
@@ -126,7 +128,7 @@ func smoke() error {
 	if err != nil {
 		return err
 	}
-	post, err := owner.call("POST", "/api/v1/posts", ownerToken, map[string]any{"channel_id": ch["id"], "slug": "smoke-post", "title": "Manual purchase", "body": "Paid content", "visibility": "private", "price_cents": 499}, "", 201)
+	post, err := owner.call("POST", "/api/v1/posts", ownerToken, map[string]any{"channel_id": ch["id"], "slug": "smoke-post", "title": "Manual purchase", "body": "Paid content", "access_policy": "ppv", "price": map[string]any{"unit_amount": "4990000", "currency": "USD"}}, "", 201)
 	if err != nil {
 		return err
 	}
@@ -138,18 +140,57 @@ func smoke() error {
 	if preview["can_read"] != false || preview["body"] != nil {
 		return fmt.Errorf("unpaid content leaked")
 	}
-	checkout, err := buyer.call("POST", path+"/checkout", buyerToken, nil, "manual-purchase", 201)
+	offers := post["offers"].([]any)
+	if len(offers) == 0 {
+		return fmt.Errorf("post has no offers")
+	}
+	purchase := map[string]any{"price_id": offers[0].(map[string]any)["price_id"]}
+	if _, err = owner.call("POST", path+"/checkout", ownerToken, purchase, "owner-refusal", 409); err != nil {
+		return err
+	}
+	editor := smokePeer(base, "127.0.0.4")
+	editorToken, err := editor.register("smokeeditor")
 	if err != nil {
 		return err
 	}
-	replay, err := buyer.call("POST", path+"/checkout", buyerToken, nil, "manual-purchase", 201)
+	if _, err = owner.call("POST", "/api/v1/channels/"+ch["id"].(string)+"/members", ownerToken, map[string]any{"username": "smokeeditor", "role": "editor"}, "", 201); err != nil {
+		return err
+	}
+	if _, err = editor.call("POST", path+"/checkout", editorToken, purchase, "editor-refusal", 409); err != nil {
+		return err
+	}
+	checkout, err := buyer.call("POST", path+"/checkout", buyerToken, purchase, "manual-purchase", 201)
+	if err != nil {
+		return err
+	}
+	if _, err = owner.call("POST", "/api/v1/channels/"+ch["id"].(string)+"/members", ownerToken, map[string]any{"username": "smokebuyer", "role": "editor"}, "", 201); err != nil {
+		return err
+	}
+	replay, err := buyer.call("POST", path+"/checkout", buyerToken, purchase, "manual-purchase", 201)
 	if err != nil {
 		return err
 	}
 	if checkout["id"] != replay["id"] {
 		return fmt.Errorf("checkout replay created a new session")
 	}
-	if err = stripe.settle(ctx, base); err != nil {
+	buyerProfile, err := auth.client.GetUserByUsername(ctx, "smokebuyer")
+	if err != nil {
+		return err
+	}
+	if _, err = owner.call("DELETE", "/api/v1/channels/"+ch["id"].(string)+"/members/"+buyerProfile.ID, ownerToken, nil, "", 204); err != nil {
+		return err
+	}
+	webhookPath := ""
+	for _, route := range app.GetRoutes(true) {
+		if route.Method == "POST" && strings.Contains(route.Path, "webhooks/") {
+			webhookPath = strings.NewReplacer(":merchant", "openrails-demo", ":provider", "stripe", ":account_id", "acct_demo_test").Replace(route.Path)
+			break
+		}
+	}
+	if webhookPath == "" {
+		return fmt.Errorf("Stripe callback route missing")
+	}
+	if err = stripe.settle(ctx, base, webhookPath); err != nil {
 		return err
 	}
 	paid, err := buyer.call("GET", path, buyerToken, nil, "", 200)
@@ -168,7 +209,177 @@ func smoke() error {
 	if _, err = buyer.call("GET", "/.well-known/jwks.json", "", nil, "", 200); err != nil {
 		return err
 	}
+	// Mutable catalog policy cannot prevent an exact accepted replay.
+	if _, err = owner.call("PATCH", path, ownerToken, map[string]any{"price": map[string]any{"unit_amount": "5990000", "currency": "USD"}}, "", 200); err != nil {
+		return err
+	}
+	acceptedReplay, err := buyer.call("POST", path+"/checkout", buyerToken, purchase, "manual-purchase", 201)
+	if err != nil {
+		return err
+	}
+	if acceptedReplay["id"] != checkout["id"] {
+		return fmt.Errorf("reprice changed accepted checkout")
+	}
+	gated, err := owner.call("POST", "/api/v1/posts", ownerToken, map[string]any{"channel_id": ch["id"], "slug": "members-extra", "title": "Members buy separately", "body": "Extra permanent purchase", "access_policy": "members_ppv", "price": map[string]any{"unit_amount": "4990000", "currency": "USD"}}, "", 201)
+	if err != nil {
+		return err
+	}
+	gatedPath := fmt.Sprintf("/api/v1/posts/%.0f/checkout", gated["id"].(float64))
+	gatedPrice := gated["offers"].([]any)[0].(map[string]any)["price_id"]
+	if _, err = buyer.call("POST", gatedPath, buyerToken, map[string]any{"price_id": gatedPrice}, "nonmember-refusal", 403); err != nil {
+		return err
+	}
+	if _, err = buyer.call("POST", "/billing/v1/me/checkout", buyerToken, map[string]any{"price_id": gatedPrice}, "bypass-refusal", 404); err != nil {
+		return err
+	}
 	channelID := ch["id"].(string)
+	membership, err := owner.call("PUT", "/api/v1/channels/"+channelID+"/membership", ownerToken, map[string]any{"unit_amount": "9990000", "currency": "USD"}, "", 200)
+	if err != nil {
+		return err
+	}
+	membershipOffers := membership["offers"].([]any)
+	if len(membershipOffers) == 0 {
+		return fmt.Errorf("membership offer missing")
+	}
+	membershipPrice := membershipOffers[0].(map[string]any)["price_id"].(string)
+	rails, err := billing.client.ListCheckoutRailOptions(ctx, membershipPrice)
+	if err != nil || len(rails) == 0 {
+		return fmt.Errorf("membership rails unavailable: %w", err)
+	}
+	action, err := buyer.call("POST", "/billing/v1/me/payment-methods/stripe-setup", buyerToken, map[string]any{"psp_id": rails[0].PSPID, "consent": true}, "manual-card-setup", 200)
+	if err != nil {
+		return err
+	}
+	method, err := buyer.call("POST", "/billing/v1/me/payment-methods/stripe-setup/"+action["id"].(string)+"/confirm", buyerToken, nil, "", 200)
+	if err != nil {
+		return err
+	}
+	included, err := owner.call("POST", "/api/v1/posts", ownerToken, map[string]any{"channel_id": channelID, "slug": "included-post", "title": "Membership post", "body": "Members read this", "access_policy": "membership"}, "", 201)
+	if err != nil {
+		return err
+	}
+	includedPath := fmt.Sprintf("/api/v1/posts/%.0f", included["id"].(float64))
+	beforeMembership, err := buyer.call("GET", includedPath, buyerToken, nil, "", 200)
+	if err != nil {
+		return err
+	}
+	if beforeMembership["can_read"] != false {
+		return fmt.Errorf("membership content leaked before payment")
+	}
+	quote, err := buyer.call("POST", "/api/v1/channels/"+channelID+"/subscribe", buyerToken, map[string]any{"price_id": membershipPrice, "payment": map[string]any{"rail": "stripe", "payment_method_id": method["payment_method_id"]}}, "manual-membership", 201)
+	if err != nil {
+		return err
+	}
+	nativeQuote, err := buyer.call("GET", "/billing/v1/me/checkout/"+quote["id"].(string), buyerToken, nil, "", 200)
+	if err != nil {
+		return err
+	}
+	if nativeQuote["membership_quote"] == nil {
+		return fmt.Errorf("membership quote missing")
+	}
+	_, err = buyer.call("POST", "/billing/v1/me/checkout/"+quote["id"].(string)+"/confirm", buyerToken, map[string]any{"payment": map[string]string{"rail": "stripe"}}, "", 200)
+	if err != nil {
+		return err
+	}
+	afterMembership, err := buyer.call("GET", includedPath, buyerToken, nil, "", 200)
+	if err != nil {
+		return err
+	}
+	if afterMembership["can_read"] != true {
+		return fmt.Errorf("verified membership did not grant access")
+	}
+	future, err := owner.call("POST", "/api/v1/posts", ownerToken, map[string]any{"channel_id": channelID, "slug": "future-included", "title": "New member story", "body": "Future member content", "access_policy": "membership"}, "", 201)
+	if err != nil {
+		return err
+	}
+	futureRead, err := buyer.call("GET", fmt.Sprintf("/api/v1/posts/%.0f", future["id"].(float64)), buyerToken, nil, "", 200)
+	if err != nil {
+		return err
+	}
+	if futureRead["can_read"] != true {
+		return fmt.Errorf("membership did not include future post")
+	}
+	gatedRead, err := buyer.call("GET", fmt.Sprintf("/api/v1/posts/%.0f", gated["id"].(float64)), buyerToken, nil, "", 200)
+	if err != nil {
+		return err
+	}
+	if gatedRead["can_read"] != false {
+		return fmt.Errorf("membership incorrectly granted separately priced post")
+	}
+	user, err := auth.client.GetUserByUsername(ctx, "smokebuyer")
+	if err != nil {
+		return err
+	}
+	groups, err := auth.client.ListSubjectGroups(ctx, authkit.UserSubject(user.ID))
+	if err != nil {
+		return err
+	}
+	for _, group := range groups {
+		if group.GroupID == channelID {
+			return fmt.Errorf("subscriber became an editorial member")
+		}
+	}
+	dashboard, err := buyer.call("GET", "/api/v1/me", buyerToken, nil, "", 200)
+	if err != nil {
+		return err
+	}
+	subscriptions := dashboard["subscriptions"].([]any)
+	if len(subscriptions) != 1 {
+		return fmt.Errorf("membership not present in dashboard")
+	}
+	subscription := subscriptions[0].(map[string]any)
+	if _, err = buyer.call("DELETE", "/auth/v1/user", buyerToken, map[string]any{"password": "Manual-smoke-password-42!"}, "", 204); err != nil {
+		return err
+	}
+	subscriptionID, err := openrails.ParseSubscriptionID(subscription["id"].(string))
+	if err != nil {
+		return err
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		current, err := billing.client.GetSubscription(ctx, subscriptionID)
+		if err != nil {
+			return err
+		}
+		if current.CancelScheduled || current.Status == "cancelled" {
+			break
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("account deletion did not cancel renewable billing")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	recovery, err := buyer.call("POST", "/auth/v1/password/login", "", map[string]any{"identifier": "smokebuyer@example.test", "password": "Manual-smoke-password-42!"}, "", 409)
+	if err != nil {
+		return err
+	}
+	token := recovery["error"].(map[string]any)["metadata"].(map[string]any)["recovery"].(map[string]any)["token"]
+	if _, err = buyer.call("POST", "/auth/v1/account/recovery/confirm", "", map[string]any{"token": token}, "", 204); err != nil {
+		return err
+	}
+	login, err := buyer.call("POST", "/auth/v1/password/login", "", map[string]any{"identifier": "smokebuyer@example.test", "password": "Manual-smoke-password-42!"}, "", 200)
+	if err != nil {
+		return err
+	}
+	buyerToken = login["access_token"].(string)
+	current, err := billing.client.GetSubscription(ctx, subscriptionID)
+	if err != nil {
+		return err
+	}
+	if !current.CancelScheduled && current.Status != "cancelled" {
+		return fmt.Errorf("account recovery silently resumed billing")
+	}
+	// A policy edit never removes permanent purchase access.
+	if _, err = owner.call("PATCH", path, ownerToken, map[string]any{"access_policy": "membership"}, "", 200); err != nil {
+		return err
+	}
+	retainedPurchase, err := buyer.call("GET", path, buyerToken, nil, "", 200)
+	if err != nil {
+		return err
+	}
+	if retainedPurchase["purchased"] != true || retainedPurchase["can_read"] != true {
+		return fmt.Errorf("policy edit removed permanent purchase")
+	}
 	if _, err = owner.call("DELETE", "/api/v1/channels/"+channelID, ownerToken, nil, "", 202); err != nil {
 		return err
 	}
@@ -196,7 +407,7 @@ func smoke() error {
 	if _, err = owner.call("DELETE", "/auth/v1/user", ownerToken, map[string]any{"password": "Manual-smoke-password-42!"}, "", 204); err != nil {
 		return fmt.Errorf("retired channel still blocked owner account deletion: %w", err)
 	}
-	fmt.Println("Manual smoke passed: native auth, channel/post, checkout replay, signed fake payment, paid access/history, retained soft deletion and immediate owner account deletion. Zero real provider requests.")
+	fmt.Println("Manual smoke passed: native auth, resource offers/reprice replay, permanent paid access, members-only purchase refusal, native saved-card membership/quote/confirmation/cancellation, future included posts, separate publishing roles, retained soft deletion and owner account deletion. Zero real provider requests.")
 	return nil
 }
 
@@ -264,6 +475,8 @@ type smokeStripe struct {
 	mu        sync.Mutex
 	form      url.Values
 	customers int
+	setup     map[string]any
+	payment   map[string]any
 }
 
 func (s *smokeStripe) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -290,7 +503,28 @@ func (s *smokeStripe) RoundTrip(req *http.Request) (*http.Response, error) {
 		data = map[string]any{"object": "list", "data": []any{}, "has_more": false}
 	case "POST /v1/customers":
 		s.customers++
-		data = map[string]any{"id": fmt.Sprintf("cus_smoke_%d", s.customers), "object": "customer"}
+		data = map[string]any{"id": fmt.Sprintf("cus_smoke%d", s.customers), "object": "customer"}
+	case "POST /v1/setup_intents":
+		s.setup = map[string]any{"id": "seti_smoke", "status": "requires_payment_method", "customer": req.PostForm.Get("customer"), "payment_method": "pm_smoke", "usage": "off_session", "payment_method_types": []string{"card"}, "livemode": false, "metadata": smokeMetadata(req.PostForm), "client_secret": "seti_smoke_secret_fake"}
+		data = s.setup
+	case "GET /v1/setup_intents/seti_smoke":
+		s.setup["status"] = "succeeded"
+		data = s.setup
+	case "GET /v1/payment_methods/pm_smoke":
+		data = map[string]any{"id": "pm_smoke", "type": "card", "customer": s.setup["customer"], "livemode": false, "card": map[string]any{"last4": "4242", "brand": "visa", "exp_month": 12, "exp_year": 2035}}
+	case "POST /v1/payment_intents":
+		amount, err := strconv.ParseInt(req.PostForm.Get("amount"), 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		s.payment = map[string]any{"object": "payment_intent", "id": "pi_membershipsmoke", "status": "succeeded", "customer": req.PostForm.Get("customer"), "payment_method": "pm_smoke", "amount": amount, "amount_received": amount, "currency": req.PostForm.Get("currency"), "setup_future_usage": "off_session", "capture_method": "automatic", "confirmation_method": "automatic", "livemode": false, "metadata": smokeMetadata(req.PostForm), "latest_charge": "ch_membershipsmoke"}
+		data = s.payment
+	case "GET /v1/payment_intents/pi_membershipsmoke":
+		data = s.payment
+	case "GET /v1/payment_intents":
+		data = map[string]any{"data": []any{s.payment}, "has_more": false}
+	case "GET /v1/charges/ch_membershipsmoke":
+		data = map[string]any{"id": "ch_membershipsmoke", "payment_intent": "pi_membershipsmoke", "customer": s.setup["customer"], "payment_method": "pm_smoke", "amount": 999, "amount_captured": 999, "currency": "usd", "status": "succeeded", "paid": true, "captured": true}
 	case "POST /v1/checkout/sessions":
 		if s.form != nil {
 			return nil, fmt.Errorf("unexpected second provider checkout")
@@ -306,7 +540,7 @@ func (s *smokeStripe) RoundTrip(req *http.Request) (*http.Response, error) {
 	encoded, err := json.Marshal(data)
 	return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(bytes.NewReader(encoded)), Request: req}, err
 }
-func (s *smokeStripe) settle(ctx context.Context, base string) error {
+func (s *smokeStripe) settle(ctx context.Context, base, webhookPath string) error {
 	s.mu.Lock()
 	form := s.form
 	s.mu.Unlock()
@@ -327,7 +561,7 @@ func (s *smokeStripe) settle(ctx context.Context, base string) error {
 	mac := hmac.New(sha256.New, []byte(smokeWebhookSecret))
 	mac.Write([]byte(timestamp + "."))
 	mac.Write(payload)
-	req, err := http.NewRequestWithContext(ctx, "POST", base+"/billing/v1/webhooks/stripe/acct_demo_test", bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, "POST", base+webhookPath, bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
@@ -342,4 +576,14 @@ func (s *smokeStripe) settle(ctx context.Context, base string) error {
 		return fmt.Errorf("fake paid webhook returned%d", response.StatusCode)
 	}
 	return nil
+}
+
+func smokeMetadata(form url.Values) map[string]string {
+	out := map[string]string{}
+	for key, values := range form {
+		if strings.HasPrefix(key, "metadata[") {
+			out[strings.TrimSuffix(strings.TrimPrefix(key, "metadata["), "]")] = values[0]
+		}
+	}
+	return out
 }

@@ -2,80 +2,179 @@ package main
 
 import (
 	"errors"
-	"net/http"
-	"strings"
-
 	"github.com/gofiber/fiber/v3"
 	"github.com/jackc/pgx/v5"
-	authkitfiber "github.com/open-rails/authkit/adapters/fiber"
 	"github.com/open-rails/openrails"
+	"net/http"
+	"strings"
 )
 
-func (api *blogAPI) checkout(c fiber.Ctx, successURL, cancelURL string) error {
-	user, ok := authkitfiber.UserClaims(c)
-	if !ok {
-		return clientError(c, http.StatusUnauthorized, "a user access token is required")
+type checkoutInput struct {
+	PriceID string                           `json:"price_id"`
+	Payment openrails.CheckoutPaymentOptions `json:"payment"`
+}
+
+func checkoutBody(c fiber.Ctx) (checkoutInput, string, error) {
+	var in checkoutInput
+	if len(c.Body()) > 0 {
+		if err := bindJSON(c, &in); err != nil {
+			return in, "", err
+		}
+	}
+	key := strings.TrimSpace(c.Get("Idempotency-Key"))
+	if key == "" || len(key) > 200 || in.PriceID == "" {
+		return in, key, errors.New("price_id and Idempotency-Key are required")
+	}
+	return in, key, nil
+}
+func checkoutError(c fiber.Ctx, err error) error {
+	switch {
+	case errors.Is(err, openrails.ErrConflict), errors.Is(err, openrails.ErrIdempotencyKeyReused):
+		return clientError(c, 409, "checkout conflicts with an earlier request")
+	case errors.Is(err, openrails.ErrInvalid):
+		return clientError(c, 400, "invalid checkout request")
+	case errors.Is(err, openrails.ErrDenied):
+		return clientError(c, 403, "checkout is not permitted")
+	case errors.Is(err, openrails.ErrNotFound):
+		return clientError(c, 404, "offer not found")
+	}
+	return billingUnavailable(c)
+}
+func (api *blogAPI) checkout(c fiber.Ctx, publicURL string) error {
+	if viewer(c) == "" {
+		return clientError(c, 401, "a user access token is required")
+	}
+	in, key, err := checkoutBody(c)
+	if err != nil {
+		return clientError(c, 400, err.Error())
 	}
 	id, err := postID(c)
 	if err != nil {
-		return clientError(c, http.StatusBadRequest, "invalid post id")
+		return clientError(c, 400, err.Error())
 	}
-	key := strings.TrimSpace(c.Get("Idempotency-Key"))
-	if key == "" || len(key) > 200 {
-		return clientError(c, http.StatusBadRequest, "Idempotency-Key must contain between 1 and 200 characters")
-	}
-	// Select the current immutable offer before billing borrows the same pool.
-	// Later price edits create a new offer; this checkout retains these terms.
-	// Request JSON never selects a customer or price.
-	post, err := scanBlogPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+`
-        FROM `+api.table+` WHERE id=$1 AND visibility='private' AND price_cents IS NOT NULL
-        AND EXISTS(SELECT 1 FROM `+api.channels.table+` AS channel WHERE channel.id=channel_id AND channel.deleted_at IS NULL)`, id))
+	// Identity-only lookup includes soft-deleted content so accepted exact-key
+	// retries can resolve before mutable content/membership admission checks.
+	post, err := scanBlogPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return clientError(c, http.StatusNotFound, "post is not for sale")
+		return clientError(c, 404, "post not found")
 	}
 	if err != nil {
 		return databaseError(c, err)
 	}
-	member, err := api.channels.allowed(c.Context(), user.UserID, post.ChannelID, channelReadPermission)
+	request := checkoutRequest(viewer(c), postResource(post.BillingKey), key, in.PriceID, in.Payment, openrails.OfferPermanent, publicURL)
+	replay, err := api.billing.client.LookupCheckoutSession(c.Context(), request)
+	if err == nil {
+		if replay.Status == "created" {
+			replay, err = api.billing.client.CreateCheckoutSession(c.Context(), request)
+			if err != nil {
+				return checkoutError(c, err)
+			}
+		}
+		return c.Status(201).JSON(replay)
+	}
+	if !errors.Is(err, openrails.ErrNotFound) {
+		return checkoutError(c, err)
+	}
+	release, err := api.channels.lock(c.Context(), post.ChannelID)
 	if err != nil {
-		return clientError(c, http.StatusServiceUnavailable, "permission service is unavailable")
+		return databaseError(c, err)
 	}
-	if member {
-		return clientError(c, http.StatusConflict, "you already have channel access to this post")
+	defer release()
+	post, err = scanBlogPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1 AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL)`, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return clientError(c, 404, "post not found")
 	}
-	if post.ProductID == "" || post.PriceID == "" {
+	if err != nil {
+		return databaseError(c, err)
+	}
+	if post.AccessPolicy != "ppv" && post.AccessPolicy != "members_ppv" {
+		return clientError(c, 409, "post is not sold separately")
+	}
+	editorial, err := api.channels.allowed(c.Context(), viewer(c), post.ChannelID, channelReadPermission)
+	if err != nil {
 		return billingUnavailable(c)
 	}
-	owned, err := api.billing.HasPostAccess(c.Context(), user.UserID, post.ProductID)
+	if editorial {
+		return clientError(c, 409, "you already have channel access to this post")
+	}
+	if post.AccessPolicy == "members_ppv" {
+		access, e := api.billing.access(c.Context(), viewer(c), []string{membershipResource(post.ChannelID)})
+		if e != nil {
+			return billingUnavailable(c)
+		}
+		if !access[membershipResource(post.ChannelID)] {
+			return clientError(c, 403, "active channel membership is required to buy this post")
+		}
+	}
+	result, err := api.billing.client.CreateCheckoutSession(c.Context(), request)
 	if err != nil {
-		return billingUnavailable(c)
-	}
-	if owned {
-		return clientError(c, http.StatusConflict, "you already have access to this post")
-	}
-	session, err := api.billing.CreateCheckout(c.Context(), postCheckout{UserID: user.UserID, ProductID: post.ProductID, PriceID: post.PriceID, IdempotencyKey: key, SuccessURL: successURL, CancelURL: cancelURL})
-	if errors.Is(err, openrails.ErrConflict) || errors.Is(err, openrails.ErrIdempotencyKeyReused) {
-		return clientError(c, http.StatusConflict, "checkout conflicts with an earlier request")
-	}
-	if err != nil {
-		return billingUnavailable(c)
+		return checkoutError(c, err)
 	}
 	c.Set("Cache-Control", "no-store")
-	return c.Status(http.StatusCreated).JSON(session)
+	return c.Status(201).JSON(result)
 }
-
-func (api *blogAPI) getCheckout(c fiber.Ctx) error {
-	user, ok := authkitfiber.UserClaims(c)
-	if !ok {
-		return clientError(c, http.StatusUnauthorized, "a user access token is required")
+func (api *channelAPI) subscribe(c fiber.Ctx, publicURL string) error {
+	if viewer(c) == "" {
+		return clientError(c, 401, "a user access token is required")
 	}
-	session, err := api.billing.GetCheckout(c.Context(), user.UserID, c.Params("id"))
-	if errors.Is(err, openrails.ErrNotFound) || errors.Is(err, openrails.ErrInvalid) || errors.Is(err, openrails.ErrDenied) {
-		return clientError(c, http.StatusNotFound, "checkout not found")
+	in, key, err := checkoutBody(c)
+	if err != nil {
+		return clientError(c, 400, err.Error())
 	}
+	id, err := channelID(c.Params("id"))
+	if err != nil {
+		return clientError(c, 400, "invalid channel id")
+	}
+	request := checkoutRequest(viewer(c), membershipResource(id), key, in.PriceID, in.Payment, openrails.OfferRecurring, publicURL)
+	replay, err := api.billing.client.LookupCheckoutSession(c.Context(), request)
+	if err == nil {
+		if replay.Status == "created" {
+			replay, err = api.billing.client.CreateCheckoutSession(c.Context(), request)
+			if err != nil {
+				return checkoutError(c, err)
+			}
+		}
+		return c.Status(201).JSON(replay)
+	}
+	if !errors.Is(err, openrails.ErrNotFound) {
+		return checkoutError(c, err)
+	}
+	release, err := api.lock(c.Context(), id)
+	if err != nil {
+		return databaseError(c, err)
+	}
+	defer release()
+	active, err := api.active(c.Context(), id)
+	if err != nil {
+		return databaseError(c, err)
+	}
+	if !active {
+		return clientError(c, 404, "channel not found")
+	}
+	editorial, err := api.allowed(c.Context(), viewer(c), id, channelReadPermission)
 	if err != nil {
 		return billingUnavailable(c)
 	}
+	if editorial {
+		return clientError(c, 409, "you already have editorial access to this channel")
+	}
+	if in.Payment.PaymentMethodID == "" {
+		return clientError(c, 400, "a verified saved payment method is required")
+	}
+	result, err := api.billing.client.CreateCheckoutSession(c.Context(), request)
+	if err != nil {
+		return checkoutError(c, err)
+	}
+	return c.Status(201).JSON(result)
+}
+func (api *blogAPI) getCheckout(c fiber.Ctx) error {
+	if viewer(c) == "" {
+		return clientError(c, 401, "a user access token is required")
+	}
+	result, err := api.billing.GetCheckout(c.Context(), viewer(c), c.Params("id"))
+	if err != nil {
+		return checkoutError(c, err)
+	}
 	c.Set("Cache-Control", "no-store")
-	return c.JSON(session)
+	return c.Status(http.StatusOK).JSON(result)
 }

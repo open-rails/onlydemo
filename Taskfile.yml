@@ -36,8 +36,20 @@ tasks:
 
   run:
     desc: Run the API against local PostgreSQL
+    deps: [frontend:build]
     cmds:
       - go run . serve
+
+  frontend:build:
+    desc: Build the React application
+    cmds:
+      - pnpm --dir frontend install --frozen-lockfile
+      - pnpm --dir frontend build
+
+  frontend:dev:
+    desc: Run Vite with API requests forwarded to port 3000
+    cmds:
+      - pnpm --dir frontend dev
 
   admin:grant:
     desc: Grant an existing user's AuthKit admin role (USER_ID required)
@@ -59,16 +71,18 @@ tasks:
       vars: [STRIPE_SECRET_KEY, STRIPE_ACCOUNT_ID]
     cmds:
       - |
-        STRIPE_BIN="$(command -v stripe || true)"
-        if [ -z "$STRIPE_BIN" ] && [ -x .runtime/bin/stripe ]; then STRIPE_BIN=.runtime/bin/stripe; fi
-        test -n "$STRIPE_BIN" || { echo 'stripe CLI not found on PATH or .runtime/bin/stripe' >&2; exit 1; }
-        "$STRIPE_BIN" listen --all-snapshot --forward-to "localhost:3000/billing/v1/webhooks/$STRIPE_ACCOUNT_ID"
+        stripe_cli="$(command -v stripe || true)"
+        if [ -z "$stripe_cli" ] && [ -x .runtime/bin/stripe ]; then stripe_cli=.runtime/bin/stripe; fi
+        test -n "$stripe_cli" || { echo 'stripe CLI not found on PATH or .runtime/bin/stripe' >&2; exit 1; }
+        "$stripe_cli" listen --all-snapshot --forward-to "localhost:3000/billing/v1/webhooks/stripe/$STRIPE_ACCOUNT_ID"
     env:
       STRIPE_API_KEY: '{{.STRIPE_SECRET_KEY}}'
 
   check:
     desc: Build and vet the demo
+    deps: [frontend:build]
     cmds:
+      - pnpm --dir frontend lint
       - go build ./...
       - go vet ./...
 

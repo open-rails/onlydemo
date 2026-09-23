@@ -11,18 +11,24 @@ import (
 )
 
 type Config struct {
-	Port                int
-	DatabaseURL         string
-	AuthIssuer          string
-	AuthAudience        string
-	PublicURL           string
-	AuthSchema          string
-	AppSchema           string
-	BillingSchema       string
-	RiverSchema         string
-	StripeSecretKey     string
-	StripeAccountID     string
-	StripeWebhookSecret string
+	Port                  int
+	DatabaseURL           string
+	AuthIssuer            string
+	AuthAudience          string
+	PublicURL             string
+	AuthSchema            string
+	AppSchema             string
+	BillingSchema         string
+	RiverSchema           string
+	StripePublishableKey  string
+	StripeSecretKey       string
+	StripeAccountID       string
+	StripeWebhookSecret   string
+	NMIAccountID          string
+	NMISandboxSecurityKey string
+	NMITokenizationKey    string
+	NMITokenizationURL    string
+	NMIWebhookSecret      string
 }
 
 func loadConfig() (Config, error) {
@@ -34,7 +40,7 @@ func loadConfig() (Config, error) {
 				return strings.ToLower(key), value
 			case "DATABASE_URL":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
-			case "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_SCHEMA", "APP_SCHEMA", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA", "STRIPE_SECRET_KEY", "STRIPE_ACCOUNT_ID", "STRIPE_WEBHOOK_SECRET":
+			case "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_SCHEMA", "APP_SCHEMA", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA", "STRIPE_PUBLISHABLE_KEY", "STRIPE_SECRET_KEY", "STRIPE_ACCOUNT_ID", "STRIPE_WEBHOOK_SECRET", "NMI_ACCOUNT_ID", "NMI_SANDBOX_SECURITY_KEY", "NMI_TOKENIZATION_KEY", "NMI_TOKENIZATION_URL", "NMI_WEBHOOK_SIGNING_SECRET":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
 			default:
 				return "", nil
@@ -73,18 +79,24 @@ func loadConfig() (Config, error) {
 	}
 
 	cfg := Config{
-		Port:                port,
-		DatabaseURL:         databaseURL,
-		AuthIssuer:          authIssuer,
-		AuthAudience:        authAudience,
-		PublicURL:           publicURL,
-		AuthSchema:          strings.TrimSpace(k.String("auth.schema")),
-		AppSchema:           strings.TrimSpace(k.String("app.schema")),
-		BillingSchema:       strings.TrimSpace(k.String("billing.schema")),
-		RiverSchema:         strings.TrimSpace(k.String("river.schema")),
-		StripeSecretKey:     k.String("stripe.secret.key"),
-		StripeAccountID:     k.String("stripe.account.id"),
-		StripeWebhookSecret: k.String("stripe.webhook.secret"),
+		Port:                  port,
+		DatabaseURL:           databaseURL,
+		AuthIssuer:            authIssuer,
+		AuthAudience:          authAudience,
+		PublicURL:             publicURL,
+		AuthSchema:            strings.TrimSpace(k.String("auth.schema")),
+		AppSchema:             strings.TrimSpace(k.String("app.schema")),
+		BillingSchema:         strings.TrimSpace(k.String("billing.schema")),
+		RiverSchema:           strings.TrimSpace(k.String("river.schema")),
+		StripePublishableKey:  k.String("stripe.publishable.key"),
+		StripeSecretKey:       k.String("stripe.secret.key"),
+		StripeAccountID:       k.String("stripe.account.id"),
+		StripeWebhookSecret:   k.String("stripe.webhook.secret"),
+		NMIAccountID:          k.String("nmi.account.id"),
+		NMISandboxSecurityKey: k.String("nmi.sandbox.security.key"),
+		NMITokenizationKey:    k.String("nmi.tokenization.key"),
+		NMITokenizationURL:    k.String("nmi.tokenization.url"),
+		NMIWebhookSecret:      k.String("nmi.webhook.signing.secret"),
 	}
 	if err := validateDatabaseSchemas(cfg); err != nil {
 		return Config{}, err

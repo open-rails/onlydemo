@@ -2,16 +2,12 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	riverkit "github.com/open-rails/helpers/river"
 	"github.com/open-rails/openrails"
@@ -26,11 +22,6 @@ const (
 	minPostPriceCents   int64 = 50
 	maxPostPriceCents   int64 = 99_999_999
 )
-
-type postCheckout struct {
-	UserID, ProductID, PriceID, IdempotencyKey string
-	SuccessURL, CancelURL                      string
-}
 
 type billingService struct {
 	runtime *openrailsembed.Runtime
@@ -110,6 +101,8 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 	if err != nil {
 		return nil, err
 	}
+	// This assignment precedes shared-fleet startup and HTTP publication.
+	auth.billing = client
 	return &billingService{runtime: runtime, client: client}, nil
 }
 
@@ -129,125 +122,4 @@ func (b *billingService) Close(ctx context.Context) error {
 
 func (b *billingService) Ready(ctx context.Context) error {
 	return b.runtime.Ready(ctx)
-}
-
-// The handler verifies channel permissions through AuthKit before selecting
-// that channel's catalog. Post authorship does not confer catalog authority.
-func (b *billingService) EnsurePostOffer(ctx context.Context, catalogOwnerID, billingKey, title string, priceCents int64) (string, string, error) {
-	client, err := b.client.ForCatalogOwner(catalogOwnerID)
-	if err != nil {
-		return "", "", err
-	}
-	return ensurePostOffer(ctx, client, "", nil, billingKey, title, priceCents)
-}
-
-// The blog handler calls this path only after AuthKit grants moderation access.
-// It uses administrator authority explicitly while preserving the channel's catalog.
-func (b *billingService) EnsurePostOfferAsAdmin(ctx context.Context, ownerID, billingKey, title string, priceCents int64) (string, string, error) {
-	catalog, err := b.client.EnsureCatalogForOwner(ctx, ownerID)
-	if err != nil {
-		return "", "", err
-	}
-	return ensurePostOffer(ctx, b.client, catalog.ID.String(), []string{"stripe"}, billingKey, title, priceCents)
-}
-
-// ArchiveChannelCatalog preserves purchase history while retiring a channel's
-// offers. Exact owner lookup does not manufacture an empty catalog.
-func (b *billingService) ArchiveChannelCatalog(ctx context.Context, channelID string) error {
-	const pageSize = 100
-	catalog, err := b.client.GetCatalogForOwner(ctx, channelID)
-	if errors.Is(err, openrails.ErrNotFound) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("find channel catalog: %w", err)
-	}
-	active, archived := false, true
-	for {
-		products, err := b.client.Products.List(ctx, &openrails.ProductListParams{
-			PageOptions: openrails.PageOptions{Limit: pageSize}, CatalogID: catalog.ID.String(), Archived: &active,
-		})
-		if err != nil {
-			return fmt.Errorf("list channel offers: %w", err)
-		}
-		if len(products.Items) == 0 {
-			return nil
-		}
-		for _, product := range products.Items {
-			if _, err := b.client.Products.Update(ctx, product.ID, &openrails.ProductUpdateParams{Archived: &archived}); err != nil {
-				return fmt.Errorf("archive channel offer: %w", err)
-			}
-		}
-		// Repeat the first active page: archived products leave this set.
-	}
-}
-
-func ensurePostOffer(ctx context.Context, client *openrails.Client, catalogID string, providers []string, billingKey, title string, priceCents int64) (string, string, error) {
-	id, err := uuid.Parse(billingKey)
-	if err != nil || id == uuid.Nil || id.String() != billingKey {
-		return "", "", errors.New("invalid post billing key")
-	}
-	if priceCents < minPostPriceCents || priceCents > maxPostPriceCents {
-		return "", "", errors.New("post price must be between 50 and 99999999 USD cents")
-	}
-	key := "post-" + billingKey
-	// The product label is the first-listing title snapshot. Preparing an offer
-	// must not change it before the blog's revision check accepts the edit.
-	// Each amount has an immutable offer. Leave previous offers intact: the
-	// later post write or revision check can fail after this catalog write.
-	// Only the price selected by the post row is exposed by our checkout route.
-	price, err := client.Prices.Create(ctx, &openrails.PriceCreateParams{
-		ProductData:         &openrails.PriceCreateProductDataParams{CatalogID: catalogID, Key: key, DisplayName: title},
-		Key:                 key + "-usd-" + strconv.FormatInt(priceCents, 10),
-		UnitAmount:          priceCents * 10_000, // OpenRails fiat amounts are micros.
-		Currency:            "USD",
-		AccessDurationHours: nil,
-		AutoRenew:           false,
-		PSPs:                providers,
-	})
-	if err != nil {
-		return "", "", fmt.Errorf("ensure post price: %w", err)
-	}
-	return price.ProductID, price.ID, nil
-}
-
-func (b *billingService) HasPostAccess(ctx context.Context, userID, productID string) (bool, error) {
-	result, err := b.client.ProductAccess.Check(ctx, &openrails.ProductAccessCheckParams{CustomerID: userID, ProductID: productID})
-	if err != nil {
-		return false, err
-	}
-	return result.HasAccess, nil
-}
-
-func (b *billingService) CheckPostAccess(ctx context.Context, userID string, productIDs []string) (map[string]bool, error) {
-	return b.client.ProductAccess.CheckMany(ctx, &openrails.ProductAccessCheckManyParams{CustomerID: userID, ProductIDs: productIDs})
-}
-
-func (b *billingService) CreateCheckout(ctx context.Context, request postCheckout) (*openrails.CheckoutSession, error) {
-	if strings.TrimSpace(request.IdempotencyKey) == "" || len(request.IdempotencyKey) > 200 {
-		return nil, errors.New("Idempotency-Key must contain between 1 and 200 characters")
-	}
-	// Namespace the caller's retry key by authenticated buyer and product. A
-	// second buyer cannot collide with or retrieve someone else's checkout.
-	digest := sha256.Sum256([]byte(request.UserID + "\x00" + request.ProductID + "\x00" + request.IdempotencyKey))
-	return b.client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{
-		Customer:       openrails.CheckoutCustomerIdentity{ID: request.UserID},
-		PriceID:        request.PriceID,
-		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "stripe"},
-		IdempotencyKey: "post-" + hex.EncodeToString(digest[:]),
-		Metadata:       map[string]string{"product_id": request.ProductID},
-		SuccessURL:     request.SuccessURL,
-		CancelURL:      request.CancelURL,
-	})
-}
-
-func (b *billingService) GetCheckout(ctx context.Context, userID, checkoutID string) (*openrails.CheckoutSession, error) {
-	result, err := b.client.GetCheckoutSession(ctx, userID, checkoutID)
-	if errors.Is(err, openrails.ErrInvalid) {
-		return nil, fmt.Errorf("%w: invalid checkout ID", openrails.ErrNotFound)
-	}
-	if errors.Is(err, openrails.ErrDenied) {
-		return nil, openrails.ErrNotFound
-	}
-	return result, err
 }

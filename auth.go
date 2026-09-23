@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/authhttp"
 	"github.com/open-rails/authkit/embedded"
+	"github.com/open-rails/openrails"
 )
 
 const (
@@ -26,6 +27,7 @@ const (
 type appAuth struct {
 	runtime *embedded.Runtime
 	client  authkit.Client
+	billing *openrails.Client
 }
 
 func (a *appAuth) Close() {
@@ -33,6 +35,7 @@ func (a *appAuth) Close() {
 }
 
 func newAuth(ctx context.Context, config Config, pool *pgxpool.Pool) (*appAuth, error) {
+	a := &appAuth{}
 	ownership := embedded.RiverFromHost()
 	runtime, err := embedded.New(embedded.Config{
 		Schema: strings.TrimSpace(config.AuthSchema),
@@ -64,11 +67,45 @@ func newAuth(ctx context.Context, config Config, pool *pgxpool.Pool) (*appAuth, 
 		TwoFactor: embedded.TwoFactorConfig{
 			Mode: embedded.TwoFactorDisabled,
 		},
-	}, embedded.Deps{Postgres: pool, River: ownership})
+	}, embedded.Deps{Postgres: pool, River: ownership, OnSoftDelete: a.cancelDeletedAccountBilling, OnHardDelete: a.cancelDeletedAccountBilling})
 	if err != nil {
 		return nil, err
 	}
-	return &appAuth{runtime: runtime, client: runtime.Client()}, nil
+	a.runtime, a.client = runtime, runtime.Client()
+	return a, nil
+}
+
+// AuthKit delivers deletion callbacks durably through the shared River fleet.
+// Cancel accepted agreements through the portable billing API before identity
+// purge; recovery never resumes billing without a new customer instruction.
+func (a *appAuth) cancelDeletedAccountBilling(ctx context.Context, event authkit.UserDeletion) error {
+	if a.billing == nil {
+		return errors.New("billing lifecycle has not been composed")
+	}
+	const pageSize = 100
+	for offset := 0; ; offset += pageSize {
+		page, err := a.billing.ListSubscriptions(ctx, openrails.SubscriptionFilter{CustomerID: event.UserID, PageOptions: openrails.PageOptions{Limit: pageSize, Offset: offset}})
+		if err != nil {
+			return err
+		}
+		for _, subscription := range page.Data {
+			if subscription.CancelScheduled || subscription.CancelledAt != nil {
+				continue
+			}
+			switch subscription.Status {
+			case "cancelled", "canceled", "expired", "ended":
+				continue
+			}
+			if err := a.billing.CancelSubscription(ctx, subscription.ID, openrails.CancelSubscriptionRequest{Reason: "Account deletion " + event.ID, RevokeAccess: false}); err != nil {
+				return err
+			}
+		}
+		// Do not filter by active status: cancellation changes state while this
+		// bounded scan proceeds, and would otherwise skip the next page.
+		if !page.HasMore {
+			return nil
+		}
+	}
 }
 
 // grantAdmin is only called by the explicit, one-off admin:grant command.

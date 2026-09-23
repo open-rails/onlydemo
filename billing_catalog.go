@@ -1,0 +1,145 @@
+package main
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
+)
+
+type offerPrice struct {
+	UnitAmount int64  `json:"unit_amount,string"`
+	Currency   string `json:"currency"`
+}
+
+func postResource(key string) string      { return "post:" + key }
+func membershipResource(id string) string { return "channel:" + id + ":membership" }
+func (b *billingService) access(ctx context.Context, user string, keys []string) (map[string]bool, error) {
+	result := map[string]bool{}
+	if user == "" {
+		return result, nil
+	}
+	for len(keys) > 0 {
+		n := min(100, len(keys))
+		page, err := b.client.CheckEntitlements(ctx, user, keys[:n], time.Time{})
+		if err != nil {
+			return nil, err
+		}
+		for k, v := range page {
+			result[k] = v
+		}
+		keys = keys[n:]
+	}
+	return result, nil
+}
+func (b *billingService) offers(ctx context.Context, key string, recurring bool) ([]openrails.CatalogOffer, error) {
+	kind := openrails.OfferPermanent
+	if recurring {
+		kind = openrails.OfferRecurring
+	}
+	page, err := b.client.ListOffersForEntitlement(ctx, key, openrails.OfferListParams{Kind: kind, PreferredCurrency: "USD", Limit: 100})
+	if err != nil {
+		return nil, err
+	}
+	if page.Data == nil {
+		return []openrails.CatalogOffer{}, nil
+	}
+	return page.Data, nil
+}
+
+// The host has already authorized the publisher against the channel. Catalog
+// owns offer versions and history; no commercial fields are stored on a post.
+func (b *billingService) setOffer(ctx context.Context, channelID, resource, title string, price *offerPrice, recurring, archived bool) error {
+	catalog, err := b.client.EnsureCatalogForOwner(ctx, channelID)
+	if err != nil {
+		return err
+	}
+	product := openrails.CatalogApplyProduct{Key: resource, Archived: openrails.CatalogValue(archived)}
+	if !archived {
+		if price == nil || price.UnitAmount < 500000 || price.UnitAmount > 999999990000 {
+			return errors.New("price must be between 0.50 and 999999.99 in native currency")
+		}
+		currency := strings.ToUpper(strings.TrimSpace(price.Currency))
+		if currency == "" {
+			currency = "USD"
+		}
+		if len(currency) != 3 {
+			return errors.New("currency must be a three-letter code")
+		}
+		product.DisplayName = openrails.CatalogValue(title)
+		product.EntitlementsSpec = openrails.CatalogValue(map[string]*int{resource: nil})
+		duration := openrails.CatalogNull[int]()
+		if recurring {
+			duration = openrails.CatalogValue(720)
+		}
+		product.Prices = []openrails.CatalogApplyPrice{{Key: resource + ":purchase", Currency: openrails.CatalogValue(currency), UnitAmount: openrails.CatalogValue(price.UnitAmount), AccessDurationHours: duration, AutoRenew: openrails.CatalogValue(recurring), Archived: openrails.CatalogValue(false), PSPs: openrails.CatalogValue([]string{"stripe"})}}
+	}
+	for attempts := 0; attempts < 3; attempts++ {
+		rev, err := b.client.Catalog.Revision(ctx)
+		if err != nil {
+			return err
+		}
+		_, err = b.client.Catalog.Apply(ctx, &openrails.CatalogApplyParams{SchemaVersion: 1, ApplicationID: uuid.NewString(), ExpectedRevision: &rev.Revision, CatalogID: catalog.ID.String(), Products: []openrails.CatalogApplyProduct{product}})
+		if !errors.Is(err, openrails.ErrConflict) {
+			return err
+		}
+	}
+	return openrails.ErrConflict
+}
+func (b *billingService) archiveResource(ctx context.Context, resource string) error {
+	product, err := b.client.Products.RetrieveByKey(ctx, resource)
+	if errors.Is(err, openrails.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	yes := true
+	_, err = b.client.Products.Update(ctx, product.ID, &openrails.ProductUpdateParams{Archived: &yes})
+	return err
+}
+func (b *billingService) ArchiveChannelCatalog(ctx context.Context, id string) error {
+	catalog, err := b.client.GetCatalogForOwner(ctx, id)
+	if errors.Is(err, openrails.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	no, yes := false, true
+	for {
+		page, err := b.client.Products.List(ctx, &openrails.ProductListParams{PageOptions: openrails.PageOptions{Limit: 100}, CatalogID: catalog.ID.String(), Archived: &no})
+		if err != nil {
+			return err
+		}
+		if len(page.Items) == 0 {
+			return nil
+		}
+		for _, product := range page.Items {
+			if _, err = b.client.Products.Update(ctx, product.ID, &openrails.ProductUpdateParams{Archived: &yes}); err != nil {
+				return err
+			}
+		}
+	}
+}
+func checkoutRequest(user, resource, key, priceID string, payment openrails.CheckoutPaymentOptions, kind openrails.OfferKind, publicURL string) openrails.CreateCheckoutSessionRequest {
+	digest := sha256.Sum256([]byte(user + "\x00" + resource + "\x00" + key))
+	if payment.Rail == "" {
+		payment.Rail = "stripe"
+	}
+	return openrails.CreateCheckoutSessionRequest{OfferKind: kind, Customer: openrails.CheckoutCustomerIdentity{ID: user}, Entitlement: resource, PriceID: priceID, IdempotencyKey: "demo-" + hex.EncodeToString(digest[:]), PaymentOptions: payment, SuccessURL: publicURL + "/checkout/return", CancelURL: publicURL + "/checkout/return?canceled=1", Metadata: map[string]string{"resource": resource}}
+}
+
+func (b *billingService) GetCheckout(ctx context.Context, user, id string) (*openrails.CheckoutSession, error) {
+	result, err := b.client.GetCheckoutSession(ctx, user, id)
+	if errors.Is(err, openrails.ErrInvalid) || errors.Is(err, openrails.ErrDenied) {
+		return nil, fmt.Errorf("%w: checkout", openrails.ErrNotFound)
+	}
+	return result, err
+}

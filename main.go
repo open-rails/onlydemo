@@ -134,7 +134,7 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, c
 	app := fiber.New()
 	blogAPI := &blogAPI{pool: pool, auth: authService, billing: billing, channels: channels, table: pgx.Identifier{appSchema(cfg), "blog_posts"}.Sanitize()}
 
-	app.Get("/", homepage(app))
+	app.Get("/dev/routes", homepage(app))
 
 	app.Get("/health", func(c fiber.Ctx) error {
 		pingContext, cancel := context.WithTimeout(c.Context(), 2*time.Second)
@@ -158,13 +158,23 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, c
 	optional := authkitfiber.Optional(authService.runtime.Verifier())
 	required := authkitfiber.Required(authService.runtime.Verifier())
 	channels.mount(app, required)
+	app.Get("/api/v1/channels", optional, channels.list)
+	app.Get("/api/v1/channels/:id", optional, channels.publicGet)
+	app.Put("/api/v1/channels/:id/membership", required, channels.membership)
+	app.Post("/api/v1/channels/:id/subscribe", required, func(c fiber.Ctx) error { return channels.subscribe(c, cfg.PublicURL) })
+	app.Get("/api/v1/channels/:id/members", required, channels.members)
+	app.Post("/api/v1/channels/:id/members", required, channels.members)
+	app.Delete("/api/v1/channels/:id/members/:user_id", required, channels.members)
+	app.Get("/api/v1/me", required, blogAPI.me)
+	app.Get("/api/v1/config", publicConfiguration(billing, cfg))
+	app.Get("/api/v1/checkout/options", checkoutOptions(billing))
 	app.Get("/api/v1/posts", optional, blogAPI.list)
 	app.Post("/api/v1/posts", required, blogAPI.create)
 	app.Get("/api/v1/posts/:id", optional, blogAPI.get)
 	app.Patch("/api/v1/posts/:id", required, blogAPI.update)
 	app.Delete("/api/v1/posts/:id", required, blogAPI.delete)
 	app.Post("/api/v1/posts/:id/checkout", required, func(c fiber.Ctx) error {
-		return blogAPI.checkout(c, cfg.PublicURL+"/", cfg.PublicURL+"/")
+		return blogAPI.checkout(c, cfg.PublicURL)
 	})
 	app.Get("/api/v1/checkouts/:id", required, blogAPI.getCheckout)
 	if err := billing.Mount(app.Group("/billing")); err != nil {
@@ -179,5 +189,6 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, c
 	if err := authRoutes.Mount(app); err != nil {
 		return nil, err
 	}
+	mountFrontend(app)
 	return app, nil
 }

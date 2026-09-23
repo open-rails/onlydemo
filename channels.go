@@ -39,7 +39,6 @@ func newChannels(pool *pgxpool.Pool, auth *appAuth, billing *billingService, cfg
 
 func (api *channelAPI) mount(app fiber.Router, required fiber.Handler) {
 	app.Post("/api/v1/channels", required, api.create)
-	app.Get("/api/v1/channels/:id", required, api.get)
 	app.Delete("/api/v1/channels/:id", required, api.delete)
 }
 
@@ -101,29 +100,6 @@ func (api *channelAPI) create(c fiber.Ctx) error {
 		return clientError(c, http.StatusConflict, "channel is deleted")
 	}
 	return c.Status(http.StatusCreated).JSON(channel{ID: group.ID, Slug: group.InstanceSlug, Name: group.DisplayName})
-}
-
-func (api *channelAPI) get(c fiber.Ctx) error {
-	user, ok := authkitfiber.UserClaims(c)
-	if !ok {
-		return clientError(c, http.StatusUnauthorized, "a user access token is required")
-	}
-	id, err := channelID(c.Params("id"))
-	if err != nil {
-		return clientError(c, http.StatusBadRequest, "invalid channel id")
-	}
-	allowed, err := api.allowed(c.Context(), user.UserID, id, channelReadPermission)
-	if err != nil {
-		return clientError(c, http.StatusServiceUnavailable, "permission service is unavailable")
-	}
-	if !allowed {
-		return clientError(c, http.StatusNotFound, "channel not found")
-	}
-	group, err := api.auth.client.GroupInstanceByID(c.Context(), id)
-	if err != nil {
-		return clientError(c, http.StatusNotFound, "channel not found")
-	}
-	return c.JSON(channel{ID: group.ID, Slug: group.InstanceSlug, Name: group.DisplayName})
 }
 
 func (api *channelAPI) active(ctx context.Context, id string) (bool, error) {
