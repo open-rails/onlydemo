@@ -25,7 +25,7 @@ func newRootCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error { return serve(cmd.Context()) },
 	}
 	root := &cobra.Command{
-		Use: "openrails-demo", Short: "A Fiber API with AuthKit and OpenRails",
+		Use: "onlydemo", Short: "OnlyDemo creator channels with AuthKit and OpenRails",
 		Long: "Run the API server or an explicit maintenance command. Configuration comes from environment variables.",
 		Args: cobra.NoArgs, RunE: serveCommand.RunE,
 		SilenceUsage: true, SilenceErrors: true,

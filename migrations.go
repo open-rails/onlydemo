@@ -38,7 +38,7 @@ func applyMigrations(ctx context.Context, pool *pgxpool.Pool, cfg Config) error 
 		return err
 	}
 
-	migrator, err := migratekit.NewPostgresFromPGXPool(pool, "openrails-demo")
+	migrator, err := migratekit.NewPostgresFromPGXPool(pool, "onlydemo")
 	if err != nil {
 		return err
 	}

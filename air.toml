@@ -2,8 +2,8 @@ root = "."
 tmp_dir = ".runtime/air"
 
 [build]
-  cmd = "go build -o .runtime/air/openrails-demo ."
-  entrypoint = [".runtime/air/openrails-demo", "serve"]
+  cmd = "go build -o .runtime/air/onlydemo ."
+  entrypoint = [".runtime/air/onlydemo", "serve"]
   delay = 1000
   exclude_dir = [".git", ".runtime", "frontend", "node_modules", "dist"]
   exclude_regex = ["_test\\.go$"]

@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	billingMerchantSlug       = "openrails-demo"
+	billingMerchantSlug       = "onlydemo"
 	minPostPriceCents   int64 = 50
 	maxPostPriceCents   int64 = 99_999_999
 )

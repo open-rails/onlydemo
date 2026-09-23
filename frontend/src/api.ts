@@ -19,7 +19,7 @@ export interface User {
   email: string | null;
   has_password: boolean;
 }
-const storageKey = "openrails-demo-session";
+const storageKey = "onlydemo-session";
 let tokens: Tokens | null = (() => {
   try {
     return JSON.parse(

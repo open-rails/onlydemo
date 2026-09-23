@@ -3,7 +3,7 @@ version: '3'
 dotenv: ['.env']
 
 vars:
-  POSTGRES_CONTAINER: openrails-demo-postgres
+  POSTGRES_CONTAINER: onlydemo-postgres
   POSTGRES_IMAGE: postgres:18-alpine
   POSTGRES_PORT: '55433'
   AIR_BIN: '{{.AIR_BIN | default "air"}}'
@@ -16,7 +16,7 @@ tasks:
         docker run --name {{.POSTGRES_CONTAINER}}
         -e POSTGRES_USER=postgres
         -e POSTGRES_PASSWORD=postgres
-        -e POSTGRES_DB=openrails_demo
+        -e POSTGRES_DB=onlydemo
         -p 127.0.0.1:{{.POSTGRES_PORT}}:5432
         -d {{.POSTGRES_IMAGE}}
 

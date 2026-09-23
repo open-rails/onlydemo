@@ -183,7 +183,7 @@ func smoke() error {
 	webhookPath := ""
 	for _, route := range app.GetRoutes(true) {
 		if route.Method == "POST" && strings.Contains(route.Path, "webhooks/") {
-			webhookPath = strings.NewReplacer(":merchant", "openrails-demo", ":provider", "stripe", ":account_id", "acct_demo_test").Replace(route.Path)
+			webhookPath = strings.NewReplacer(":merchant", "onlydemo", ":provider", "stripe", ":account_id", "acct_demo_test").Replace(route.Path)
 			break
 		}
 	}

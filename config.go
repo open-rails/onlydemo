@@ -64,7 +64,7 @@ func loadConfig() (Config, error) {
 
 	databaseURL := k.String("database.url")
 	if databaseURL == "" {
-		databaseURL = "postgres://postgres:postgres@localhost:55433/openrails_demo?sslmode=disable"
+		databaseURL = "postgres://postgres:postgres@localhost:55433/onlydemo?sslmode=disable"
 	}
 
 	authIssuer := k.String("auth.issuer")
@@ -74,7 +74,7 @@ func loadConfig() (Config, error) {
 
 	authAudience := k.String("auth.audience")
 	if authAudience == "" {
-		authAudience = "openrails-demo"
+		authAudience = "onlydemo"
 	}
 	publicURL := strings.TrimRight(k.String("public.url"), "/")
 	if publicURL == "" {

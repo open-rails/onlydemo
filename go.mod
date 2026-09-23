@@ -1,4 +1,4 @@
-module github.com/open-rails/openrails-demo
+module github.com/open-rails/onlydemo
 
 go 1.26.6
 
