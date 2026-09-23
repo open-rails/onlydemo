@@ -113,7 +113,7 @@ elected leader schedules periodic jobs. A consumer that wants a library-managed
 fleet can omit the host integration and let the library initialize its queue.
 
 The local container provides the default `postgres` login. A normal PostgreSQL
-login that owns its database also works; integration tests use that setup. There
+login that owns its database also works; the manual walkthrough creates its own database. There
 are no per-library logins or permission-group roles. Merchant authorization uses
 explicit scoped queries, independently of database-role flags.
 
