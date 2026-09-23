@@ -11,17 +11,18 @@ directory is `/dev/routes`. AuthKit protocol anchors stay at
 
 ## Run locally
 
-Use Go 1.26.6, Node 24, pnpm 11 and PostgreSQL 18. Copy `.env.example` to `.env`, then:
+Use Go 1.26.6, Node 24, pnpm 11, Docker and libvips (`libvips-dev`; the image
+job is CGO). Copy `.env.example` to `.env`, set `MEDIA_TOKEN_KEY`, then:
 
 ```sh
-task db:up
+task dev:up   # PostgreSQL and MinIO with the media bucket (compose.yaml)
 task migrate
 task run
-task seed   # optional display channels and posts, created through the API
+task seed     # optional display channels and posts, created through the API
 ```
 
-`task run` serves Go with Air and the frontend with Vite, both reloading on
-change; open http://localhost:5173. `task run:embedded` builds the frontend into
+`task run` serves Go with Air, the frontend with Vite and the media access
+worker (`task media:access`), reloading on change; open http://localhost:5173. `task run:embedded` builds the frontend into
 the single Go binary and serves everything from http://localhost:3000.
 `task seed` targets http://127.0.0.1:3000; pass `-- --url <base>` for another
 server. It is idempotent.
@@ -69,6 +70,11 @@ Do not put executable paths or obsolete billing encryption keys in `.env`.
 | `AUTH_KEYS_PATH` | Dev signing and TOTP key directory (default `.runtime/auth`), so sessions and authenticator apps survive restarts |
 | `AUTH_SCHEMA`, `APP_SCHEMA`, `BILLING_SCHEMA`, `RIVER_SCHEMA` | Optional independent schema names; shared `public` is supported |
 | `BILLING_PSPS` | Enabled providers: `stripe`, `nmi` or both (default `stripe`) |
+| `CONTENT_SCHEMA` | ContentKit baseline schema (default `content`); holds the upload limiter's counters |
+| `MEDIA_S3_*` | Media bucket: `ENDPOINT`, `PUBLIC_ENDPOINT` (browser presign host), `BUCKET`, `REGION`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY` |
+| `MEDIA_URL`, `MEDIA_DELIVERY`, `MEDIA_COOKIE_DOMAIN` | media-access origin; `cookie` (default) or `url` delivery |
+| `MEDIA_TOKEN_KEY`, `MEDIA_TOKEN_KEY_PREVIOUS` | `{kid}:{base64 32+ bytes}` signing keys shared with media-access |
+| `MEDIA_UPLOAD_FILES_PER_HOUR`, `MEDIA_UPLOAD_BYTES_PER_DAY`, `MEDIA_CHANNEL_QUOTA_BYTES` | Upload limits (defaults 60, 2 GiB, 5 GiB) |
 | `STRIPE_SECRET_KEY`, `STRIPE_ACCOUNT_ID`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PUBLISHABLE_KEY` | Stripe sandbox credentials (when enabled) |
 | `NMI_ACCOUNT_ID`, `NMI_SANDBOX_SECURITY_KEY`, `NMI_WEBHOOK_SIGNING_SECRET`, `NMI_TOKENIZATION_KEY`, `NMI_TOKENIZATION_URL` | NMI gateway ID, test-mode credentials and Collect.js settings (when enabled; URL optional) |
 
@@ -102,6 +108,34 @@ currency amounts, availability and immutable price versions. USD offers appear
 first; another displayed currency is charged only when explicitly selected.
 Channel membership currently uses a 720-hour period: **every 30 days**, not a calendar
 month. Repricing moves a stable price key and preserves already accepted terms.
+
+## Media
+
+Images use ContentKit media: one private bucket, a folder per item, originals
+never served. Browsers upload straight to the bucket with
+`@open-rails/contentkit-upload` (vendored in `frontend/vendor` until the package
+is published); the app presigns and commits (`/api/v1/media/upload/*`).
+
+- **Kinds.** `post`: ordered images (`large`, `thumb`) plus an optional `teaser`
+  file, derived as a blurred WebP. `channel`: public `avatar` and `banner`
+  slots. `user`: public `avatar_80`/`avatar_320`. Item order lives in the
+  manifest; the post row keeps only its access policy.
+- **Reads.** `GET /api/v1/media/post/{id}?variant=large,blurred` resolves once
+  with the post rule (`media/tiered` over OpenRails: membership key,
+  `post:<billing_key>` purchase key, members_ppv = purchase only; channel
+  editors and site admins read everything). Full access gets every file;
+  anyone else who can see the post gets the teaser only. Files are served by
+  `media-access`, never the bucket.
+- **Uploads.** Post images need `channel:posts:create`, channel slots
+  `channel:settings:manage`, a user their own avatar. The UploadLimiter
+  rate-limits each uploader (429) and holds each channel's quota (413); site
+  admins are exempt. Deleting a post erases its folder and releases quota;
+  channel purge erases post and channel folders; account purge erases the
+  avatar.
+- **Delivery.** Production uses cookie mode: the site and `media.` host share a
+  registrable domain (`MEDIA_COOKIE_DOMAIN`) over HTTPS. Locally the app
+  (`localhost:5173`) and worker (`localhost:8090`) share no parent domain, so
+  `.env.example` uses URL tokens (`MEDIA_DELIVERY=url`).
 
 ## Buying and membership
 
@@ -170,8 +204,10 @@ pnpm --dir frontend lint
 pnpm --dir frontend build
 go build ./...
 go vet ./...
-SMOKE_DATABASE_URL='postgres://postgres:postgres@localhost:55433/postgres?sslmode=disable' scripts/smoke.sh
+SMOKE_DATABASE_URL='postgres://postgres:postgres@localhost:55433/postgres?sslmode=disable' task smoke
 ```
+
+`task smoke` loads `.env` for the `MEDIA_*` bucket settings.
 
 The optional walkthrough creates and drops only its own uniquely named local
 database. It runs real HTTP, AuthKit, OpenRails and River with a closed fake Stripe
@@ -179,7 +215,12 @@ transport. It covers purchases/replay, resource access, saved-card membership,
 explicit quote confirmation/cancellation and retained deletion. Unexpected provider
 requests fail locally; no real Stripe request or credential is used.
 
-This demo has no automated test suite. CI builds/vets Go and builds/lints the
-frontend. The libraries retain their full automated qualification. A real sandbox
+`TestMediaEndToEnd` runs the media proof on real PostgreSQL, MinIO, the
+ContentKit handlers, the libvips job and the `media-access` binary (fake Stripe
+only): uploads and variants, what anonymous, member, buyer and members_ppv
+buyer (after membership lapse) viewers get, editor/admin bypass, rate and
+quota refusals, public slots and post erasure. `task dev:up && task test:media`
+runs it locally; CI runs it on every push. CI also builds/vets Go and
+builds/lints the frontend. The libraries retain their full automated qualification. A real sandbox
 purchase/subscription walkthrough is a separate deliberate activity with retained
 provider receipts and idempotency keys.

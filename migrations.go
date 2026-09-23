@@ -23,6 +23,9 @@ func initializeDatabase(ctx context.Context, cfg Config, pool *pgxpool.Pool) err
 	if err := applyMigrations(ctx, pool, cfg); err != nil {
 		return fmt.Errorf("application migrations: %w", err)
 	}
+	if err := applyContentMigrations(ctx, pool, cfg); err != nil {
+		return fmt.Errorf("ContentKit migrations: %w", err)
+	}
 	if err := riverkit.ApplyMigrations(ctx, pool, cfg.RiverSchema); err != nil {
 		return fmt.Errorf("host River migrations: %w", err)
 	}

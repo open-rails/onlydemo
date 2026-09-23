@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/contentkit/media/tiered"
 	"github.com/open-rails/openrails"
 )
 
@@ -37,6 +38,10 @@ func (b *billingService) access(ctx context.Context, user string, keys []string)
 		keys = keys[n:]
 	}
 	return result, nil
+}
+// checker adapts OpenRails entitlements to media/tiered.
+func (b *billingService) checker() tiered.Checker {
+	return tiered.CheckerFunc(b.access)
 }
 func (b *billingService) offers(ctx context.Context, key string, recurring bool) ([]openrails.CatalogOffer, error) {
 	kind := openrails.OfferPermanent

@@ -20,32 +20,45 @@ import { hue, membershipOffer, useChannels } from "../channels";
 const tint = (seed: string | number) =>
   ({ "--h": hue(seed) }) as CSSProperties;
 
+// A public slot image over the generated placeholder; a slot never uploaded
+// answers 404 and the placeholder stays.
+function SlotImage({ src, className }: { src?: string; className?: string }) {
+  const [failed, setFailed] = useState("");
+  if (!src || failed === src) return null;
+  return <img src={src} alt="" className={className} onError={() => setFailed(src)} />;
+}
 export function Avatar({
   name,
   seed,
+  src,
   className,
 }: {
   name: string;
   seed: string | number;
+  src?: string;
   className?: string;
 }) {
   return (
     <span className={cn("avatar", className)} style={tint(seed)}>
       {(name || "?").slice(0, 1).toUpperCase()}
+      <SlotImage src={src} />
     </span>
   );
 }
 export function Cover({
   seed,
+  src,
   className,
   children,
 }: {
   seed: string | number;
+  src?: string;
   className?: string;
   children?: ReactNode;
 }) {
   return (
     <div className={cn("cover", className)} style={tint(seed)}>
+      <SlotImage src={src} className="cover-image" />
       {children}
     </div>
   );
@@ -62,7 +75,7 @@ export function PostCard({ post, handle }: { post: Post; handle?: string }) {
     <article className="feed-card">
       <header className="feed-head">
         <Link to={`/channels/${post.channel_slug}`} className="feed-author">
-          <Avatar name={name} seed={post.channel_id} />
+          <Avatar name={name} seed={post.channel_id} src={post.channel_avatar_url} />
           <span>
             <strong>
               {name}
@@ -163,9 +176,9 @@ export function ChannelCard({ channel }: { channel: Channel }) {
   const offer = membershipOffer(channel);
   return (
     <article className="creator-card">
-      <Cover seed={channel.id} />
+      <Cover seed={channel.id} src={channel.banner_url} />
       <div className="creator-card-body">
-        <Avatar name={channel.name} seed={channel.id} className="avatar-lg" />
+        <Avatar name={channel.name} seed={channel.id} src={channel.avatar_url} className="avatar-lg" />
         <h3>
           <Link to={`/channels/${channel.slug}`}>{channel.name}</Link>
         </h3>
@@ -219,9 +232,9 @@ export function SuggestedCreators({ strip = false }: { strip?: boolean }) {
             key={channel.id}
             className="suggested-item"
           >
-            <Cover seed={channel.id} />
+            <Cover seed={channel.id} src={channel.banner_url} />
             <span className="suggested-info">
-              <Avatar name={channel.name} seed={channel.id} />
+              <Avatar name={channel.name} seed={channel.id} src={channel.avatar_url} />
               <span>
                 <strong>{channel.name}</strong>
                 <small>@{channel.slug}</small>

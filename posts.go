@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
+	"github.com/open-rails/contentkit/media/tiered"
 	authkitfiber "github.com/open-rails/authkit/adapters/fiber"
 	"github.com/open-rails/openrails"
 	"github.com/riverqueue/river"
@@ -29,6 +30,7 @@ type postAPI struct {
 	table    string
 	channels *channelAPI
 	jobs     *river.Client[pgx.Tx]
+	media    *mediaService
 }
 
 func newPosts(channels *channelAPI, cfg Config) *postAPI {
@@ -51,6 +53,7 @@ type post struct {
 	CanEdit            bool                     `json:"can_edit"`
 	Purchased          bool                     `json:"purchased"`
 	SubscriptionActive bool                     `json:"has_membership"`
+	ChannelAvatarURL   string                   `json:"channel_avatar_url,omitempty"`
 	CreatedAt          time.Time                `json:"created_at"`
 	UpdatedAt          time.Time                `json:"updated_at"`
 	BillingKey         string                   `json:"-"`
@@ -109,6 +112,15 @@ func (api *postAPI) decorate(c fiber.Ctx, posts []post, withOffers bool) error {
 	if err != nil {
 		return err
 	}
+	policies := make([]tiered.Policy, len(posts))
+	for i, p := range posts {
+		policies[i] = postPolicy(p)
+	}
+	held := tiered.CheckerFunc(func(context.Context, string, []string) (map[string]bool, error) { return access, nil })
+	readable, err := tiered.DecideAll(c.Context(), held, actorFor(user), policies)
+	if err != nil {
+		return err
+	}
 	publishing := map[string]bool{}
 	editing := map[string]bool{}
 	groups := map[string]authkit.GroupInstance{}
@@ -131,7 +143,8 @@ func (api *postAPI) decorate(c fiber.Ctx, posts []post, withOffers bool) error {
 		p.Purchased = access[postResource(p.BillingKey)]
 		p.SubscriptionActive = access[membershipResource(p.ChannelID)]
 		p.CanEdit = editing[p.ChannelID] || editAdmin
-		p.CanRead = p.AccessPolicy == "public" || publishing[p.ChannelID] || admin || p.Purchased || (p.AccessPolicy == "membership" && p.SubscriptionActive)
+		p.CanRead = readable[i] || publishing[p.ChannelID] || admin
+		p.ChannelAvatarURL = api.media.publicURL(kindChannel, p.ChannelID, "avatar")
 		if !p.CanRead {
 			p.Body = ""
 		}
@@ -414,8 +427,10 @@ func (api *postAPI) delete(c fiber.Ctx) error {
 		if result.RowsAffected() == 0 {
 			return pgx.ErrNoRows
 		}
-		_, err = api.jobs.InsertTx(c.Context(), tx, postArchiveArgs{PostID: id}, &river.InsertOpts{UniqueOpts: river.UniqueOpts{ByArgs: true}})
-		return err
+		if _, err = api.jobs.InsertTx(c.Context(), tx, postArchiveArgs{PostID: id}, &river.InsertOpts{UniqueOpts: river.UniqueOpts{ByArgs: true}}); err != nil {
+			return err
+		}
+		return api.media.deletePostsTx(c.Context(), tx, p.ChannelID, id)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, 404, "post not found")
@@ -427,6 +442,10 @@ func (api *postAPI) delete(c fiber.Ctx) error {
 	return c.SendStatus(204)
 }
 
+// visible is a live post on a live channel.
+func (api *postAPI) visible(ctx context.Context, id int64) (post, error) {
+	return scanPost(api.pool.QueryRow(ctx, `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1 AND deleted_at IS NULL AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL)`, id))
+}
 func (api *postAPI) live(ctx context.Context, id int64) (post, error) {
 	return scanPost(api.pool.QueryRow(ctx, `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1 AND deleted_at IS NULL`, id))
 }
@@ -464,6 +483,7 @@ func (api *postAPI) settled(c fiber.Ctx, status int, id int64, job *postOfferArg
 		return databaseError(c, err)
 	}
 	p.CanRead, p.CanEdit, p.Offers = true, true, []openrails.CatalogOffer{}
+	p.ChannelAvatarURL = api.media.publicURL(kindChannel, p.ChannelID, "avatar")
 	if g, e := api.auth.client.GroupInstanceByID(c.Context(), p.ChannelID); e == nil {
 		p.ChannelSlug, p.ChannelName = g.InstanceSlug, g.DisplayName
 	}

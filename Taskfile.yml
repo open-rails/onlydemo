@@ -3,53 +3,55 @@ version: '3'
 dotenv: ['.env']
 
 vars:
-  POSTGRES_CONTAINER: onlydemo-postgres
-  POSTGRES_IMAGE: postgres:18-alpine
-  POSTGRES_PORT: '55433'
   AIR_BIN: '{{.AIR_BIN | default "air"}}'
 
 tasks:
-  db:up:
-    desc: Start the local PostgreSQL container
+  dev:up:
+    desc: Start local PostgreSQL and MinIO (with the media bucket)
     cmds:
-      - >-
-        docker run --name {{.POSTGRES_CONTAINER}}
-        -e POSTGRES_USER=postgres
-        -e POSTGRES_PASSWORD=postgres
-        -e POSTGRES_DB=onlydemo
-        -p 127.0.0.1:{{.POSTGRES_PORT}}:5432
-        -d {{.POSTGRES_IMAGE}}
+      - docker compose up -d --wait postgres minio
+      - docker compose run --rm bucket
 
-  db:down:
-    desc: Stop and remove the local PostgreSQL container
+  dev:down:
+    desc: Stop and remove the local services and their data
     cmds:
-      - docker rm -f {{.POSTGRES_CONTAINER}}
+      - docker compose down -v
 
-  db:logs:
-    desc: Follow local PostgreSQL logs
+  media:access:
+    desc: Run the media access worker (ContentKit cmd/media-access at the go.mod version)
     cmds:
-      - docker logs -f {{.POSTGRES_CONTAINER}}
-
-  migrate:
-    desc: Initialize application and library storage with the application connection
-    cmds:
-      - go run . migrate
+      - |
+        MEDIA_ACCESS_LISTEN="${MEDIA_ACCESS_LISTEN:-127.0.0.1:8090}" \
+        MEDIA_ACCESS_S3_ENDPOINT="$MEDIA_S3_ENDPOINT" \
+        MEDIA_ACCESS_S3_BUCKET="${MEDIA_S3_BUCKET:-onlydemo-media}" \
+        MEDIA_ACCESS_S3_ACCESS_KEY_ID="$MEDIA_S3_ACCESS_KEY_ID" \
+        MEDIA_ACCESS_S3_SECRET_ACCESS_KEY="$MEDIA_S3_SECRET_ACCESS_KEY" \
+        MEDIA_ACCESS_TOKEN_KEY="$MEDIA_TOKEN_KEY" \
+        MEDIA_ACCESS_TOKEN_KEY_PREVIOUS="${MEDIA_TOKEN_KEY_PREVIOUS:-}" \
+        go run github.com/open-rails/contentkit/cmd/media-access
 
   run:
-    desc: Run Go with Air and the React frontend with Vite
+    desc: Run Go with Air, the React frontend with Vite and the media access worker
     cmds:
       - |
         set -e
         pnpm --dir frontend dev --host 127.0.0.1 &
         FRONTEND_PID=$!
-        trap 'kill "$FRONTEND_PID" 2>/dev/null || true' EXIT INT TERM
+        task media:access &
+        MEDIA_PID=$!
+        trap 'kill "$FRONTEND_PID" "$MEDIA_PID" 2>/dev/null || true' EXIT INT TERM
         PUBLIC_URL="${DEV_PUBLIC_URL:-http://localhost:5173}" {{.AIR_BIN}} -c air.toml
 
   run:embedded:
     desc: Build the embedded frontend and run the standalone Go binary
     deps: [frontend:build]
     cmds:
-      - go run . serve
+      - |
+        set -e
+        task media:access &
+        MEDIA_PID=$!
+        trap 'kill "$MEDIA_PID" 2>/dev/null || true' EXIT INT TERM
+        go run . serve
 
   seed:
     desc: Create display channels and posts through the running server's API
@@ -106,3 +108,13 @@ tasks:
     desc: Run the optional local fake-payment walkthrough
     cmds:
       - scripts/smoke.sh
+
+  test:media:
+    desc: Media end-to-end test on the local PostgreSQL and MinIO (task dev:up first)
+    cmds:
+      - go test -run TestMediaEndToEnd -count=1 -v .
+    env:
+      DEMO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:55433/postgres?sslmode=disable
+      DEMO_TEST_S3_ENDPOINT: http://127.0.0.1:59000
+      DEMO_TEST_S3_ACCESS_KEY: onlydemo
+      DEMO_TEST_S3_SECRET_KEY: onlydemo-dev-secret

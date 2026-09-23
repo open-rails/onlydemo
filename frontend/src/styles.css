@@ -1117,3 +1117,118 @@
     }
   }
 }
+
+/* Media */
+@layer components {
+  .avatar,
+  .cover {
+    overflow: hidden;
+  }
+  .avatar > img,
+  .cover-image {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .avatar {
+    position: relative;
+  }
+  .avatar-slot {
+    position: relative;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  .slot-upload {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    background: var(--card);
+    border: 1px solid var(--border);
+    max-width: 16rem;
+  }
+  .cover-upload {
+    position: absolute;
+    right: 14px;
+    bottom: 14px;
+    z-index: 2;
+  }
+  .post-gallery {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0 16px 16px;
+  }
+  .post-gallery figure {
+    position: relative;
+    margin: 0;
+    overflow: hidden;
+    border-radius: 12px;
+  }
+  .post-gallery img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .post-gallery figcaption {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-content: center;
+    justify-items: center;
+    gap: 6px;
+    color: #fff;
+    font-weight: 650;
+    background: #0000004d;
+  }
+  .media-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    border-top: 1px solid var(--border);
+  }
+  .media-editor header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .upload-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--primary);
+  }
+  .media-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .media-list li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .media-list .media-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.875rem;
+  }
+  .media-list .queued {
+    opacity: 0.85;
+  }
+}

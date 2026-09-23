@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	authkitfiber "github.com/open-rails/authkit/adapters/fiber"
+	"github.com/riverqueue/river"
 )
 
 func openDatabase(ctx context.Context) (Config, *pgxpool.Pool, error) {
@@ -85,55 +87,86 @@ func serve(ctx context.Context) error {
 		return err
 	}
 	defer pool.Close()
-	authService, err := newAuth(ctx, config, pool)
+	srv, err := startServer(ctx, config, pool, billingOptions{})
 	if err != nil {
-		return fmt.Errorf("initialize authkit: %w", err)
-	}
-	defer authService.Close()
-
-	billing, err := newBilling(ctx, config, pool, authService, billingOptions{})
-	if err != nil {
-		return fmt.Errorf("initialize OpenRails: %w", err)
-	}
-	defer billing.Close(context.Background())
-	channels := newChannels(pool, authService, billing, config)
-	posts := newPosts(channels, config)
-	jobs, err := newJobs(ctx, pool, config, authService, billing, channels, posts)
-	if err != nil {
-		return fmt.Errorf("compose application jobs: %w", err)
-	}
-	defer func() {
-		stopCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := stopJobs(stopCtx, jobs); err != nil {
-			log.Printf("close background jobs: %v", err)
-		}
-	}()
-	if err := billing.requireReady(ctx); err != nil {
 		return err
 	}
-	if err := authService.runtime.Start(ctx); err != nil {
-		return fmt.Errorf("start AuthKit: %w", err)
-	}
-	if err := jobs.Start(ctx); err != nil {
-		return fmt.Errorf("start application jobs: %w", err)
-	}
-
-	app, err := newApp(pool, authService, billing, config, channels, posts)
-	if err != nil {
-		return fmt.Errorf("create application: %w", err)
-	}
+	defer srv.Close()
 	go func() {
 		<-ctx.Done()
-		if err := app.ShutdownWithTimeout(10 * time.Second); err != nil {
+		if err := srv.app.ShutdownWithTimeout(10 * time.Second); err != nil {
 			log.Printf("shutdown HTTP: %v", err)
 		}
 	}()
 	log.Printf("API listening on http://localhost:%d", config.Port)
-	return app.Listen(fmt.Sprintf(":%d", config.Port))
+	return srv.app.Listen(fmt.Sprintf(":%d", config.Port))
 }
 
-func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, cfg Config, channels *channelAPI, posts *postAPI) (*fiber.App, error) {
+// server is the composed application: libraries, background jobs and HTTP.
+type server struct {
+	auth     *appAuth
+	billing  *billingService
+	channels *channelAPI
+	posts    *postAPI
+	media    *mediaService
+	jobs     *river.Client[pgx.Tx]
+	app      *fiber.App
+	closers  []func()
+}
+
+// Close stops jobs before the services they use.
+func (s *server) Close() {
+	for i := len(s.closers) - 1; i >= 0; i-- {
+		s.closers[i]()
+	}
+}
+
+func startServer(ctx context.Context, config Config, pool *pgxpool.Pool, opts billingOptions) (_ *server, err error) {
+	s := &server{}
+	defer func() {
+		if err != nil {
+			s.Close()
+		}
+	}()
+	if s.auth, err = newAuth(ctx, config, pool); err != nil {
+		return nil, fmt.Errorf("initialize authkit: %w", err)
+	}
+	s.closers = append(s.closers, s.auth.Close)
+	if s.billing, err = newBilling(ctx, config, pool, s.auth, opts); err != nil {
+		return nil, fmt.Errorf("initialize OpenRails: %w", err)
+	}
+	s.closers = append(s.closers, func() { _ = s.billing.Close(context.Background()) })
+	s.channels = newChannels(pool, s.auth, s.billing, config)
+	s.posts = newPosts(s.channels, config)
+	if s.media, err = newMedia(ctx, config, pool, s.auth, s.billing, s.channels, s.posts); err != nil {
+		return nil, fmt.Errorf("initialize media: %w", err)
+	}
+	if s.jobs, err = newJobs(ctx, pool, config, s.auth, s.billing, s.channels, s.posts, s.media); err != nil {
+		return nil, fmt.Errorf("compose application jobs: %w", err)
+	}
+	s.closers = append(s.closers, func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := stopJobs(stopCtx, s.jobs); err != nil {
+			log.Printf("close background jobs: %v", err)
+		}
+	})
+	if err = s.billing.requireReady(ctx); err != nil {
+		return nil, err
+	}
+	if err = s.auth.runtime.Start(ctx); err != nil {
+		return nil, fmt.Errorf("start AuthKit: %w", err)
+	}
+	if err = s.jobs.Start(ctx); err != nil {
+		return nil, fmt.Errorf("start application jobs: %w", err)
+	}
+	if s.app, err = newApp(pool, s.auth, s.billing, config, s.channels, s.posts, s.media); err != nil {
+		return nil, fmt.Errorf("create application: %w", err)
+	}
+	return s, nil
+}
+
+func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, cfg Config, channels *channelAPI, posts *postAPI, media *mediaService) (*fiber.App, error) {
 	app := fiber.New()
 
 	app.Get("/dev/routes", homepage(app))
@@ -179,6 +212,7 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, c
 		return posts.checkout(c, cfg.PublicURL)
 	})
 	app.Get("/api/v1/checkouts/:id", required, posts.getCheckout)
+	media.mount(app, optional)
 	if err := billing.Mount(app.Group("/billing")); err != nil {
 		return nil, err
 	}
