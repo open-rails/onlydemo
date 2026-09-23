@@ -77,7 +77,7 @@ func (api *blogAPI) list(c fiber.Ctx) error {
 	}
 	rows, err := api.pool.Query(c.Context(), `SELECT `+postColumns+` FROM `+api.table+`
   WHERE (visibility = 'public' OR price_cents IS NOT NULL OR $1 <> '' OR $2)
-   AND EXISTS(SELECT 1 FROM `+api.channels.table+` AS channel WHERE channel.id=channel_id AND channel.deleting_at IS NULL)
+   AND EXISTS(SELECT 1 FROM `+api.channels.table+` AS channel WHERE channel.id=channel_id AND channel.deleted_at IS NULL)
    AND ($3::bigint = 0 OR id < $3)
   ORDER BY id DESC LIMIT $4`, userID, admin, before, limit+1)
 	if err != nil {
@@ -146,7 +146,7 @@ func (api *blogAPI) get(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	post, err := scanBlogPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id = $1 AND EXISTS(SELECT 1 FROM `+api.channels.table+` AS channel WHERE channel.id=channel_id AND channel.deleting_at IS NULL)`, id))
+	post, err := scanBlogPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id = $1 AND EXISTS(SELECT 1 FROM `+api.channels.table+` AS channel WHERE channel.id=channel_id AND channel.deleted_at IS NULL)`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, http.StatusNotFound, "post not found")
 	}
@@ -313,7 +313,7 @@ func (api *blogAPI) update(c fiber.Ctx) error {
 		SET slug=$1, title=$2, body=$3, visibility=$4, price_cents=$5,
 			openrails_product_id=NULLIF($6,''), openrails_price_id=NULLIF($7,''), updated_at=NOW()
 		WHERE id=$8 AND channel_id=$9 AND updated_at=$10
-		AND EXISTS(SELECT 1 FROM `+api.channels.table+` AS channel WHERE channel.id=channel_id AND channel.deleting_at IS NULL) RETURNING `+postColumns,
+		AND EXISTS(SELECT 1 FROM `+api.channels.table+` AS channel WHERE channel.id=channel_id AND channel.deleted_at IS NULL) RETURNING `+postColumns,
 		post.Slug, post.Title, post.Body, post.Visibility, post.PriceCents, post.ProductID, post.PriceID, id, post.ChannelID, revision))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, http.StatusConflict, "post changed while editing; fetch it again and retry")

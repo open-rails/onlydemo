@@ -29,7 +29,7 @@ func (api *blogAPI) checkout(c fiber.Ctx) error {
 	// Request JSON never selects a customer or price.
 	post, err := scanBlogPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+`
         FROM `+api.table+` WHERE id=$1 AND visibility='private' AND price_cents IS NOT NULL
-        AND EXISTS(SELECT 1 FROM `+api.channels.table+` AS channel WHERE channel.id=channel_id AND channel.deleting_at IS NULL)`, id))
+        AND EXISTS(SELECT 1 FROM `+api.channels.table+` AS channel WHERE channel.id=channel_id AND channel.deleted_at IS NULL)`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, http.StatusNotFound, "post is not for sale")
 	}

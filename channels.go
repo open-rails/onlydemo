@@ -98,7 +98,7 @@ func (api *channelAPI) create(c fiber.Ctx) error {
 	if active, err := api.active(c.Context(), group.ID); err != nil {
 		return databaseError(c, err)
 	} else if !active {
-		return clientError(c, http.StatusConflict, "channel is being deleted")
+		return clientError(c, http.StatusConflict, "channel is deleted")
 	}
 	return c.Status(http.StatusCreated).JSON(channel{ID: group.ID, Slug: group.InstanceSlug, Name: group.DisplayName})
 }
@@ -128,7 +128,7 @@ func (api *channelAPI) get(c fiber.Ctx) error {
 
 func (api *channelAPI) active(ctx context.Context, id string) (bool, error) {
 	var active bool
-	err := api.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM `+api.table+` WHERE id=$1 AND deleting_at IS NULL)`, id).Scan(&active)
+	err := api.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM `+api.table+` WHERE id=$1 AND deleted_at IS NULL)`, id).Scan(&active)
 	return active, err
 }
 
@@ -222,7 +222,7 @@ func (api *channelAPI) delete(c fiber.Ctx) error {
 		return databaseError(c, err)
 	}
 	defer release()
-	allowed, err := api.auth.client.CanOnGroup(c.Context(), authkit.UserSubject(user.UserID), id, "channel:settings:manage")
+	allowed, err := api.allowed(c.Context(), user.UserID, id, "channel:settings:manage")
 	if err != nil {
 		return clientError(c, http.StatusServiceUnavailable, "permission service is unavailable")
 	}
@@ -237,7 +237,7 @@ func (api *channelAPI) delete(c fiber.Ctx) error {
 		return databaseError(c, err)
 	}
 	defer tx.Rollback(c.Context())
-	result, err := tx.Exec(c.Context(), `UPDATE `+api.table+` SET deleting_at=COALESCE(deleting_at,NOW()) WHERE id=$1`, id)
+	result, err := tx.Exec(c.Context(), `UPDATE `+api.table+` SET deleted_at=COALESCE(deleted_at,NOW()) WHERE id=$1`, id)
 	if err != nil {
 		return databaseError(c, err)
 	}
@@ -250,7 +250,30 @@ func (api *channelAPI) delete(c fiber.Ctx) error {
 	if err = tx.Commit(c.Context()); err != nil {
 		return databaseError(c, err)
 	}
-	return c.Status(http.StatusAccepted).JSON(fiber.Map{"id": id, "status": "deleting"})
+	// Hide the channel durably before retiring its authority. Success means
+	// its last owner can immediately delete their account; a failure is retried
+	// by the already committed job without reopening visibility.
+	if err = api.retireGroup(c.Context(), id); err != nil {
+		return clientError(c, http.StatusServiceUnavailable, "channel retirement is pending")
+	}
+	return c.Status(http.StatusAccepted).JSON(fiber.Map{"id": id, "status": "deleted"})
+}
+
+func (api *channelAPI) retireGroup(ctx context.Context, id string) error {
+	group, err := api.auth.client.SoftDeleteGroupInstanceByID(ctx, id)
+	if errors.Is(err, authkit.ErrGroupNotFound) {
+		return nil // A prior due purge may have removed the group before a retry.
+	}
+	if err != nil {
+		return err
+	}
+	if group.DeletedAt == nil {
+		return errors.New("identity group retirement returned no timestamp")
+	}
+	// AuthKit's timestamp is stable on retries and starts the one retention
+	// clock. No application transaction is held during the library operation.
+	_, err = api.pool.Exec(ctx, `UPDATE `+api.table+` SET deleted_at=$2 WHERE id=$1 AND deleted_at IS NOT NULL`, id, *group.DeletedAt)
+	return err
 }
 
 func (api *channelAPI) finishDeletion(ctx context.Context, id string) error {
@@ -259,19 +282,29 @@ func (api *channelAPI) finishDeletion(ctx context.Context, id string) error {
 		return err
 	}
 	defer release()
-	var deleting bool
-	err = api.pool.QueryRow(ctx, `SELECT deleting_at IS NOT NULL FROM `+api.table+` WHERE id=$1`, id).Scan(&deleting)
+	var deleted bool
+	err = api.pool.QueryRow(ctx, `SELECT deleted_at IS NOT NULL FROM `+api.table+` WHERE id=$1`, id).Scan(&deleted)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	if !deleting {
+	if !deleted {
 		return errors.New("channel deletion was not accepted")
+	}
+	if err = api.retireGroup(ctx, id); err != nil {
+		return err
 	}
 	if err = api.billing.ArchiveChannelCatalog(ctx, id); err != nil {
 		return fmt.Errorf("archive channel catalog: %w", err)
+	}
+	var seconds float64
+	if err = api.pool.QueryRow(ctx, `SELECT EXTRACT(EPOCH FROM deleted_at + INTERVAL '30 days' - clock_timestamp())::double precision FROM `+api.table+` WHERE id=$1`, id).Scan(&seconds); err != nil {
+		return err
+	}
+	if seconds > 0 {
+		return river.JobSnooze(max(time.Millisecond, time.Duration(seconds*float64(time.Second))))
 	}
 	if _, err = api.pool.Exec(ctx, `DELETE FROM `+api.posts+` WHERE channel_id=$1`, id); err != nil {
 		return err
@@ -279,6 +312,6 @@ func (api *channelAPI) finishDeletion(ctx context.Context, id string) error {
 	if err = api.auth.client.DeleteGroupInstanceByID(ctx, id, authkit.DeletePermissionGroupOptions{}); err != nil && !errors.Is(err, authkit.ErrGroupNotFound) {
 		return err
 	}
-	_, err = api.pool.Exec(ctx, `DELETE FROM `+api.table+` WHERE id=$1 AND deleting_at IS NOT NULL`, id)
+	_, err = api.pool.Exec(ctx, `DELETE FROM `+api.table+` WHERE id=$1 AND deleted_at <= clock_timestamp()-INTERVAL '30 days'`, id)
 	return err
 }

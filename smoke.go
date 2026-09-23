@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -25,6 +26,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/riverqueue/river"
 )
 
 const smokeWebhookSecret = "whsec_manual_fake_only"
@@ -166,7 +168,35 @@ func smoke() error {
 	if _, err = buyer.call("GET", "/.well-known/jwks.json", "", nil, "", 200); err != nil {
 		return err
 	}
-	fmt.Println("Manual smoke passed: native auth, channel/post, checkout replay, signed fake payment, paid access and billing history. Zero real provider requests.")
+	channelID := ch["id"].(string)
+	if _, err = owner.call("DELETE", "/api/v1/channels/"+channelID, ownerToken, nil, "", 202); err != nil {
+		return err
+	}
+	if _, err = buyer.call("GET", path, buyerToken, nil, "", 404); err != nil {
+		return err
+	}
+	if _, err = owner.call("DELETE", "/api/v1/channels/"+channelID, ownerToken, nil, "", 404); err != nil {
+		return err
+	}
+	group, err := auth.client.GroupInstanceByID(ctx, channelID)
+	if err != nil || group.DeletedAt == nil {
+		return fmt.Errorf("channel group was not retained as retired: %w", err)
+	}
+	var snooze *river.JobSnoozeError
+	if err = channels.finishDeletion(ctx, channelID); !errors.As(err, &snooze) {
+		return fmt.Errorf("early cleanup did not defer hard deletion: %w", err)
+	}
+	var retained bool
+	if err = pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM demo.channels c JOIN demo.blog_posts p ON p.channel_id=c.id WHERE c.id=$1 AND c.deleted_at IS NOT NULL)`, channelID).Scan(&retained); err != nil {
+		return err
+	}
+	if !retained {
+		return fmt.Errorf("soft deletion removed retained channel/post rows")
+	}
+	if _, err = owner.call("DELETE", "/auth/v1/user", ownerToken, map[string]any{"password": "Manual-smoke-password-42!"}, "", 204); err != nil {
+		return fmt.Errorf("retired channel still blocked owner account deletion: %w", err)
+	}
+	fmt.Println("Manual smoke passed: native auth, channel/post, checkout replay, signed fake payment, paid access/history, retained soft deletion and immediate owner account deletion. Zero real provider requests.")
 	return nil
 }
 

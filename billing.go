@@ -19,7 +19,7 @@ import (
 	openrailsfiber "github.com/open-rails/openrails/adapters/fiber"
 	openrailsconfig "github.com/open-rails/openrails/config"
 	openrailsembed "github.com/open-rails/openrails/embed"
-	openrailsauthkit "github.com/open-rails/openrails/embed/authkit"
+	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 const (
@@ -69,7 +69,7 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 	if auth == nil {
 		return nil, errors.New("billing customer routes require AuthKit")
 	}
-	identity, err := openrailsauthkit.New(openrailsauthkit.Config{Verifier: auth.runtime.Verifier()})
+	identity, err := billingauth.NewIntegration(billingauth.IntegrationOptions{Verifier: auth.runtime.Verifier(), Customer: billingauth.SubjectCustomerID})
 	if err != nil {
 		return nil, err
 	}

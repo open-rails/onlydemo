@@ -6,7 +6,7 @@ CREATE TABLE channels (
     id UUID PRIMARY KEY,
     created_by UUID NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    deleting_at TIMESTAMPTZ
+    deleted_at TIMESTAMPTZ
 );
 
 CREATE TABLE blog_posts (
