@@ -261,6 +261,8 @@ github.com/open-rails/authkit v0.129.0 h1:N6cSrocZxoGAvwLTVK0RTx5AoiOjm3wA7yzapF
 github.com/open-rails/authkit v0.129.0/go.mod h1:F6QzjPo2Ler4P3apAC83Zo0lg8MC3dehaVoyBqYtGFU=
 github.com/open-rails/authkit v0.130.0 h1:v8OZf5oJWhGoGY6ZucgbRsqS6YD8a+1IP6/x2w3CmRQ=
 github.com/open-rails/authkit v0.130.0/go.mod h1:F6QzjPo2Ler4P3apAC83Zo0lg8MC3dehaVoyBqYtGFU=
+github.com/open-rails/authkit v0.130.1 h1:u7DTohqE1aL80BG+FGShL4jLxrITJ9GLttdLt7dvbxw=
+github.com/open-rails/authkit v0.130.1/go.mod h1:F6QzjPo2Ler4P3apAC83Zo0lg8MC3dehaVoyBqYtGFU=
 github.com/open-rails/helpers v0.3.0 h1:SE5YuAO3mOwcUF5ttkffHn2KNHPRQv9q83OUsoH6IMs=
 github.com/open-rails/helpers v0.3.0/go.mod h1:SGBErWMyTPllcGAfiHvZf5qvEBDZpT17c7KS/s11Y/Y=
 github.com/open-rails/migratekit v1.0.4 h1:i/azuFFLY3Si5nUz3hKAIqngynAGa5TIMUe+GDFS6pU=

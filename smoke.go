@@ -81,7 +81,7 @@ func smoke() error {
 	defer listener.Close()
 	base := "http://" + listener.Addr().String()
 	databaseURL := (&url.URL{Scheme: "postgres", User: url.UserPassword(db.ConnConfig.User, db.ConnConfig.Password), Host: net.JoinHostPort(db.ConnConfig.Host, strconv.Itoa(int(db.ConnConfig.Port))), Path: "/" + name, RawQuery: "sslmode=disable"}).String()
-	cfg := Config{DatabaseURL: databaseURL, PublicURL: base, AuthIssuer: base, AuthAudience: "demo-smoke", StripeSecretKey: "sk_test_manual_fake_only", StripeAccountID: "acct_demo_test", StripeWebhookSecret: smokeWebhookSecret}
+	cfg := Config{DatabaseURL: databaseURL, PublicURL: base, AuthIssuer: base, AuthAudience: "demo-smoke", BillingPSPs: []string{"stripe"}, StripePublishableKey: "pk_test_manual_fake_only", StripeSecretKey: "sk_test_manual_fake_only", StripeAccountID: "acct_demo_test", StripeWebhookSecret: smokeWebhookSecret}
 	if err = initializeDatabase(ctx, cfg, pool); err != nil {
 		return err
 	}
@@ -148,7 +148,7 @@ func smoke() error {
 	if len(offers) == 0 {
 		return fmt.Errorf("post has no offers")
 	}
-	purchase := map[string]any{"price_id": offers[0].(map[string]any)["price_id"]}
+	purchase := map[string]any{"price_id": offers[0].(map[string]any)["price_id"], "payment": stripeRail}
 	if _, err = owner.call("POST", path+"/checkout", ownerToken, purchase, "owner-refusal", 409); err != nil {
 		return err
 	}
@@ -233,7 +233,7 @@ func smoke() error {
 	}
 	gatedPath := fmt.Sprintf("/api/v1/posts/%.0f/checkout", gated["id"].(float64))
 	gatedPrice := gated["offers"].([]any)[0].(map[string]any)["price_id"]
-	if _, err = buyer.call("POST", gatedPath, buyerToken, map[string]any{"price_id": gatedPrice}, "nonmember-refusal", 403); err != nil {
+	if _, err = buyer.call("POST", gatedPath, buyerToken, map[string]any{"price_id": gatedPrice, "payment": stripeRail}, "nonmember-refusal", 403); err != nil {
 		return err
 	}
 	if _, err = buyer.call("POST", "/billing/v1/me/checkout", buyerToken, map[string]any{"price_id": gatedPrice}, "bypass-refusal", 404); err != nil {
@@ -401,7 +401,7 @@ func smoke() error {
 	if _, err = owner.call("GET", doomedPath, ownerToken, nil, "", 404); err != nil {
 		return err
 	}
-	if _, err = buyer.call("POST", doomedPath+"/checkout", buyerToken, map[string]any{"price_id": doomed["offers"].([]any)[0].(map[string]any)["price_id"]}, "deleted-post", 404); err != nil {
+	if _, err = buyer.call("POST", doomedPath+"/checkout", buyerToken, map[string]any{"price_id": doomed["offers"].([]any)[0].(map[string]any)["price_id"], "payment": stripeRail}, "deleted-post", 404); err != nil {
 		return err
 	}
 	var billingKey string
@@ -441,6 +441,8 @@ func smoke() error {
 	fmt.Println("Manual smoke passed: native auth, resource offers/reprice replay, permanent paid access, members-only purchase refusal, native saved-card membership/quote/confirmation/cancellation, future included posts, separate publishing roles, post soft deletion with archived product, retained channel soft deletion and owner account deletion. Zero real provider requests.")
 	return nil
 }
+
+var stripeRail = map[string]string{"rail": "stripe"}
 
 type smokeClient struct {
 	base   string

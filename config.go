@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/joho/godotenv"
@@ -21,6 +22,7 @@ type Config struct {
 	AppSchema             string
 	BillingSchema         string
 	RiverSchema           string
+	BillingPSPs           []string
 	StripePublishableKey  string
 	StripeSecretKey       string
 	StripeAccountID       string
@@ -47,7 +49,7 @@ func loadConfig() (Config, error) {
 				return strings.ToLower(key), value
 			case "DATABASE_URL":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
-			case "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_SCHEMA", "APP_SCHEMA", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA", "STRIPE_PUBLISHABLE_KEY", "STRIPE_SECRET_KEY", "STRIPE_ACCOUNT_ID", "STRIPE_WEBHOOK_SECRET", "NMI_ACCOUNT_ID", "NMI_SANDBOX_SECURITY_KEY", "NMI_TOKENIZATION_KEY", "NMI_TOKENIZATION_URL", "NMI_WEBHOOK_SIGNING_SECRET":
+			case "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_SCHEMA", "APP_SCHEMA", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA", "BILLING_PSPS", "STRIPE_PUBLISHABLE_KEY", "STRIPE_SECRET_KEY", "STRIPE_ACCOUNT_ID", "STRIPE_WEBHOOK_SECRET", "NMI_ACCOUNT_ID", "NMI_SANDBOX_SECURITY_KEY", "NMI_TOKENIZATION_KEY", "NMI_TOKENIZATION_URL", "NMI_WEBHOOK_SIGNING_SECRET":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
 			default:
 				return "", nil
@@ -85,6 +87,11 @@ func loadConfig() (Config, error) {
 		return Config{}, fmt.Errorf("PUBLIC_URL must be an http(s) origin without a path, credentials, query, or fragment")
 	}
 
+	psps, err := parseBillingPSPs(k.String("billing.psps"))
+	if err != nil {
+		return Config{}, err
+	}
+
 	cfg := Config{
 		Port:                  port,
 		DatabaseURL:           databaseURL,
@@ -95,6 +102,7 @@ func loadConfig() (Config, error) {
 		AppSchema:             strings.TrimSpace(k.String("app.schema")),
 		BillingSchema:         strings.TrimSpace(k.String("billing.schema")),
 		RiverSchema:           strings.TrimSpace(k.String("river.schema")),
+		BillingPSPs:           psps,
 		StripePublishableKey:  k.String("stripe.publishable.key"),
 		StripeSecretKey:       k.String("stripe.secret.key"),
 		StripeAccountID:       k.String("stripe.account.id"),
@@ -109,6 +117,25 @@ func loadConfig() (Config, error) {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+// parseBillingPSPs reads the operator's provider list; unset means Stripe only.
+func parseBillingPSPs(raw string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return []string{"stripe"}, nil
+	}
+	var psps []string
+	for _, name := range strings.Split(raw, ",") {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name != "stripe" && name != "nmi" {
+			return nil, fmt.Errorf("BILLING_PSPS: unsupported provider %q (supported: stripe, nmi)", name)
+		}
+		if slices.Contains(psps, name) {
+			return nil, fmt.Errorf("BILLING_PSPS: duplicate provider %q", name)
+		}
+		psps = append(psps, name)
+	}
+	return psps, nil
 }
 
 // Libraries own distinct relation names and can share a schema. Validate

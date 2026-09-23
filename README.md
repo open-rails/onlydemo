@@ -30,10 +30,20 @@ For payment flows while browsing Vite, start the backend with
 origin. Sessions and pending checkout attempts are stored per origin; switching
 from 5173 to 3000 during a payment loses that browser context.
 
-Billing is required. Supply Stripe **test** secret/restricted credentials, the
-account ID, and a webhook signing secret. Card setup also requires the same test
-account's `STRIPE_PUBLISHABLE_KEY=pk_test_...`; live publishable keys are never
-exposed to the browser. Server secrets are never part of public configuration.
+Billing is required and sandbox-only. `BILLING_PSPS` lists the providers the site
+offers (`stripe`, `nmi`, or `stripe,nmi`; default `stripe`); each listed provider
+requires its credentials at startup and unlisted ones need none. The browser
+chooses among the rails OpenRails reports for each offer.
+
+- Stripe: **test** secret/restricted key, account ID, webhook signing secret and
+  the same account's `pk_test_` publishable key. Purchases redirect to hosted
+  Stripe Checkout.
+- NMI: gateway ID, test-mode security key, webhook signing secret and Collect.js
+  tokenization key/URL. Cards are tokenized in the page by Collect.js; the API
+  only sees opaque tokens. Requires OpenRails with NMI `endpoint_deployment`
+  qualification (after v0.159.0).
+
+Public configuration carries only browser-safe values.
 
 ```sh
 task stripe:listen
@@ -51,8 +61,9 @@ Do not put executable paths or obsolete billing encryption keys in `.env`.
 | `PORT`, `PUBLIC_URL` | API listener and browser return origin |
 | `AUTH_ISSUER`, `AUTH_AUDIENCE` | Token issuer/audience; origin issuer matches root discovery |
 | `AUTH_SCHEMA`, `APP_SCHEMA`, `BILLING_SCHEMA`, `RIVER_SCHEMA` | Optional independent schema names; shared `public` is supported |
-| `STRIPE_SECRET_KEY`, `STRIPE_ACCOUNT_ID`, `STRIPE_WEBHOOK_SECRET` | Required sandbox account and webhook credentials |
-| `STRIPE_PUBLISHABLE_KEY` | Optional `pk_test_` browser key for saved-card membership checkout |
+| `BILLING_PSPS` | Enabled providers: `stripe`, `nmi` or both (default `stripe`) |
+| `STRIPE_SECRET_KEY`, `STRIPE_ACCOUNT_ID`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PUBLISHABLE_KEY` | Stripe sandbox credentials (when enabled) |
+| `NMI_ACCOUNT_ID`, `NMI_SANDBOX_SECURITY_KEY`, `NMI_WEBHOOK_SIGNING_SECRET`, `NMI_TOKENIZATION_KEY`, `NMI_TOKENIZATION_URL` | NMI gateway ID, test-mode credentials and Collect.js settings (when enabled; URL optional) |
 
 There is no separate billing database URL or billing encryption key. Credentials
 are supplied as a host-owned snapshot. The app and billing library use fresh
@@ -88,7 +99,8 @@ month. Repricing moves a stable price key and preserves already accepted terms.
 ## Buying and membership
 
 One-time purchases go from the frontend to the post purchase endpoint, then through the
-portable OpenRails Client to hosted Stripe Checkout. The host checks only content
+portable OpenRails Client to hosted Stripe Checkout or an embedded NMI card form.
+The host checks only content
 and channel policy; OpenRails decides offer validity, repeat purchase eligibility,
 accepted terms and payment state. An exact idempotency lookup happens before
 mutable admission checks, so retrying an accepted attempt does not create a new
@@ -96,7 +108,7 @@ payment or lose its original terms. The UI persists the attempt key.
 After a post is physically removed, its purchase endpoint returns 404; an already
 accepted checkout and its financial history remain available by checkout ID.
 
-Membership uses native customer Stripe card setup, a saved method, an immutable
+Membership uses native customer card setup (Stripe or NMI), a saved method, an immutable
 membership quote and an explicit payer confirmation. The browser uses the native
 `/billing/v1/me/checkout/:id` read/confirm routes. Generic billing checkout creation
 is omitted from this profile, so it cannot bypass the app's admission rules.

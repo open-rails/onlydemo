@@ -86,7 +86,7 @@ func (b *billingService) setOffer(ctx context.Context, channelID, resource, titl
 		if recurring {
 			duration = openrails.CatalogValue(720)
 		}
-		product.Prices = []openrails.CatalogApplyPrice{{Key: resource + ":purchase", Currency: openrails.CatalogValue(currency), UnitAmount: openrails.CatalogValue(price.UnitAmount), AccessDurationHours: duration, AutoRenew: openrails.CatalogValue(recurring), Archived: openrails.CatalogValue(false), PSPs: openrails.CatalogValue([]string{"stripe"})}}
+		product.Prices = []openrails.CatalogApplyPrice{{Key: resource + ":purchase", Currency: openrails.CatalogValue(currency), UnitAmount: openrails.CatalogValue(price.UnitAmount), AccessDurationHours: duration, AutoRenew: openrails.CatalogValue(recurring), Archived: openrails.CatalogValue(false), PSPs: openrails.CatalogValue(b.psps)}}
 	}
 	for attempts := 0; attempts < 3; attempts++ {
 		rev, err := b.client.Catalog.Revision(ctx)
@@ -112,6 +112,7 @@ func (b *billingService) archiveResource(ctx context.Context, resource string) e
 	_, err = b.client.Products.Update(ctx, product.ID, &openrails.ProductUpdateParams{Archived: &yes})
 	return err
 }
+
 // archivePostProduct retires a deleted post's product. It never deletes the
 // product, so purchase history and entitlements stay intact; host refund
 // policy for deleted content belongs here.
@@ -144,9 +145,6 @@ func (b *billingService) ArchiveChannelCatalog(ctx context.Context, id string) e
 }
 func checkoutRequest(user, resource, key, priceID string, payment openrails.CheckoutPaymentOptions, kind openrails.OfferKind, publicURL string) openrails.CreateCheckoutSessionRequest {
 	digest := sha256.Sum256([]byte(user + "\x00" + resource + "\x00" + key))
-	if payment.Rail == "" {
-		payment.Rail = "stripe"
-	}
 	return openrails.CreateCheckoutSessionRequest{OfferKind: kind, Customer: openrails.CheckoutCustomerIdentity{ID: user}, Entitlement: resource, PriceID: priceID, IdempotencyKey: "demo-" + hex.EncodeToString(digest[:]), PaymentOptions: payment, SuccessURL: publicURL + "/checkout/return", CancelURL: publicURL + "/checkout/return?canceled=1", Metadata: map[string]string{"resource": resource}}
 }
 
