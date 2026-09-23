@@ -1,20 +1,121 @@
-// Application responses; commercial offer fields are shared with the backend
-// contract. A readable post is decided by the server, never by a UI role.
-export type AccessPolicy = 'public' | 'membership' | 'members_ppv' | 'ppv'
-export interface OfferPrice { id: string; amount_cents: number; currency: string; interval?: string; active: boolean }
-export interface Offer { id: string; name: string; prices: OfferPrice[]; active: boolean; mode: 'one_off' | 'subscription' }
+export type AccessPolicy = "public" | "membership" | "members_ppv" | "ppv";
+export interface Offer {
+  product_id: string;
+  product_key: string;
+  product_name: string;
+  price_id: string;
+  price_key: string;
+  unit_amount: string;
+  currency: string;
+  kind: string;
+  access_duration_hours?: number | null;
+  auto_renew: boolean;
+}
 export interface Channel {
-  id: string; slug: string; name: string; description?: string; post_count?: number
-  role?: 'owner' | 'editor'; can_manage?: boolean; can_edit?: boolean
-  subscription_active?: boolean; subscription_id?: string; offers?: Offer[]; deleted_at?: string | null
+  id: string;
+  slug: string;
+  name: string;
+  description?: string;
+  post_count?: number;
+  role?: "owner" | "editor";
+  can_manage: boolean;
+  can_edit: boolean;
+  has_membership: boolean;
+  offers: Offer[];
+  deleted_at?: string | null;
 }
 export interface Post {
-  id: number; channel_id: string; channel_name?: string; channel_slug?: string; author_id: string
-  slug: string; title: string; body?: string; excerpt?: string; visibility: 'public' | 'private'
-  can_read: boolean; can_edit?: boolean; purchased?: boolean; subscription_active?: boolean
-  access_policy?: AccessPolicy; offers?: Offer[]; price_cents?: number | null; currency?: string
-  created_at: string; updated_at: string
+  id: number;
+  channel_id: string;
+  channel_name?: string;
+  author_id: string;
+  slug: string;
+  title: string;
+  body?: string;
+  can_read: boolean;
+  can_edit?: boolean;
+  purchased?: boolean;
+  has_membership?: boolean;
+  access_policy: AccessPolicy;
+  offers: Offer[];
+  created_at: string;
+  updated_at: string;
 }
-export interface Checkout { id: string; status: 'created' | 'requires_action' | 'succeeded' | 'failed' | 'expired' | 'canceled'; payment_status: 'unpaid' | 'paid' | 'no_payment_required'; url?: string | null; mode: string; metadata?: Record<string, string> }
-export function policyOf(post: Post): AccessPolicy { return post.access_policy || (post.visibility === 'public' ? 'public' : post.price_cents != null ? 'ppv' : 'membership') }
-export const policyLabels: Record<AccessPolicy, string> = { public: 'Free to read', membership: 'Included with membership', members_ppv: 'Members-only purchase', ppv: 'One-time purchase' }
+export interface Page<T> {
+  data: T[];
+  has_more?: boolean;
+  next_cursor?: string | null;
+  total?: number;
+}
+export interface Payment {
+  id: string;
+  status: string;
+  amount: string;
+  currency: string;
+  amount_refunded?: string;
+  created_at: string;
+  rail: string;
+  refunded?: boolean;
+  price?: { product?: { display_name?: string } };
+}
+export interface Subscription {
+  id: string;
+  status: string;
+  channel_name?: string;
+  current_period_ends_at?: string | null;
+  cancel_scheduled?: boolean;
+  cancel_mode?: string;
+  cancel_portal_url?: string;
+  resumable?: boolean;
+  price?: {
+    unit_amount: string;
+    currency: string;
+    access_duration_hours: number | null;
+  };
+  product?: { display_name: string };
+}
+export interface AccountData {
+  user: { id: string; username: string; email?: string };
+  manageable_channels: Channel[];
+  purchased_posts: Post[];
+  subscriptions: Subscription[];
+  payments: Payment[];
+}
+export interface Checkout {
+  id: string;
+  status: string;
+  url?: string | null;
+  mode: string;
+  amount?: string;
+  currency?: string;
+  metadata?: Record<string, string>;
+  membership_quote?: { product_name: string; cycle_hours: number };
+  operation?: { id: string; status: string };
+  subscription_id?: string;
+  payment_method_id?: string;
+}
+export interface PaymentMethod {
+  id: string;
+  rail: string;
+  psp_id: string;
+  card?: {
+    brand?: string;
+    last4?: string;
+    exp_month?: number;
+    exp_year?: number;
+  };
+  health?: { active: boolean };
+}
+export interface AppConfig {
+  stripe_publishable_key: string | null;
+  stripe_psp_id: string | null;
+  billing_available: boolean;
+}
+export const policyLabels: Record<AccessPolicy, string> = {
+  public: "Free to read",
+  membership: "Included with membership",
+  members_ppv: "Members-only purchase",
+  ppv: "One-time purchase",
+};
+export const terminalCheckout = (status?: string) =>
+  ["succeeded", "failed", "expired", "canceled"].includes(status || "");

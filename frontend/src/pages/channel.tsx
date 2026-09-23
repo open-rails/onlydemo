@@ -1,30 +1,427 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, useNavigate, useParams } from 'react-router-dom'
-import { request } from '../api'
-import { useAuth } from '../auth'
-import type { Channel, Post } from '../models'
-import { Badge, Button, EmptyState, ErrorState, Field, Icon, Loading, Modal } from '../components/ui'
-import { PostCard } from '../components/cards'
-import { useState, type FormEvent } from 'react'
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { useState, type FormEvent } from "react";
+import { request, postPage } from "../api";
+import { useAuth } from "../auth-context";
+import type { Channel } from "../models";
+import { micros, money, duration } from "../format";
+import {
+  Badge,
+  Button,
+  EmptyState,
+  ErrorState,
+  Field,
+  Icon,
+  Loading,
+  Modal,
+} from "../components/ui";
+import { PostCard } from "../components/cards";
+import { PostEditor } from "../components/post-editor";
+import { ChannelTeam } from "../components/channel-team";
+import { MembershipDialog } from "../components/membership";
 
 export function ChannelPage() {
-  const { id = '' } = useParams(); const client = useQueryClient(); const [manage, setManage] = useState(false)
-  const channel = useQuery({ queryKey: ['channel', id], queryFn: () => request<Channel>(`/api/v1/channels/${id}`, {}, false) })
-  const posts = useQuery({ queryKey: ['channel-posts', id], queryFn: () => request<Post[]>(`/api/v1/posts?channel_id=${encodeURIComponent(id)}`, {}, false), enabled: !!id })
-  const createPost = useMutation({ mutationFn: (body: { channel_id: string; title: string; slug: string; body: string; access_policy: string; price_cents?: number }) => request<Post>('/api/v1/posts', { method: 'POST', body: JSON.stringify(body) }), onSuccess: () => { void client.invalidateQueries({ queryKey: ['channel-posts', id] }); setManage(false) } })
-  if (channel.isPending) return <Loading />
-  if (channel.error || !channel.data) return <ErrorState error={channel.error || new Error('Channel not found.')} />
-  const current = channel.data
-  return <><div className="channel-banner"><div className="channel-banner-row"><div><span className="eyebrow">Channel</span><h1>{current.name}</h1><p>@{current.slug}{current.description ? ` · ${current.description}` : ''}</p></div><div className="channel-banner-actions">{current.subscription_active ? <Badge tone="success"><Icon name="check" size={12} />Member</Badge> : current.offers?.some((offer) => offer.mode === 'subscription' && offer.active) && <Button variant="secondary">Join channel</Button>}{current.can_manage && <Button onClick={() => setManage(true)}><Icon name="plus" size={16} />New post</Button>}</div></div></div><div className="tabs"><button className="tab active">Posts</button><button className="tab">About</button>{current.can_manage && <button className="tab" onClick={() => setManage(true)}><Icon name="settings" size={15} />Manage</button>}</div>{posts.isPending ? <Loading cards /> : posts.error ? <ErrorState error={posts.error} retry={() => void posts.refetch()} /> : posts.data?.length ? <div className="card-grid">{posts.data.map((post) => <PostCard post={post} key={post.id} />)}</div> : <EmptyState icon="book" title="No posts yet." action={current.can_manage ? <Button onClick={() => setManage(true)}>Write the first post</Button> : undefined}>Check back soon for the first story from this channel.</EmptyState>}{current.can_manage && <PostEditor open={manage} onClose={() => setManage(false)} busy={createPost.isPending} error={createPost.error} onSubmit={(input) => createPost.mutate({ ...input, channel_id: id })} />}</>
+  const { id = "" } = useParams();
+  const auth = useAuth();
+  const client = useQueryClient();
+  const [editor, setEditor] = useState(false);
+  const [membership, setMembership] = useState(false);
+  const [tab, setTab] = useState("posts");
+  const channel = useQuery({
+    queryKey: ["channel", id, auth.user?.id],
+    queryFn: () => request<Channel>(`/api/v1/channels/${id}`),
+  });
+  const postQuery = useInfiniteQuery({
+    queryKey: ["channel-posts", id, auth.user?.id],
+    initialPageParam: "",
+    queryFn: ({ pageParam }) =>
+      postPage(
+        `/api/v1/posts?channel_id=${encodeURIComponent(id)}${pageParam ? "&before=" + encodeURIComponent(pageParam) : ""}`,
+      ),
+    getNextPageParam: (last) => last.next_cursor || undefined,
+  });
+  const posts = {
+    ...postQuery,
+    data: postQuery.data?.pages.flatMap((page) => page.data),
+  };
+  if (channel.isPending) return <Loading />;
+  if (channel.error || !channel.data)
+    return (
+      <ErrorState
+        error={channel.error || new Error("Channel not found.")}
+        retry={() => void channel.refetch()}
+      />
+    );
+  const current = channel.data;
+  const offer = current.offers?.find((item) => item.auto_renew);
+  return (
+    <>
+      <div className="channel-banner">
+        <div className="channel-banner-row">
+          <div>
+            <span className="eyebrow">Independent channel</span>
+            <h1>{current.name}</h1>
+            <p>
+              @{current.slug}
+              {current.description ? ` · ${current.description}` : ""}
+            </p>
+            {offer && (
+              <p style={{ marginTop: 12 }}>
+                {money(offer.unit_amount, offer.currency)} ·{" "}
+                {duration(offer.access_duration_hours)}
+              </p>
+            )}
+          </div>
+          <div className="channel-banner-actions">
+            {current.has_membership ? (
+              <Badge tone="success">
+                <Icon name="check" size={12} />
+                Subscribed
+              </Badge>
+            ) : (
+              offer && (
+                <Button variant="secondary" onClick={() => setMembership(true)}>
+                  Join channel
+                </Button>
+              )
+            )}
+            {current.can_edit && (
+              <Button onClick={() => setEditor(true)}>
+                <Icon name="plus" size={16} />
+                New post
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="tabs" aria-label="Channel sections">
+        <button
+          className={`tab ${tab === "posts" ? "active" : ""}`}
+          onClick={() => setTab("posts")}
+        >
+          Posts
+        </button>
+        <button
+          className={`tab ${tab === "about" ? "active" : ""}`}
+          onClick={() => setTab("about")}
+        >
+          About
+        </button>
+        {current.can_edit && (
+          <button
+            className={`tab ${tab === "team" ? "active" : ""}`}
+            onClick={() => setTab("team")}
+          >
+            <Icon name="users" size={15} />
+            Editorial team
+          </button>
+        )}
+        {current.can_manage && (
+          <button
+            className={`tab ${tab === "settings" ? "active" : ""}`}
+            onClick={() => setTab("settings")}
+          >
+            <Icon name="settings" size={15} />
+            Settings
+          </button>
+        )}
+      </div>
+      {tab === "posts" &&
+        (posts.isPending ? (
+          <Loading cards />
+        ) : posts.error ? (
+          <ErrorState error={posts.error} retry={() => void posts.refetch()} />
+        ) : posts.data?.length ? (
+          <div className="card-grid">
+            {posts.data.map((post) => (
+              <PostCard
+                post={{ ...post, channel_name: current.name }}
+                key={post.id}
+              />
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            title="No posts yet."
+            action={
+              current.can_edit ? (
+                <Button onClick={() => setEditor(true)}>
+                  Write the first post
+                </Button>
+              ) : undefined
+            }
+          >
+            Check back soon for the first story from this channel.
+          </EmptyState>
+        ))}
+      {tab === "posts" && posts.hasNextPage && (
+        <div className="pagination">
+          <Button
+            variant="secondary"
+            busy={posts.isFetchingNextPage}
+            onClick={() => void posts.fetchNextPage()}
+          >
+            Older posts
+          </Button>
+        </div>
+      )}
+      {tab === "about" && (
+        <div className="panel stack">
+          <h2>About {current.name}</h2>
+          <p>
+            {current.description ||
+              "An independent channel for original stories and ideas."}
+          </p>
+          <p className="muted">
+            Membership includes posts marked “Included with membership” while
+            subscribed. Some posts are sold separately. Every purchased post
+            keeps permanent access, even after membership ends.
+          </p>
+          <p className="muted">
+            Channel owners and editors manage publication. Paying readers do not
+            receive editing permissions.
+          </p>
+        </div>
+      )}
+      {tab === "team" && current.can_edit && <ChannelTeam channel={current} />}
+      {tab === "settings" && current.can_manage && (
+        <ChannelSettings
+          channel={current}
+          onUpdated={() =>
+            void client.invalidateQueries({ queryKey: ["channel", id] })
+          }
+        />
+      )}
+      <PostEditor
+        open={editor}
+        channelID={id}
+        onClose={() => setEditor(false)}
+      />
+      <MembershipDialog
+        open={membership}
+        channel={current}
+        onClose={() => setMembership(false)}
+      />
+    </>
+  );
 }
-function PostEditor({ open, onClose, busy, error, onSubmit }: { open: boolean; onClose: () => void; busy: boolean; error: Error | null; onSubmit: (input: { title: string; slug: string; body: string; access_policy: string; price_cents?: number }) => void }) {
-  const submit = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const data = new FormData(event.currentTarget); const policy = String(data.get('access_policy')); onSubmit({ title: String(data.get('title')).trim(), slug: String(data.get('slug')).trim(), body: String(data.get('body')), access_policy: policy, price_cents: policy === 'ppv' || policy === 'members_ppv' ? Math.round(Number(data.get('price')) * 100) : undefined }) }
-  return <Modal open={open} onOpenChange={(value) => { if (!value) onClose() }} title="Write a new post" description="All posts belong to this channel. You can change the access policy before publishing." wide><form className="stack" onSubmit={submit}><div className="input-row"><Field label="Title"><input name="title" required maxLength={200} autoFocus /></Field><Field label="Slug"><input name="slug" required pattern="[a-z0-9-]+" placeholder="a-short-slug" /></Field></div><Field label="Story"><textarea name="body" className="editor-body" required placeholder="Start writing…" /></Field><fieldset className="stack" style={{ border: 0, padding: 0, margin: 0 }}><legend className="field">Access policy</legend><div className="choice-grid"><label className="choice"><input type="radio" name="access_policy" value="public" defaultChecked /><span><strong>Free to read</strong><small>Anyone can open it.</small></span></label><label className="choice"><input type="radio" name="access_policy" value="membership" /><span><strong>Membership</strong><small>Included for current and future members.</small></span></label><label className="choice"><input type="radio" name="access_policy" value="members_ppv" /><span><strong>Member purchase</strong><small>Membership is required to buy; access stays permanent.</small></span></label><label className="choice"><input type="radio" name="access_policy" value="ppv" /><span><strong>Open purchase</strong><small>Anyone can buy; access stays permanent.</small></span></label></div></fieldset><Field label="One-time price (USD)" hint="Only used for a purchase policy. The backend remains the source of offer and currency truth."><input name="price" type="number" min="0.5" step="0.01" placeholder="9.00" /></Field>{error && <p className="form-error" role="alert">{error.message}</p>}<div className="form-actions"><Button type="button" variant="ghost" onClick={onClose}>Cancel</Button><Button type="submit" busy={busy}>Publish post<Icon name="arrow" size={16} /></Button></div></form></Modal>
+function ChannelSettings({
+  channel,
+  onUpdated,
+}: {
+  channel: Channel;
+  onUpdated: () => void;
+}) {
+  const navigate = useNavigate();
+  const [error, setError] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [confirmation, setConfirmation] = useState("");
+  const offer = channel.offers.find((item) => item.auto_renew);
+  const save = useMutation({
+    mutationFn: (unit_amount: string) =>
+      request(`/api/v1/channels/${channel.id}/membership`, {
+        method: "PUT",
+        body: JSON.stringify({ unit_amount, currency: "USD" }),
+      }),
+    onSuccess: onUpdated,
+  });
+  const remove = useMutation({
+    mutationFn: () =>
+      request(`/api/v1/channels/${channel.id}`, { method: "DELETE" }),
+    onSuccess: () => navigate("/me?tab=channels"),
+  });
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError("");
+    try {
+      save.mutate(
+        micros(String(new FormData(event.currentTarget).get("amount"))),
+      );
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Invalid price.");
+    }
+  };
+  return (
+    <div className="stack">
+      <div className="panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Channel membership</h2>
+            <p>
+              Set a USD subscription price for a fixed 30-day access period.
+              Included posts grant access to current and future members.
+            </p>
+          </div>
+        </div>
+        <form className="stack" onSubmit={submit}>
+          <Field label="Price every 30 days (USD)">
+            <input
+              name="amount"
+              required
+              inputMode="decimal"
+              defaultValue={
+                offer ? (Number(offer.unit_amount) / 1_000_000).toFixed(2) : ""
+              }
+              placeholder="5.00"
+            />
+          </Field>
+          {(error || save.error) && (
+            <p className="form-error" role="alert">
+              {error || save.error?.message}
+            </p>
+          )}
+          {save.isSuccess && (
+            <p className="notice notice-success" role="status">
+              Membership offer saved.
+            </p>
+          )}
+          <Button type="submit" busy={save.isPending}>
+            Save membership offer
+          </Button>
+        </form>
+      </div>
+      <div className="panel stack">
+        <h2>Delete channel</h2>
+        <p className="muted">
+          Deletion immediately hides the channel and retires its editorial
+          permissions. Channel content is retained for 30 days before cleanup.
+          Financial history remains separate.
+        </p>
+        <Button variant="danger" onClick={() => setDeleting(true)}>
+          Delete channel
+        </Button>
+      </div>
+      <Modal
+        open={deleting}
+        onOpenChange={setDeleting}
+        title="Delete this channel?"
+        description="The channel becomes inaccessible immediately. This does not automatically refund purchases or cancel subscriptions."
+      >
+        <div className="stack">
+          <Field label={`Type ${channel.slug} to confirm`}>
+            <input
+              value={confirmation}
+              onChange={(event) => setConfirmation(event.target.value)}
+            />
+          </Field>
+          {remove.error && (
+            <p className="form-error" role="alert">
+              {remove.error.message}
+            </p>
+          )}
+          <div className="form-actions">
+            <Button variant="ghost" onClick={() => setDeleting(false)}>
+              Keep channel
+            </Button>
+            <Button
+              variant="danger"
+              disabled={confirmation !== channel.slug}
+              busy={remove.isPending}
+              onClick={() => remove.mutate()}
+            >
+              Delete channel
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
 }
-
 export function NewChannelPage() {
-  const auth = useAuth(); const navigate = useNavigate(); const [busy,setBusy]=useState(false); const [error,setError]=useState('')
-  if (!auth.user) return <EmptyState icon="users" title="Sign in to start a channel." action={<Button onClick={auth.openLogin}>Sign in</Button>} />
-  const submit=async(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();setBusy(true);setError('');const d=new FormData(e.currentTarget);try{const channel=await request<Channel>('/api/v1/channels',{method:'POST',body:JSON.stringify({slug:String(d.get('slug')).trim(),name:String(d.get('name')).trim(),description:String(d.get('description')||'').trim()})});navigate(`/channels/${channel.id}`)}catch(cause){setError(cause instanceof Error?cause.message:'Channel could not be created.')}finally{setBusy(false)}}
-  return <div className="page-narrow"><div className="page-heading"><span className="eyebrow">Start publishing</span><h1>Create a channel</h1><p>Your channel is the home for your archive. You become its owner and can invite editors after it exists.</p></div><div className="panel"><form className="stack" onSubmit={submit}><Field label="Channel name"><input name="name" required maxLength={120} autoFocus placeholder="A name readers will remember" /></Field><Field label="Slug" hint="Lowercase letters, numbers, and dashes. This becomes the channel’s stable address."><input name="slug" required pattern="[a-z0-9-]+" placeholder="my-channel" /></Field><Field label="Description"><textarea name="description" maxLength={500} placeholder="What will readers find here?" /></Field>{error&&<p className="form-error" role="alert">{error}</p>}<div className="form-actions"><Link className="button button-ghost" to="/channels">Cancel</Link><Button type="submit" busy={busy}>Create channel<Icon name="arrow" size={16}/></Button></div></form></div></div>
+  const auth = useAuth();
+  const navigate = useNavigate();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  if (!auth.user)
+    return (
+      <EmptyState
+        icon="users"
+        title="Sign in to start a channel."
+        action={<Button onClick={auth.openLogin}>Sign in</Button>}
+      />
+    );
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    const data = new FormData(event.currentTarget);
+    try {
+      const channel = await request<Channel>("/api/v1/channels", {
+        method: "POST",
+        body: JSON.stringify({
+          slug: String(data.get("slug")).trim(),
+          name: String(data.get("name")).trim(),
+        }),
+      });
+      navigate(`/channels/${channel.id}`);
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Channel could not be created.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="page-narrow">
+      <div className="page-heading">
+        <span className="eyebrow">Start publishing</span>
+        <h1>Create a channel</h1>
+        <p>
+          Your channel is the home for your archive. You become its owner and
+          can invite editors after it exists.
+        </p>
+      </div>
+      <div className="panel">
+        <form
+          className="stack"
+          onSubmit={(event) => {
+            void submit(event);
+          }}
+        >
+          <Field label="Channel name">
+            <input
+              name="name"
+              required
+              maxLength={120}
+              autoFocus
+              placeholder="A name readers will remember"
+            />
+          </Field>
+          <Field
+            label="Slug"
+            hint="Lowercase letters, numbers, and dashes. AuthKit reserves and manages channel names."
+          >
+            <input
+              name="slug"
+              required
+              pattern="[a-z0-9-]+"
+              placeholder="my-channel"
+            />
+          </Field>
+          {error && (
+            <p className="form-error" role="alert">
+              {error}
+            </p>
+          )}
+          <div className="form-actions">
+            <Link className="button button-ghost" to="/channels">
+              Cancel
+            </Link>
+            <Button type="submit" busy={busy}>
+              Create channel
+              <Icon name="arrow" size={16} />
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
 }
