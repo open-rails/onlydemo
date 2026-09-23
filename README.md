@@ -232,6 +232,9 @@ rejected concurrent edit cannot leave its title in billing.
 | GET | `/api/checkouts/:id` | Read only the authenticated buyer's checkout |
 
 OpenRails also exposes its native customer billing group under `/billing/v1/me`.
+`billing.go` supplies native AuthKit identity and the customer route policy to the
+OpenRails constructor. The library resolves the declared merchant slug and owns
+the customer authorization; the app mounts the configured bundle under `/billing`.
 Purchased products use cursor pagination; payments, subscriptions and invoices
 have bounded pages. The group includes saved payment methods, payment recovery,
 subscription cancellation/resumption and existing-agreement management. The

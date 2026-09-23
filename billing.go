@@ -75,7 +75,18 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 	if pool == nil {
 		return nil, errors.New("billing requires the host PostgreSQL pool")
 	}
+	if auth == nil {
+		return nil, errors.New("billing customer routes require AuthKit")
+	}
+	identity, err := openrailsauthkit.New(openrailsauthkit.Config{Verifier: auth.runtime.Verifier()})
+	if err != nil {
+		return nil, err
+	}
 	opts := openrailsembed.Options{
+		Auth: identity,
+		HTTP: &openrailsembed.HTTPConfig{CustomerRoutes: []openrailsembed.CustomerRoutesConfig{{
+			Merchant: billingMerchantSlug, Scope: openrailsembed.CustomerBillingManagement,
+		}}},
 		Merchant: &openrailsembed.MerchantDeclaration{Slug: billingMerchantSlug, Config: openrailsembed.MerchantConfig{
 			DisplayName: "OpenRails Blog Demo",
 			PSPs: map[string]openrailsembed.PSPConfig{"stripe": {"stripe": {
@@ -111,21 +122,6 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 	}()
 	client, err := runtime.Client()
 	if err != nil {
-		return nil, err
-	}
-	if auth == nil {
-		return nil, errors.New("billing customer routes require AuthKit")
-	}
-	// The provisioned merchant UUID is known only after construction. Configure
-	// HTTP once using that fixed authority and the host's existing verifier.
-	customerAuth, err := openrailsauthkit.NewDelegatedAuthenticator(auth.runtime.Verifier(), client.MerchantID().String(),
-		openrailsauthkit.WithRolePermissions(func([]string) []string { return nil }))
-	if err != nil {
-		return nil, err
-	}
-	if err := runtime.ConfigureHTTP(openrailsembed.HTTPConfig{CustomerExposures: []openrailsembed.CustomerHTTPConfig{{
-		Prefix: "/v1/me", Scope: openrailsembed.CustomerBillingManagement, DelegatedAuthenticator: customerAuth,
-	}}}); err != nil {
 		return nil, err
 	}
 	return &billingService{runtime: runtime, client: client, publicURL: strings.TrimRight(cfg.PublicURL, "/")}, nil

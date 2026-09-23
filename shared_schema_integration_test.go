@@ -158,13 +158,18 @@ func TestAllPublicCLICommands(t *testing.T) {
 func TestBillingConstructorPreservesHostPoolOnFailure(t *testing.T) {
 	admin := newBlogTestDatabase(t)
 	pool, dsn := newBlogTestOwnerPool(t, admin, 1)
-	cfg := Config{DatabaseURL: dsn, PublicURL: "http://localhost:3000", AppSchema: "public", AuthSchema: "public", BillingSchema: "public", RiverSchema: "public", StripeSecretKey: "sk_test_cleanup", StripeAccountID: "acct_cleanup", StripeWebhookSecret: "whsec_cleanup"}
+	cfg := Config{DatabaseURL: dsn, PublicURL: "http://localhost:3000", AuthIssuer: "http://localhost:3000", AuthAudience: "openrails-demo", AppSchema: "public", AuthSchema: "public", BillingSchema: "public", RiverSchema: "public", StripeSecretKey: "sk_test_cleanup", StripeAccountID: "acct_cleanup", StripeWebhookSecret: "whsec_cleanup"}
 	if err := initializeDatabase(t.Context(), cfg, pool); err != nil {
 		t.Fatal(err)
 	}
+	auth, err := newAuth(t.Context(), cfg, pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer auth.Close()
 	canceled, cancel := context.WithCancel(t.Context())
 	cancel()
-	billing, err := newBilling(canceled, cfg, pool, nil, billingOptions{StripeTransport: &blogTestStripe{}})
+	billing, err := newBilling(canceled, cfg, pool, auth, billingOptions{StripeTransport: &blogTestStripe{}})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected constructor failure: %v", err)
 	}
