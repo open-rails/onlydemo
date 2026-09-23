@@ -1,125 +1,213 @@
 import { Link } from "react-router-dom";
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
+import { clsx } from "clsx";
 import { money, date, duration } from "../format";
 import { Badge, Icon } from "./ui";
 import { policyLabels, type Channel, type Post } from "../models";
+import { hue, membershipOffer, useChannels } from "../channels";
 
-const covers = [
-  "#825d70",
-  "#5c7470",
-  "#74634c",
-  "#5d6984",
-  "#806943",
-  "#6b6283",
-];
-export function PostCard({ post }: { post: Post }) {
+const tint = (seed: string | number) =>
+  ({ "--h": hue(seed) }) as CSSProperties;
+
+export function Avatar({
+  name,
+  seed,
+  className,
+}: {
+  name: string;
+  seed: string | number;
+  className?: string;
+}) {
+  return (
+    <span className={clsx("avatar", className)} style={tint(seed)}>
+      {(name || "?").slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
+export function Cover({
+  seed,
+  className,
+  children,
+}: {
+  seed: string | number;
+  className?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div className={clsx("cover", className)} style={tint(seed)}>
+      {children}
+    </div>
+  );
+}
+export function PostCard({ post, handle }: { post: Post; handle?: string }) {
+  const [liked, setLiked] = useState(false);
   const policy = post.access_policy;
   const price = post.offers?.find((offer) => !offer.auto_renew);
+  const needsMembership =
+    policy === "membership" ||
+    (policy === "members_ppv" && !post.has_membership);
+  const name = post.channel_name || "Creator";
   return (
-    <article className="post-card">
-      <Link
-        to={`/posts/${post.id}`}
-        className="post-cover"
-        style={{ "--cover": covers[post.id % covers.length] } as CSSProperties}
-        tabIndex={-1}
-        aria-hidden="true"
-      >
-        <span className="cover-title">{post.title}</span>
-        {!post.can_read && (
-          <span className="cover-lock">
-            <Icon name="lock" size={15} />
+    <article className="feed-card">
+      <header className="feed-head">
+        <Link to={`/channels/${post.channel_id}`} className="feed-author">
+          <Avatar name={name} seed={post.channel_id} />
+          <span>
+            <strong>
+              {name}
+              <Icon name="verified" size={15} className="verified" />
+            </strong>
+            {handle && <small>@{handle}</small>}
           </span>
-        )}
-      </Link>
-      <div className="card-body">
-        <Link to={`/channels/${post.channel_id}`} className="card-channel">
-          <span className="avatar">
-            {(post.channel_name || "C").slice(0, 1)}
-          </span>
-          {post.channel_name || "View channel"}
         </Link>
+        <span className="feed-date">{date(post.created_at)}</span>
+      </header>
+      <div className="feed-text">
         <h3>
           <Link to={`/posts/${post.id}`}>{post.title}</Link>
         </h3>
-        {post.body && <p className="card-excerpt">{post.body}</p>}
-        <div>
-          <Badge
-            tone={
-              post.purchased
-                ? "success"
-                : policy === "public"
-                  ? "neutral"
-                  : "brand"
-            }
-          >
-            {post.purchased ? (
-              <>
-                <Icon name="check" size={11} />
-                Purchased
-              </>
-            ) : (
-              policyLabels[policy]
-            )}
-          </Badge>
-        </div>
-        <div className="card-bottom">
-          <span>{date(post.created_at)}</span>
-          <span>
-            {price
-              ? money(price.unit_amount, price.currency)
-              : post.can_read
-                ? "Read story"
-                : "View options"}{" "}
-            <span aria-hidden="true">↗</span>
+        {post.can_read && post.body && <p>{post.body}</p>}
+      </div>
+      {!post.can_read && (
+        <Link
+          to={`/posts/${post.id}`}
+          className="feed-media"
+          style={tint(post.channel_id)}
+          aria-label={`Unlock ${post.title}`}
+        >
+          <span className="lock-badge">
+            <Icon name="lock" size={30} />
           </span>
+          <span className="media-meta">
+            <Icon name="image" size={15} /> {policyLabels[policy]}
+          </span>
+        </Link>
+      )}
+      {!post.can_read && (
+        <div className="feed-unlock">
+          <Link
+            to={
+              needsMembership
+                ? `/channels/${post.channel_id}`
+                : `/posts/${post.id}`
+            }
+            className="button button-primary button-full"
+          >
+            <Icon name="lock" size={16} />
+            {needsMembership
+              ? "Subscribe to unlock"
+              : price
+                ? `Unlock for ${money(price.unit_amount, price.currency)}`
+                : "Unlock post"}
+          </Link>
+        </div>
+      )}
+      <footer className="feed-actions">
+        <button
+          className={clsx("icon-button", liked && "liked")}
+          aria-label="Like"
+          aria-pressed={liked}
+          onClick={() => setLiked(!liked)}
+        >
+          <Icon name="heart" size={21} />
+        </button>
+        <Link
+          to={`/posts/${post.id}`}
+          className="icon-button"
+          aria-label="Open post"
+        >
+          <Icon name="message" size={21} />
+        </Link>
+        <Link to={`/channels/${post.channel_id}`} className="tip-link">
+          <Icon name="dollar" size={21} />
+          Send tip
+        </Link>
+        <span className="feed-actions-end">
+          {post.purchased ? (
+            <Badge tone="success">
+              <Icon name="check" size={11} />
+              Purchased
+            </Badge>
+          ) : (
+            policy === "public" && <Badge>Free</Badge>
+          )}
+          <Icon name="bookmark" size={20} className="muted" />
+        </span>
+      </footer>
+    </article>
+  );
+}
+export function ChannelCard({ channel }: { channel: Channel }) {
+  const offer = membershipOffer(channel);
+  return (
+    <article className="creator-card">
+      <Cover seed={channel.id} />
+      <div className="creator-card-body">
+        <Avatar name={channel.name} seed={channel.id} className="avatar-lg" />
+        <h3>
+          <Link to={`/channels/${channel.id}`}>{channel.name}</Link>
+          <Icon name="verified" size={15} className="verified" />
+        </h3>
+        <p className="handle">@{channel.slug}</p>
+        {channel.description && (
+          <p className="creator-bio">{channel.description}</p>
+        )}
+        <div className="creator-card-footer">
+          {channel.can_manage || channel.can_edit ? (
+            <Badge tone="brand">{channel.can_manage ? "Owner" : "Editor"}</Badge>
+          ) : channel.has_membership ? (
+            <Badge tone="success">Subscribed</Badge>
+          ) : (
+            channel.post_count != null && (
+              <span className="muted">
+                {channel.post_count}{" "}
+                {channel.post_count === 1 ? "post" : "posts"}
+              </span>
+            )
+          )}
+          <Link
+            to={`/channels/${channel.id}`}
+            className="button button-primary button-sm"
+          >
+            {offer && !channel.has_membership
+              ? `${money(offer.unit_amount, offer.currency)} ${duration(offer.access_duration_hours).replace("every ", "/ ")}`
+              : "View profile"}
+          </Link>
         </div>
       </div>
     </article>
   );
 }
-export function ChannelCard({ channel }: { channel: Channel }) {
+export function SuggestedCreators({ strip = false }: { strip?: boolean }) {
+  const channels = useChannels();
+  const list = channels.data?.data.slice(0, strip ? 10 : 5) || [];
+  if (!list.length) return null;
   return (
-    <article className="channel-card">
-      <div className="channel-avatar">
-        {channel.name.slice(0, 1).toUpperCase()}
-      </div>
-      <div>
-        <h3>
-          <Link to={`/channels/${channel.id}`}>{channel.name}</Link>
-        </h3>
-        <p>@{channel.slug}</p>
-        {channel.offers?.find((o) => o.auto_renew) && (
-          <p>
-            {money(
-              channel.offers.find((o) => o.auto_renew)!.unit_amount,
-              channel.offers.find((o) => o.auto_renew)!.currency,
-            )}{" "}
-            ·{" "}
-            {duration(
-              channel.offers.find((o) => o.auto_renew)!.access_duration_hours,
-            )}
-          </p>
-        )}
-      </div>
-      {channel.description && <p>{channel.description}</p>}
-      <div className="channel-card-footer">
-        <span>
-          {channel.can_manage || channel.can_edit ? (
-            <Badge tone="brand">
-              {channel.can_manage ? "Owner" : "Editor"}
-            </Badge>
-          ) : channel.has_membership ? (
-            <Badge tone="success">Subscribed</Badge>
-          ) : channel.post_count != null ? (
-            `${channel.post_count} ${channel.post_count === 1 ? "post" : "posts"}`
-          ) : (
-            "Independent channel"
-          )}
-        </span>
-        <Link to={`/channels/${channel.id}`} className="text-button">
-          Visit channel <span aria-hidden="true">↗</span>
+    <section className={clsx("suggested", strip && "suggested-strip")}>
+      <div className="suggested-heading">
+        <h2>Suggestions</h2>
+        <Link to="/channels" className="text-button">
+          See all
         </Link>
       </div>
-    </article>
+      <div className="suggested-list">
+        {list.map((channel) => (
+          <Link
+            to={`/channels/${channel.id}`}
+            key={channel.id}
+            className="suggested-item"
+          >
+            <Cover seed={channel.id} />
+            <span className="suggested-info">
+              <Avatar name={channel.name} seed={channel.id} />
+              <span>
+                <strong>{channel.name}</strong>
+                <small>@{channel.slug}</small>
+              </span>
+            </span>
+          </Link>
+        ))}
+      </div>
+    </section>
   );
 }

@@ -69,7 +69,7 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 			Merchant: billingMerchantSlug, Scope: openrailsembed.CustomerBillingManagement,
 		}}},
 		Merchant: &openrailsembed.MerchantDeclaration{Slug: billingMerchantSlug, Config: openrailsembed.MerchantConfig{
-			DisplayName: "OpenRails Blog Demo",
+			DisplayName: "OnlyDemo",
 			PSPs: map[string]openrailsembed.PSPConfig{"stripe": {"stripe": {
 				AccountID: cfg.StripeAccountID,
 				Secrets: map[string]string{

@@ -22,7 +22,17 @@ export type IconName =
   | "wallet"
   | "warning"
   | "logout"
-  | "menu";
+  | "menu"
+  | "home"
+  | "compass"
+  | "star"
+  | "bag"
+  | "heart"
+  | "message"
+  | "dollar"
+  | "bookmark"
+  | "verified"
+  | "image";
 const paths: Record<IconName, ReactNode> = {
   arrow: <path d="M5 12h14m-6-6 6 6-6 6" />,
   book: (
@@ -108,6 +118,42 @@ const paths: Record<IconName, ReactNode> = {
     </>
   ),
   menu: <path d="M4 6h16M4 12h16M4 18h16" />,
+  home: <path d="M3 11 12 4l9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9Z" />,
+  compass: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="m15.5 8.5-2 5-5 2 2-5 5-2Z" />
+    </>
+  ),
+  star: <path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3Z" />,
+  bag: (
+    <>
+      <path d="M5 8h14l-1 13H6L5 8Z" />
+      <path d="M9 8V6a3 3 0 0 1 6 0v2" />
+    </>
+  ),
+  heart: <path d="M12 20s-8-4.6-8-10.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 8 2.5C20 15.4 12 20 12 20Z" />,
+  message: <path d="M4 5h16v11H9l-5 4V5Z" />,
+  dollar: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .8-3 2s1.3 1.7 3 2 3 .8 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6.5v11" />
+    </>
+  ),
+  bookmark: <path d="M6 3h12v18l-6-4-6 4V3Z" />,
+  verified: (
+    <>
+      <path d="m12 2 2.4 1.8 3-.2.9 2.9 2.5 1.7-1 2.8 1 2.8-2.5 1.7-.9 2.9-3-.2L12 22l-2.4-1.8-3 .2-.9-2.9-2.5-1.7 1-2.8-1-2.8 2.5-1.7.9-2.9 3 .2L12 2Z" fill="currentColor" />
+      <path d="m8.5 12 2.3 2.3 4.7-4.6" stroke="#fff" />
+    </>
+  ),
+  image: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <circle cx="9" cy="10" r="2" />
+      <path d="m21 16-5-5-9 9" />
+    </>
+  ),
 };
 export function Icon({
   name,
@@ -248,7 +294,7 @@ export function ErrorState({
 export function Loading({ cards = false }: { cards?: boolean }) {
   if (cards)
     return (
-      <div className="card-grid" aria-label="Loading stories" role="status">
+      <div className="card-grid" aria-label="Loading posts" role="status">
         {[0, 1, 2].map((n) => (
           <div className="skeleton-card" key={n}>
             <div className="skeleton skeleton-cover" />

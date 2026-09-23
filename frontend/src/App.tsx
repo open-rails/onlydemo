@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from "react";
-import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
+import { Link, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "./auth-context";
-import { Button, Icon } from "./components/ui";
+import { Button, Icon, type IconName } from "./components/ui";
+import { Avatar, SuggestedCreators } from "./components/cards";
 
 export function AppLayout() {
   const auth = useAuth();
@@ -30,103 +31,177 @@ export function AppLayout() {
       );
     }
   };
+  const tab = new URLSearchParams(location.search).get("tab") || "library";
+  const active = (to: string) => {
+    const [path, query] = to.split("?");
+    if (path !== location.pathname) return false;
+    return !query || query === `tab=${tab}`;
+  };
+  const nav: [string, string, IconName][] = [
+    ["/", "Home", "home"],
+    ["/channels", "Explore", "compass"],
+    ["/me?tab=subscriptions", "Subscriptions", "star"],
+    ["/me?tab=library", "Purchased", "bag"],
+    ["/me?tab=channels", "My channels", "users"],
+    ["/me?tab=settings", "Account", "user"],
+  ];
+  const themeButton = (
+    <button
+      className="icon-button"
+      onClick={toggleTheme}
+      aria-label={`Switch to ${dark ? "light" : "dark"} theme`}
+    >
+      <Icon name={dark ? "sun" : "moon"} size={20} />
+    </button>
+  );
+  const logoutButton = (
+    <button
+      className="icon-button"
+      onClick={() => {
+        void logout();
+      }}
+      aria-label="Sign out"
+      title="Sign out"
+    >
+      <Icon name="logout" size={20} />
+    </button>
+  );
   return (
     <>
       <a href="#main-content" className="skip-link">
         Skip to content
       </a>
-      <header className="app-header">
-        <div className="header-inner">
-          <Link to="/" className="brand" aria-label="OpenRails home">
-            <span className="brand-mark">
-              <Icon name="book" size={20} />
-            </span>
-            OpenRails
-            <span className="brand-divider" />
+      <header className="mobile-top">
+        <Link to="/" className="brand" aria-label="OnlyDemo home">
+          <Logo />
+        </Link>
+        <div className="inline-actions">
+          {themeButton}
+          {!auth.loading &&
+            (auth.user ? (
+              logoutButton
+            ) : (
+              <Button className="button-sm" onClick={auth.openLogin}>
+                Sign in
+              </Button>
+            ))}
+        </div>
+      </header>
+      <div className="shell">
+        <aside className="sidebar">
+          <Link to="/" className="brand" aria-label="OnlyDemo home">
+            <Logo />
           </Link>
-          <nav className="main-nav" aria-label="Main navigation">
-            <NavLink to="/" end>
-              Explore
-            </NavLink>
-            <NavLink to="/channels">Channels</NavLink>
-            <NavLink to="/me">My library</NavLink>
+          {auth.user && (
+            <Link to="/me" className="sidebar-user">
+              <Avatar name={auth.user.username} seed={auth.user.id} />
+              <span>
+                <strong>{auth.user.username}</strong>
+                <small>@{auth.user.username}</small>
+              </span>
+            </Link>
+          )}
+          <nav className="side-nav" aria-label="Main navigation">
+            {nav.map(([to, label, icon]) => (
+              <Link
+                key={to}
+                to={to}
+                className={active(to) ? "active" : undefined}
+                aria-current={active(to) ? "page" : undefined}
+              >
+                <Icon name={icon} size={24} />
+                <span>{label}</span>
+              </Link>
+            ))}
           </nav>
-          <div className="header-actions">
-            <button
-              className="icon-button"
-              onClick={toggleTheme}
-              aria-label={`Switch to ${dark ? "light" : "dark"} theme`}
-            >
-              <Icon name={dark ? "sun" : "moon"} size={19} />
-            </button>
+          <Link to="/channels/new" className="button button-primary sidebar-cta">
+            <Icon name="plus" size={18} />
+            <span>New channel</span>
+          </Link>
+          <div className="sidebar-footer">
+            {themeButton}
             {auth.loading ? (
               <span className="spinner muted" aria-label="Loading account" />
             ) : auth.user ? (
-              <>
-                <Link to="/me" className="user-chip">
-                  <span className="avatar">
-                    {auth.user.username.slice(0, 1).toUpperCase()}
-                  </span>
-                  <span>{auth.user.username}</span>
-                </Link>
-                <button
-                  className="icon-button"
-                  onClick={() => {
-                    void logout();
-                  }}
-                  aria-label="Sign out"
-                  title="Sign out"
-                >
-                  <Icon name="logout" size={18} />
-                </button>
-              </>
+              logoutButton
             ) : (
               <>
-                <Button variant="ghost" onClick={auth.openLogin}>
+                <Button className="button-sm" onClick={auth.openLogin}>
                   Sign in
                 </Button>
-                <Button onClick={auth.openRegister}>Get started</Button>
+                <Button
+                  variant="secondary"
+                  className="button-sm"
+                  onClick={auth.openRegister}
+                >
+                  Sign up
+                </Button>
               </>
             )}
           </div>
-        </div>
-      </header>
-      <main
-        id="main-content"
-        className="page"
-        key={location.pathname}
-        tabIndex={-1}
-      >
-        {logoutError && (
-          <div
-            className="notice notice-warning"
-            role="status"
-            style={{ marginBottom: 24 }}
-          >
-            {logoutError}
-            <button
-              className="icon-button"
-              aria-label="Dismiss"
-              onClick={() => setLogoutError("")}
+        </aside>
+        <main
+          id="main-content"
+          className="content"
+          key={location.pathname}
+          tabIndex={-1}
+        >
+          {logoutError && (
+            <div
+              className="notice notice-warning"
+              role="status"
+              style={{ marginBottom: 24 }}
             >
-              <Icon name="close" />
-            </button>
-          </div>
-        )}
-        <Outlet />
-      </main>
-      <footer className="app-footer">
-        <div className="footer-inner">
-          <span>OpenRails · Independent stories, direct support.</span>
-          <div className="footer-links">
+              {logoutError}
+              <button
+                className="icon-button"
+                aria-label="Dismiss"
+                onClick={() => setLogoutError("")}
+              >
+                <Icon name="close" />
+              </button>
+            </div>
+          )}
+          <Outlet />
+        </main>
+        <aside className="rail">
+          <SuggestedCreators />
+          <div className="rail-footer">
             <span className="badge badge-warning">Stripe test environment</span>
             <a href="/dev/routes">
               Developer routes
               <Icon name="external" size={11} />
             </a>
+            <span>© OnlyDemo</span>
           </div>
-        </div>
-      </footer>
+        </aside>
+      </div>
+      <nav className="tabbar" aria-label="Mobile navigation">
+        {nav
+          .filter(([to]) => to !== "/me?tab=channels")
+          .map(([to, label, icon]) => (
+            <Link
+              key={to}
+              to={to}
+              className={active(to) ? "active" : undefined}
+              aria-label={label}
+            >
+              <Icon name={icon} size={24} />
+            </Link>
+          ))}
+      </nav>
+    </>
+  );
+}
+function Logo() {
+  return (
+    <>
+      <span className="brand-mark">
+        <Icon name="lock" size={17} />
+      </span>
+      <span>
+        Only<b>Demo</b>
+      </span>
     </>
   );
 }
@@ -143,13 +218,13 @@ export function RequireAccount({ children }: { children: ReactNode }) {
     return (
       <div className="centered-page">
         <div className="empty-icon">
-          <Icon name="book" size={28} />
+          <Icon name="lock" size={28} />
         </div>
-        <span className="eyebrow">Your reading space</span>
-        <h1 style={{ marginTop: 16 }}>All your stories, together.</h1>
+        <span className="eyebrow">OnlyDemo</span>
+        <h1 style={{ marginTop: 16 }}>Sign in to continue.</h1>
         <p>
-          Sign in to revisit purchased posts, manage memberships, and publish to
-          your channels.
+          Sign in to see your subscriptions, unlocked posts, and the channels
+          you run.
         </p>
         <div className="inline-actions">
           <Button onClick={auth.openLogin}>Sign in</Button>
@@ -172,7 +247,7 @@ export function NotFoundPage() {
       </p>
       <div className="inline-actions">
         <Link className="button button-primary" to="/">
-          Back to explore
+          Back home
           <Icon name="arrow" size={16} />
         </Link>
       </div>

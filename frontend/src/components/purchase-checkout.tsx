@@ -137,7 +137,7 @@ function makeSource(
           ? "processing"
           : current?.status || "created",
       ),
-      merchant: { display_name: post.channel_name || "OpenRails demo" },
+      merchant: { display_name: post.channel_name || "OnlyDemo" },
       plan: frozenPlan(),
       line_items: [
         {

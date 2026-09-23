@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Routes · OpenRails demo</title>
+  <title>Routes · OnlyDemo</title>
   <style>
     :root { color-scheme: light dark; --bg: #f5f6f8; --panel: #fff; --text: #192331; --muted: #596678; --line: #dde3eb; --accent: #2457c5; }
     * { box-sizing: border-box; }
@@ -52,9 +52,9 @@
 </head>
 <body>
 <main>
-  <div class="eyebrow">OpenRails demo</div>
+  <div class="eyebrow">OnlyDemo</div>
   <h1>Explore the API routes</h1>
-  <p>See what this application, AuthKit, and OpenRails expose in the running server.</p>
+  <p>See what this application, AuthKit, and the billing runtime expose in the running server.</p>
   <nav aria-label="Route sections">
     {{range .}}<a href="#{{.ID}}">{{.Name}} · <span data-count-source="{{.ID}}">{{len .Routes}} registered</span></a>{{end}}
   </nav>

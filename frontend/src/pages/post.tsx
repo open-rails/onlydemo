@@ -5,7 +5,7 @@ import {
   useParams,
   useSearchParams,
 } from "react-router-dom";
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useState, type CSSProperties } from "react";
 import { getSessionGeneration, request } from "../api";
 import { useAuth } from "../auth-context";
 import { checkoutAttempt, finishCheckout } from "../attempts";
@@ -27,6 +27,8 @@ import {
   Modal,
 } from "../components/ui";
 import { PostEditor } from "../components/post-editor";
+import { Avatar } from "../components/cards";
+import { hue } from "../channels";
 import { MembershipDialog } from "../components/membership";
 const PurchaseCheckout = lazy(() =>
   import("../components/purchase-checkout").then((module) => ({
@@ -85,6 +87,7 @@ export function PostPage() {
     policy === "membership" ||
     (policy === "members_ppv" && !channel.data?.has_membership);
   const canEdit = item.can_edit || channel.data?.can_edit;
+  const creator = channel.data?.name || item.channel_name || "Creator";
   const action = () => {
     if (!auth.user) auth.openLogin();
     else if (mustJoin) setJoin(true);
@@ -92,69 +95,92 @@ export function PostPage() {
   };
   return (
     <>
-      <div className="breadcrumb">
-        <Link to="/">Explore</Link>
-        <Icon name="chevron" size={13} />
-        <Link to={`/channels/${item.channel_id}`}>
-          {channel.data?.name || "Channel"}
+      <div className="page-title">
+        <Link
+          to={`/channels/${item.channel_id}`}
+          className="icon-button cover-back-inline"
+          aria-label="Back to creator"
+        >
+          <Icon name="arrow" size={20} />
         </Link>
-        <Icon name="chevron" size={13} />
-        <span>{item.title}</span>
+        <h1>Post</h1>
       </div>
       <div className="reader-layout">
-        <article className="reader-main">
-          <span className="eyebrow">
-            {channel.data?.name || "Independent channel"}
-          </span>
-          <h1 className="reader-title">{item.title}</h1>
-          <div className="reader-meta">
-            <span className="avatar">
-              {(channel.data?.name || "O").slice(0, 1)}
+        <article className="feed-card reader-main">
+          <header className="feed-head">
+            <Link to={`/channels/${item.channel_id}`} className="feed-author">
+              <Avatar name={creator} seed={item.channel_id} />
+              <span>
+                <strong>
+                  {creator}
+                  <Icon name="verified" size={15} className="verified" />
+                </strong>
+                {channel.data && <small>@{channel.data.slug}</small>}
+              </span>
+            </Link>
+            <span className="feed-date">
+              {item.purchased && <Badge tone="success">Purchased</Badge>}{" "}
+              {date(item.created_at)}
             </span>
-            <span>{channel.data?.name || "Channel story"}</span>
-            <span>·</span>
-            <span>{date(item.created_at)}</span>
-            {item.purchased && <Badge tone="success">Purchased</Badge>}
-          </div>
-          {canEdit && (
-            <div className="inline-actions" style={{ marginBottom: 25 }}>
-              <Button variant="secondary" onClick={() => setEditor(true)}>
-                <Icon name="edit" size={15} />
-                Edit post
-              </Button>
-              <Button variant="ghost" onClick={() => setDeleting(true)}>
-                Delete post
-              </Button>
-            </div>
-          )}
-          {item.can_read ? (
-            <div className="article-body">
-              {item.body || "This post has no body."}
-            </div>
-          ) : (
-            <div className="locked-content">
-              <div className="empty-icon">
-                <Icon name="lock" size={27} />
-              </div>
-              <h2>This story is waiting for you.</h2>
-              <p>
-                {policy === "membership"
-                  ? "Join this channel to read its included posts, now and in the future."
-                  : policy === "members_ppv"
-                    ? "You need an active membership to purchase this post. Once purchased, access remains yours after membership ends."
-                    : "Buy this post once and keep reading access permanently."}
-              </p>
-              {offer || mustJoin ? (
-                <Button onClick={action}>
-                  {!auth.user
-                    ? "Sign in to continue"
-                    : mustJoin
-                      ? "Join channel"
-                      : `Buy for ${money(offer.unit_amount, offer.currency)}`}
+          </header>
+          <div className="feed-text">
+            <h2 className="reader-title">{item.title}</h2>
+            {canEdit && (
+              <div className="inline-actions">
+                <Button
+                  variant="secondary"
+                  className="button-sm"
+                  onClick={() => setEditor(true)}
+                >
+                  <Icon name="edit" size={15} />
+                  Edit post
                 </Button>
-              ) : (
-                <p>This post is not currently for sale.</p>
-              )}
+                <Button
+                  variant="ghost"
+                  className="button-sm"
+                  onClick={() => setDeleting(true)}
+                >
+                  Delete post
+                </Button>
+              </div>
+            )}
+            {item.can_read && (
+              <div className="article-body">
+                {item.body || "This post has no body."}
+              </div>
+            )}
+          </div>
+          {!item.can_read && (
+            <div className="locked-content">
+              <div
+                className="feed-media"
+                style={{ "--h": hue(item.channel_id) } as CSSProperties}
+              >
+                <span className="lock-badge">
+                  <Icon name="lock" size={30} />
+                </span>
+              </div>
+              <div className="feed-unlock">
+                <p>
+                  {policy === "membership"
+                    ? "Subscribe to this creator to unlock this post and everything included with membership."
+                    : policy === "members_ppv"
+                      ? "Subscribers can unlock this post. Once unlocked, it stays yours even after your subscription ends."
+                      : "Unlock this post once and keep it forever."}
+                </p>
+                {offer || mustJoin ? (
+                  <Button className="button-full" onClick={action}>
+                    <Icon name="lock" size={16} />
+                    {!auth.user
+                      ? "Sign in to unlock"
+                      : mustJoin
+                        ? "Subscribe to unlock"
+                        : `Unlock for ${money(offer.unit_amount, offer.currency)}`}
+                  </Button>
+                ) : (
+                  <p>This post is not currently for sale.</p>
+                )}
+              </div>
             </div>
           )}
         </article>
@@ -172,7 +198,7 @@ export function PostPage() {
               ? "Permanent purchased access"
               : policyLabels[policy]}
           </Badge>
-          <h3>{item.can_read ? "You have access." : "Support the story."}</h3>
+          <h3>{item.can_read ? "You have access." : "Support the creator."}</h3>
           <p>
             {item.purchased
               ? "This purchase remains yours after membership ends. Deleted or archived content may no longer be available."
@@ -197,7 +223,7 @@ export function PostPage() {
               }
               onClick={action}
             >
-              {mustJoin ? "View membership" : "Review purchase"}
+              {mustJoin ? "View subscription" : "Review purchase"}
             </Button>
           )}
           <div className="purchase-note">
@@ -339,7 +365,7 @@ export function CheckoutReturnPage() {
         title="No checkout reference in this browser."
         action={
           <Link className="button button-secondary" to="/me">
-            Check my library
+            View purchased
           </Link>
         }
       >
@@ -375,7 +401,7 @@ export function CheckoutReturnPage() {
       </span>
       <h1 style={{ marginTop: 16 }}>
         {complete
-          ? "It’s in your library."
+          ? "Unlocked."
           : ended
             ? "This attempt is not complete."
             : "We’re checking your payment."}
@@ -407,11 +433,11 @@ export function CheckoutReturnPage() {
       )}
       <div className="inline-actions">
         <Link to="/me?tab=library" className="button button-primary">
-          Open my library
+          View purchased
           <Icon name="arrow" size={16} />
         </Link>
         <Link to="/" className="button button-secondary">
-          Explore stories
+          Back home
         </Link>
         {!complete && (
           <Button variant="ghost" onClick={() => void status.refetch()}>

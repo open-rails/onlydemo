@@ -28,6 +28,13 @@ import { PostCard, ChannelCard } from "../components/cards";
 import { useAuth } from "../auth-context";
 import { date, duration, money } from "../format";
 
+const titles: Record<string, string> = {
+  library: "Purchased",
+  subscriptions: "Subscriptions",
+  channels: "My channels",
+  billing: "Payments",
+  settings: "Account",
+};
 export function AccountPage() {
   const [search, setSearch] = useSearchParams();
   const tab = search.get("tab") || "library";
@@ -45,20 +52,16 @@ export function AccountPage() {
   const current = summary.data?.pages[0];
   return (
     <>
-      <div className="page-heading">
-        <span className="eyebrow">Your reading space</span>
-        <h1>{auth.user?.username || "My library"}</h1>
-        <p>
-          Purchased stories stay yours. Membership access and editorial
-          permissions are managed separately.
-        </p>
+      <div className="page-title">
+        <h1>{titles[tab] || "Account"}</h1>
+        <span className="muted">@{auth.user?.username}</span>
       </div>
       <div className="tabs" aria-label="Account sections">
         {[
-          ["library", "Purchased posts"],
-          ["subscriptions", "Memberships"],
+          ["library", "Purchased"],
+          ["subscriptions", "Subscriptions"],
           ["channels", "My channels"],
-          ["billing", "Billing history"],
+          ["billing", "Payments"],
           ["settings", "Account"],
         ].map(([key, label]) => (
           <button
@@ -110,7 +113,7 @@ export function AccountPage() {
             <>
               <div className="section-heading">
                 <div>
-                  <h2>Your editorial channels</h2>
+                  <h2>Channels you run</h2>
                   <p>
                     Only channels where you can manage or edit publication
                     appear here.
@@ -151,7 +154,7 @@ function Library({
 }) {
   const unique = [...new Map(posts.map((post) => [post.id, post])).values()];
   return unique.length ? (
-    <div className="card-grid">
+    <div className="feed">
       {unique.map((post) => (
         <PostCard post={{ ...post, purchased: true }} key={post.id} />
       ))}
@@ -160,12 +163,12 @@ function Library({
     <EmptyState
       icon="book"
       title={
-        searching ? "No purchases on this page." : "Your shelf is waiting."
+        searching ? "No purchases on this page." : "Nothing unlocked yet."
       }
       action={
         !searching ? (
-          <Link to="/" className="button button-primary">
-            Explore stories
+          <Link to="/channels" className="button button-primary">
+            Explore creators
           </Link>
         ) : undefined
       }
@@ -326,10 +329,10 @@ function Subscriptions({ initial }: { initial?: Subscription[] }) {
       ) : (
         <EmptyState
           icon="users"
-          title="No memberships yet."
+          title="No subscriptions yet."
           action={
             <Link to="/channels" className="button button-secondary">
-              Browse channels
+              Explore creators
             </Link>
           }
         >

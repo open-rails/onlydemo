@@ -1,7 +1,6 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { request, postPage } from "../api";
-import type { Channel, Page } from "../models";
+import { postPage } from "../api";
 import {
   Button,
   EmptyState,
@@ -9,7 +8,12 @@ import {
   Icon,
   Loading,
 } from "../components/ui";
-import { ChannelCard, PostCard } from "../components/cards";
+import {
+  ChannelCard,
+  PostCard,
+  SuggestedCreators,
+} from "../components/cards";
+import { useChannels } from "../channels";
 import { useAuth } from "../auth-context";
 
 function usePosts() {
@@ -26,126 +30,78 @@ function usePosts() {
   });
   return { ...query, data: query.data?.pages.flatMap((page) => page.data) };
 }
-function useChannels() {
-  const { user } = useAuth();
-  const query = useInfiniteQuery({
-    queryKey: ["channels", user?.id],
-    initialPageParam: "",
-    queryFn: ({ pageParam }) =>
-      request<Page<Channel>>(
-        "/api/v1/channels" +
-          (pageParam ? "?cursor=" + encodeURIComponent(pageParam) : ""),
-      ),
-    getNextPageParam: (last) =>
-      last.has_more ? last.next_cursor || undefined : undefined,
-  });
-  return {
-    ...query,
-    data: query.data
-      ? { data: query.data.pages.flatMap((page) => page.data) }
-      : undefined,
-  };
-}
 export function HomePage() {
   const posts = usePosts();
   const auth = useAuth();
+  const channels = useChannels();
+  const byID = new Map(
+    channels.data?.data.map((channel) => [channel.id, channel]),
+  );
   return (
     <>
-      <section className="hero">
-        <div className="hero-copy">
-          <span className="eyebrow">
-            Independent publishing, direct support
-          </span>
-          <h1>
-            Read something <em>worth keeping.</em>
-          </h1>
-          <p>
-            Discover thoughtful channels, follow the people behind them, and buy
-            the stories you want to keep forever.
-          </p>
-          <div className="hero-actions">
-            <a className="button button-primary" href="#latest">
-              Explore latest <Icon name="arrow" size={17} />
-            </a>
-            {auth.user ? (
-              <Link className="button button-secondary" to="/me">
-                Open my library
-              </Link>
-            ) : (
-              <Button variant="secondary" onClick={auth.openRegister}>
-                Start reading free
-              </Button>
-            )}
-          </div>
-          <p className="hero-note">
-            Free posts stay free. Paid posts clearly show what you get before
-            you buy.
-          </p>
-        </div>
-        <div className="hero-panel">
-          <div className="hero-panel-top">
-            <span className="badge badge-success">
-              <Icon name="check" size={11} /> Reader-first
-            </span>
-            <span>OpenRails editorial</span>
-          </div>
-          <h2>Small channels. Long shelf life.</h2>
-          <p>
-            Membership access and one-time purchases are kept separate, so your
-            library remains yours.
-          </p>
-          <div className="hero-panel-bottom">
-            <span className="hero-monogram">OR</span>
-            <span className="muted">Built for independent voices.</span>
-          </div>
-        </div>
-      </section>
-      <section id="latest">
-        <div className="section-heading">
+      <div className="page-title">
+        <h1>Home</h1>
+      </div>
+      {!auth.user && (
+        <section className="welcome-card">
           <div>
-            <span className="eyebrow">From the shelf</span>
-            <h2 style={{ marginTop: 8 }}>Latest stories</h2>
-            <p>New writing from channels worth following.</p>
+            <h2>Support the creators you love.</h2>
+            <p>
+              Subscribe for members-only posts, unlock individual posts, and
+              keep everything you buy.
+            </p>
           </div>
-          <Link className="text-button" to="/channels">
-            Browse channels <span aria-hidden="true">↗</span>
-          </Link>
-        </div>
-        {posts.isPending ? (
-          <Loading cards />
-        ) : posts.error ? (
-          <ErrorState error={posts.error} retry={() => void posts.refetch()} />
-        ) : posts.data?.length ? (
-          <div className="card-grid">
-            {posts.data.map((post) => (
-              <PostCard key={post.id} post={post} />
-            ))}
-          </div>
-        ) : (
-          <EmptyState
-            icon="book"
-            title="The shelf is quiet."
-            action={
-              <Link to="/channels" className="button button-secondary">
-                Find a channel
-              </Link>
-            }
-          >
-            New stories will appear here as creators publish them.
-          </EmptyState>
-        )}
-        {posts.hasNextPage && (
-          <div className="pagination">
-            <Button
-              variant="secondary"
-              busy={posts.isFetchingNextPage}
-              onClick={() => void posts.fetchNextPage()}
-            >
-              Older stories
+          <div className="inline-actions">
+            <Button onClick={auth.openRegister}>Sign up</Button>
+            <Button variant="secondary" onClick={auth.openLogin}>
+              Log in
             </Button>
           </div>
-        )}
-      </section>
+        </section>
+      )}
+      <SuggestedCreators strip />
+      {posts.isPending ? (
+        <Loading cards />
+      ) : posts.error ? (
+        <ErrorState error={posts.error} retry={() => void posts.refetch()} />
+      ) : posts.data?.length ? (
+        <div className="feed">
+          {posts.data.map((post) => (
+            <PostCard
+              key={post.id}
+              post={{
+                ...post,
+                channel_name:
+                  post.channel_name || byID.get(post.channel_id)?.name,
+              }}
+              handle={byID.get(post.channel_id)?.slug}
+            />
+          ))}
+        </div>
+      ) : (
+        <EmptyState
+          icon="image"
+          title="Your feed is empty."
+          action={
+            <Link to="/channels" className="button button-primary">
+              Find creators
+            </Link>
+          }
+        >
+          New posts appear here as creators publish them.
+        </EmptyState>
+      )}
+      {posts.hasNextPage && (
+        <div className="pagination">
+          <Button
+            variant="secondary"
+            busy={posts.isFetchingNextPage}
+            onClick={() => void posts.fetchNextPage()}
+          >
+            Load more
+          </Button>
+        </div>
+      )}
     </>
   );
 }
@@ -154,22 +110,15 @@ export function ChannelsPage() {
   const auth = useAuth();
   return (
     <>
-      <div className="page-heading">
-        <span className="eyebrow">Find your people</span>
-        <h1>Channels</h1>
-        <p>
-          Each channel has its own voice, archive, and way to support the work.
-          Read free posts first, then decide what belongs in your library.
-        </p>
-      </div>
-      {auth.user && (
-        <div className="toolbar">
-          <Link className="button button-primary" to="/channels/new">
+      <div className="page-title">
+        <h1>Explore creators</h1>
+        {auth.user && (
+          <Link className="button button-primary button-sm" to="/channels/new">
             <Icon name="plus" size={16} />
-            Create a channel
+            New channel
           </Link>
-        </div>
-      )}
+        )}
+      </div>
       {channels.isPending ? (
         <Loading cards />
       ) : channels.error ? (
@@ -193,7 +142,7 @@ export function ChannelsPage() {
             ) : undefined
           }
         >
-          Be the first to start an independent channel.
+          Be the first creator on OnlyDemo.
         </EmptyState>
       )}
       {channels.hasNextPage && (
@@ -203,7 +152,7 @@ export function ChannelsPage() {
             busy={channels.isFetchingNextPage}
             onClick={() => void channels.fetchNextPage()}
           >
-            More channels
+            More creators
           </Button>
         </div>
       )}

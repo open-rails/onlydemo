@@ -50,12 +50,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (!open) setDialog(null);
         }}
         title={
-          dialog === "register" ? "Find your next great read." : "Welcome back."
+          dialog === "register" ? "Join OnlyDemo" : "Welcome back."
         }
         description={
           dialog === "register"
-            ? "Create an account to follow creators, buy stories, and start your own channel."
-            : "Sign in to your reading library and channels."
+            ? "Subscribe to creators, unlock posts, and start your own channel."
+            : "Sign in to your subscriptions and channels."
         }
       >
         {dialog && (

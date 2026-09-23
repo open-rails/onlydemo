@@ -11,7 +11,6 @@ import { useAuth } from "../auth-context";
 import type { Channel } from "../models";
 import { micros, money, duration } from "../format";
 import {
-  Badge,
   Button,
   EmptyState,
   ErrorState,
@@ -20,7 +19,8 @@ import {
   Loading,
   Modal,
 } from "../components/ui";
-import { PostCard } from "../components/cards";
+import { Avatar, Cover, PostCard } from "../components/cards";
+import { membershipOffer } from "../channels";
 import { PostEditor } from "../components/post-editor";
 import { ChannelTeam } from "../components/channel-team";
 import { MembershipDialog } from "../components/membership";
@@ -58,53 +58,92 @@ export function ChannelPage() {
       />
     );
   const current = channel.data;
-  const offer = current.offers?.find((item) => item.auto_renew);
+  const offer = membershipOffer(current);
+  const postCount = current.post_count ?? posts.data?.length ?? 0;
   return (
     <>
-      <div className="channel-banner">
-        <div className="channel-banner-row">
-          <div>
-            <span className="eyebrow">Independent channel</span>
-            <h1>{current.name}</h1>
-            <p>
-              @{current.slug}
-              {current.description ? ` · ${current.description}` : ""}
-            </p>
-            {offer && (
-              <p style={{ marginTop: 12 }}>
-                {money(offer.unit_amount, offer.currency)} ·{" "}
-                {duration(offer.access_duration_hours)}
-              </p>
-            )}
+      <section className="profile">
+        <Cover seed={current.id} className="profile-cover">
+          <Link to="/channels" className="cover-back" aria-label="Back">
+            <Icon name="arrow" size={20} />
+          </Link>
+          <div className="cover-title">
+            <strong>{current.name}</strong>
+            <small>
+              {postCount} {postCount === 1 ? "post" : "posts"}
+            </small>
           </div>
-          <div className="channel-banner-actions">
-            {current.has_membership ? (
-              <Badge tone="success">
-                <Icon name="check" size={12} />
-                Subscribed
-              </Badge>
-            ) : (
-              offer && (
-                <Button variant="secondary" onClick={() => setMembership(true)}>
-                  Join channel
+        </Cover>
+        <div className="profile-body">
+          <div className="profile-top">
+            <Avatar
+              name={current.name}
+              seed={current.id}
+              className="avatar-xl"
+            />
+            <div className="inline-actions">
+              {current.can_edit && (
+                <Button onClick={() => setEditor(true)}>
+                  <Icon name="plus" size={16} />
+                  New post
                 </Button>
-              )
-            )}
-            {current.can_edit && (
-              <Button onClick={() => setEditor(true)}>
-                <Icon name="plus" size={16} />
-                New post
-              </Button>
-            )}
+              )}
+              <button
+                className="icon-button icon-button-outline"
+                aria-label="Tip creator"
+              >
+                <Icon name="dollar" size={20} />
+              </button>
+              <button
+                className="icon-button icon-button-outline"
+                aria-label="Favorite creator"
+              >
+                <Icon name="star" size={20} />
+              </button>
+            </div>
           </div>
+          <h1 className="profile-name">
+            {current.name}
+            <Icon name="verified" size={20} className="verified" />
+          </h1>
+          <p className="handle">
+            @{current.slug} · <span className="online">Available now</span>
+          </p>
+          {current.description && (
+            <p className="profile-bio">{current.description}</p>
+          )}
+          {!current.can_edit && (
+            <div className="subscribe-box">
+              <span className="subscribe-label">Subscription</span>
+              {current.has_membership ? (
+                <div className="button button-subscribed button-full">
+                  <Icon name="check" size={18} />
+                  Subscribed
+                </div>
+              ) : offer ? (
+                <button
+                  className="button button-primary button-full button-subscribe"
+                  onClick={() => setMembership(true)}
+                >
+                  <span>Subscribe</span>
+                  <span>
+                    {money(offer.unit_amount, offer.currency)}{" "}
+                    {duration(offer.access_duration_hours).replace("every ", "/ ")}
+                  </span>
+                </button>
+              ) : (
+                <p className="muted">This creator has no subscription yet.</p>
+              )}
+            </div>
+          )}
         </div>
-      </div>
+      </section>
       <div className="tabs" aria-label="Channel sections">
         <button
           className={`tab ${tab === "posts" ? "active" : ""}`}
           onClick={() => setTab("posts")}
         >
-          Posts
+          {postCount} {postCount === 1 ? "Post" : "Posts"}
         </button>
         <button
           className={`tab ${tab === "about" ? "active" : ""}`}
@@ -117,8 +156,7 @@ export function ChannelPage() {
             className={`tab ${tab === "team" ? "active" : ""}`}
             onClick={() => setTab("team")}
           >
-            <Icon name="users" size={15} />
-            Editorial team
+            Team
           </button>
         )}
         {current.can_manage && (
@@ -126,7 +164,6 @@ export function ChannelPage() {
             className={`tab ${tab === "settings" ? "active" : ""}`}
             onClick={() => setTab("settings")}
           >
-            <Icon name="settings" size={15} />
             Settings
           </button>
         )}
@@ -137,10 +174,11 @@ export function ChannelPage() {
         ) : posts.error ? (
           <ErrorState error={posts.error} retry={() => void posts.refetch()} />
         ) : posts.data?.length ? (
-          <div className="card-grid">
+          <div className="feed">
             {posts.data.map((post) => (
               <PostCard
                 post={{ ...post, channel_name: current.name }}
+                handle={current.slug}
                 key={post.id}
               />
             ))}
@@ -156,7 +194,7 @@ export function ChannelPage() {
               ) : undefined
             }
           >
-            Check back soon for the first story from this channel.
+            Check back soon for the first post from this creator.
           </EmptyState>
         ))}
       {tab === "posts" && posts.hasNextPage && (
@@ -175,7 +213,7 @@ export function ChannelPage() {
           <h2>About {current.name}</h2>
           <p>
             {current.description ||
-              "An independent channel for original stories and ideas."}
+              "A creator on OnlyDemo."}
           </p>
           <p className="muted">
             Membership includes posts marked “Included with membership” while
@@ -372,11 +410,10 @@ export function NewChannelPage() {
   return (
     <div className="page-narrow">
       <div className="page-heading">
-        <span className="eyebrow">Start publishing</span>
-        <h1>Create a channel</h1>
+        <h1>Become a creator</h1>
         <p>
-          Your channel is the home for your archive. You become its owner and
-          can invite editors after it exists.
+          Your channel is your creator profile. You become its owner and can
+          invite editors after it exists.
         </p>
       </div>
       <div className="panel">
@@ -392,7 +429,7 @@ export function NewChannelPage() {
               required
               maxLength={120}
               autoFocus
-              placeholder="A name readers will remember"
+              placeholder="Your creator name"
             />
           </Field>
           <Field
