@@ -1,4 +1,4 @@
-import type { CheckoutPlan } from "openrails-checkout";
+import type { CheckoutPlan } from "@openrails/billing-ui";
 interface Attempt {
   key: string;
   checkoutID?: string;
@@ -40,16 +40,16 @@ export function clearAttempt(scope: string) {
 }
 export function rememberCheckout(checkoutID: string, scope: string) {
   try {
-    sessionStorage.setItem("openrails-checkout:" + checkoutID, scope);
+    sessionStorage.setItem("billing-ui:" + checkoutID, scope);
   } catch {
     /* Server status remains authoritative. */
   }
 }
 export function finishCheckout(checkoutID: string) {
   try {
-    const scope = sessionStorage.getItem("openrails-checkout:" + checkoutID);
+    const scope = sessionStorage.getItem("billing-ui:" + checkoutID);
     if (scope) clearAttempt(scope);
-    sessionStorage.removeItem("openrails-checkout:" + checkoutID);
+    sessionStorage.removeItem("billing-ui:" + checkoutID);
   } catch {
     /* Read-only confirmation remains usable. */
   }
@@ -57,7 +57,7 @@ export function finishCheckout(checkoutID: string) {
 
 export function checkoutAttempt(checkoutID: string) {
   try {
-    const scope = sessionStorage.getItem("openrails-checkout:" + checkoutID);
+    const scope = sessionStorage.getItem("billing-ui:" + checkoutID);
     if (!scope) return null;
     const attempt =
       fallback.get(scope) ||

@@ -127,7 +127,7 @@ export interface PublicProvider {
   config?: Record<string, string>;
 }
 export interface PaymentOptionsDocument {
-  plan: import("openrails-checkout").CheckoutPlan;
+  plan: import("@openrails/billing-ui").CheckoutPlan;
   options: ProviderOption[];
   psps: PublicProvider[];
   price_id: string;

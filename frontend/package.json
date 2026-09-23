@@ -17,11 +17,11 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
+    "@openrails/billing-ui": "https://github.com/open-rails/billing-ui/releases/download/v0.4.1/openrails-billing-ui-0.4.1.tgz",
     "@stripe/react-stripe-js": "^6.11.0",
     "@stripe/stripe-js": "^9.17.0",
     "@tanstack/react-query": "^5.100.11",
     "clsx": "^2.1.1",
-    "openrails-checkout": "https://github.com/open-rails/billing-ui/releases/download/v0.3.0/openrails-checkout-0.3.0.tgz",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-router-dom": "^7.18.4"

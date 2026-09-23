@@ -5,7 +5,7 @@ import {
   useElements,
   useStripe,
 } from "@stripe/react-stripe-js";
-import type { TokenizedCardData } from "openrails-checkout";
+import type { TokenizedCardData } from "@openrails/billing-ui";
 import { loadStripe } from "@stripe/stripe-js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
@@ -34,7 +34,7 @@ import { money, duration } from "../format";
 import { Badge, Button, ErrorState, Field, Icon, Loading, Modal } from "./ui";
 
 const TokenizedCardForm = lazy(() =>
-  import("openrails-checkout").then((module) => ({
+  import("@openrails/billing-ui").then((module) => ({
     default: module.TokenizedCardForm,
   })),
 );

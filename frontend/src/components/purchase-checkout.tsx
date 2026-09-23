@@ -7,7 +7,7 @@ import {
   type PayRequest,
   type PayResult,
   type CheckoutSession as PaymentView,
-} from "openrails-checkout";
+} from "@openrails/billing-ui";
 import {
   APIError,
   getSessionGeneration,
