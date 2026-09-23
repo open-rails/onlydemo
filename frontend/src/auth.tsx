@@ -86,6 +86,11 @@ function AuthForm({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const policy = useQuery({
+    queryKey: ["auth", "capabilities"],
+    queryFn: authAPI.capabilities,
+    staleTime: Infinity,
+  }).data?.password;
   const [recovery, setRecovery] = useState<string | null>(null);
   const [restored, setRestored] = useState(false);
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -214,7 +219,14 @@ function AuthForm({
           />
         </Field>
       )}
-      <Field label="Password">
+      <Field
+        label="Password"
+        hint={
+          mode === "register" && policy
+            ? `At least ${policy.min_length} characters.`
+            : undefined
+        }
+      >
         <input
           name="password"
           type="password"
@@ -222,7 +234,8 @@ function AuthForm({
             mode === "register" ? "new-password" : "current-password"
           }
           required
-          minLength={mode === "register" ? 10 : 1}
+          minLength={mode === "register" ? policy?.min_length : 1}
+          maxLength={mode === "register" ? policy?.max_length : undefined}
           placeholder={
             mode === "register"
               ? "Choose a strong password"

@@ -168,8 +168,13 @@ export async function request<T>(
   return body;
 }
 
+export type AuthCapabilities = {
+  password: { login: boolean; min_length: number; max_length: number };
+};
 export const authAPI = {
   me: () => request<User>("/auth/v1/me"),
+  capabilities: () =>
+    request<AuthCapabilities>("/auth/v1/capabilities", {}, false),
   login: (identifier: string, password: string) =>
     request<Tokens>(
       "/auth/v1/password/login",
