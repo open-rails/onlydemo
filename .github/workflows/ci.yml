@@ -45,7 +45,7 @@ jobs:
       DEMO_TEST_MEDIA_ACCESS: /tmp/media-access
     services:
       postgres:
-        image: postgres:18-alpine
+        image: groonga/pgroonga:4.0.8-debian-18
         env:
           POSTGRES_PASSWORD: postgres
         ports: ['5432:5432']

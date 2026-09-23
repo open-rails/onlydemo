@@ -3,7 +3,7 @@
 name: onlydemo
 services:
   postgres:
-    image: postgres:18-alpine
+    image: groonga/pgroonga:4.0.8-debian-18
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres

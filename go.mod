@@ -19,7 +19,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.42.1
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.96.0
 	github.com/joho/godotenv v1.5.1
-	github.com/open-rails/contentkit v0.15.1-0.20260923213649-7be09579474c
+	github.com/open-rails/contentkit v0.15.1-0.20260923214243-6a512d66ad14
 	github.com/open-rails/helpers v0.3.0
 	github.com/spf13/cobra v1.10.2
 )

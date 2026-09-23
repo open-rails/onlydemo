@@ -15,7 +15,7 @@ Use Go 1.26.6, Node 24, pnpm 11, Docker and libvips (`libvips-dev`; the image
 job is CGO). Copy `.env.example` to `.env`, set `MEDIA_TOKEN_KEY`, then:
 
 ```sh
-task dev:up   # PostgreSQL and MinIO with the media bucket (compose.yaml)
+task dev:up   # PostgreSQL (with PGroonga, for ContentKit) and MinIO with the media bucket
 task migrate
 task run
 task seed     # optional display channels and posts, created through the API
