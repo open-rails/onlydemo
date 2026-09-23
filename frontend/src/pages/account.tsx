@@ -228,7 +228,7 @@ function Subscriptions({ initial }: { initial?: Subscription[] }) {
     initialData: initial ? { data: initial } : undefined,
   });
   const change = useMutation({
-    mutationFn: ({
+    mutationFn: async ({
       id,
       action,
       feedback,
@@ -236,11 +236,25 @@ function Subscriptions({ initial }: { initial?: Subscription[] }) {
       id: string;
       action: "cancel" | "resume";
       feedback?: string;
-    }) =>
-      request(`/billing/v1/me/subscriptions/${id}/${action}`, {
+    }) => {
+      await request(`/billing/v1/me/subscriptions/${id}/${action}`, {
         method: "POST",
         body: JSON.stringify(feedback ? { feedback } : {}),
-      }),
+      });
+      // The server queues the change (202); wait until it is applied.
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const page = await request<Page<Subscription>>(
+          "/billing/v1/me/subscriptions?limit=100",
+        );
+        const current = page.data.find((value) => value.id === id);
+        if (!current || !!current.cancel_scheduled === (action === "cancel"))
+          return;
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
+      throw new Error(
+        "The change is still processing. Refresh in a moment to see it.",
+      );
+    },
     onSuccess: async () => {
       setCancel(null);
       await client.invalidateQueries();
@@ -448,6 +462,14 @@ function Billing() {
         `/billing/v1/me/payments?limit=20&offset=${offset}`,
       ),
   });
+  const subscriptions = useQuery({
+    queryKey: ["subscriptions", user?.id],
+    queryFn: () =>
+      request<Page<Subscription>>("/billing/v1/me/subscriptions?limit=100"),
+  });
+  const membershipName = (id?: string) =>
+    subscriptions.data?.data.find((value) => value.id === id)?.product
+      ?.display_name;
   const methods = useQuery({
     queryKey: ["payment-methods", user?.id],
     queryFn: () =>
@@ -480,7 +502,15 @@ function Billing() {
               {payments.data.data.map((payment) => (
                 <div className="data-row" key={payment.id}>
                   <div className="data-row-main">
-                    <h3>{payment.price?.product?.display_name || "Payment"}</h3>
+                    <h3>
+                      {payment.subscription_id ||
+                      payment.price?.type === "recurring"
+                        ? membershipName(payment.subscription_id) ||
+                          "Channel membership"
+                        : payment.price
+                          ? "Post purchase"
+                          : "Payment"}
+                    </h3>
                     <p>
                       {date(payment.created_at)} · {payment.rail}
                     </p>

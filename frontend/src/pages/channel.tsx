@@ -6,7 +6,8 @@ import {
 } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useState, type FormEvent } from "react";
-import { request, postPage } from "../api";
+import { APIError, request, postPage } from "../api";
+import { NotFoundPage } from "../App";
 import { useAuth } from "../auth-context";
 import type { Channel } from "../models";
 import { micros, money, duration } from "../format";
@@ -87,6 +88,8 @@ export function ChannelPage() {
     data: postQuery.data?.pages.flatMap((page) => page.data),
   };
   if (channel.isPending) return <Loading />;
+  if (channel.error instanceof APIError && channel.error.status === 404)
+    return <NotFoundPage />;
   if (channel.error || !channel.data)
     return (
       <ErrorState
@@ -486,7 +489,7 @@ export function NewChannelPage() {
                   id="channel-slug"
                   name="slug"
                   required
-                  pattern="[a-z0-9-]+"
+                  pattern="[a-z0-9\-]+"
                   placeholder="my-channel"
                 />
                 <FieldDescription>

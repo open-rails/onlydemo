@@ -224,11 +224,14 @@ function AuthForm({
           </Alert>
         )}
         <Field>
-          <FieldLabel htmlFor="auth-identifier">Email or username</FieldLabel>
+          <FieldLabel htmlFor="auth-identifier">
+            {mode === "register" ? "Email" : "Email or username"}
+          </FieldLabel>
           <Input
             id="auth-identifier"
             name="identifier"
-            autoComplete="username"
+            type={mode === "register" ? "email" : "text"}
+            autoComplete={mode === "register" ? "email" : "username"}
             required
             autoFocus
             placeholder="you@example.com"

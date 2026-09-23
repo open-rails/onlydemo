@@ -123,7 +123,7 @@ function EditorForm({
     const data = new FormData(event.currentTarget);
     try {
       save.mutate({
-        channel_id: channelID,
+        ...(post ? {} : { channel_id: channelID }),
         title: String(data.get("title")).trim(),
         slug: String(data.get("slug")).trim(),
         body: String(data.get("body")),
@@ -164,7 +164,7 @@ function EditorForm({
               id="post-slug"
               name="slug"
               required
-              pattern="[a-z0-9-]+"
+              pattern="[a-z0-9\-]+"
               defaultValue={post?.slug}
               placeholder="a-short-slug"
             />

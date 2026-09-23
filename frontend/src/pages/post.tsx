@@ -6,7 +6,8 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { lazy, Suspense, useState, type CSSProperties } from "react";
-import { getSessionGeneration, request } from "../api";
+import { APIError, getSessionGeneration, request } from "../api";
+import { NotFoundPage } from "../App";
 import { useAuth } from "../auth-context";
 import { checkoutAttempt, finishCheckout } from "../attempts";
 import {
@@ -99,6 +100,8 @@ export function PostPage() {
     },
   });
   if (post.isPending) return <Loading />;
+  if (post.error instanceof APIError && post.error.status === 404)
+    return <NotFoundPage />;
   if (post.error || !post.data)
     return (
       <ErrorState
@@ -233,12 +236,12 @@ export function PostPage() {
                   ? "Available while your channel membership is active."
                   : "A one-time purchase. No recurring charge for this post."}
           </p>
-          {!item.can_read && pricePending && (
+          {(!item.can_read || canEdit) && pricePending && (
             <div className="purchase-price">
               <small>Price pending</small>
             </div>
           )}
-          {!item.can_read && !pricePending && offer && (
+          {(!item.can_read || canEdit) && !pricePending && offer && (
             <div className="purchase-price">
               {money(offer.unit_amount, offer.currency)} <small>one time</small>
             </div>

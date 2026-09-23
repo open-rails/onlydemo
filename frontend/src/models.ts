@@ -58,7 +58,8 @@ export interface Payment {
   created_at: string;
   rail: string;
   refunded?: boolean;
-  price?: { product?: { display_name?: string } };
+  subscription_id?: string;
+  price?: { id: string; key?: string; type?: "one_time" | "recurring" };
 }
 export interface Subscription {
   id: string;
