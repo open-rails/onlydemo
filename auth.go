@@ -34,6 +34,7 @@ type appAuth struct {
 	runtime *embedded.Runtime
 	client  authkit.Client
 	billing *openrails.Client
+	media   *mediaService
 }
 
 func (a *appAuth) Close() {
@@ -77,7 +78,7 @@ func newAuth(ctx context.Context, config Config, pool *pgxpool.Pool) (*appAuth, 
 			Methods:       []embedded.TwoFactorMethod{embedded.TwoFactorTOTP, embedded.TwoFactorEmail},
 			TOTPSecretKey: totpKey,
 		},
-	}, embedded.Deps{Postgres: pool, River: ownership, Email: logEmail{}, OnSoftDelete: a.cancelDeletedAccountBilling, OnHardDelete: a.cancelDeletedAccountBilling})
+	}, embedded.Deps{Postgres: pool, River: ownership, Email: logEmail{}, OnSoftDelete: a.cancelDeletedAccountBilling, OnHardDelete: a.purgeDeletedAccount})
 	if err != nil {
 		return nil, err
 	}
@@ -173,6 +174,17 @@ func (a *appAuth) cancelDeletedAccountBilling(ctx context.Context, event authkit
 			return nil
 		}
 	}
+}
+
+// A purge also erases the account's avatar folder.
+func (a *appAuth) purgeDeletedAccount(ctx context.Context, event authkit.UserDeletion) error {
+	if err := a.cancelDeletedAccountBilling(ctx, event); err != nil {
+		return err
+	}
+	if a.media == nil {
+		return errors.New("media lifecycle has not been composed")
+	}
+	return a.media.eraseUser(ctx, event.UserID)
 }
 
 // grantAdmin is only called by the explicit, one-off admin:grant command.

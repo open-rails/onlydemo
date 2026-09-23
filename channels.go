@@ -24,6 +24,7 @@ type channelAPI struct {
 	billing      *billingService
 	table, posts string
 	jobs         *river.Client[pgx.Tx]
+	media        *mediaService
 	locks        chan struct{}
 }
 
@@ -285,7 +286,23 @@ func (api *channelAPI) finishDeletion(ctx context.Context, id string) error {
 	if seconds > 0 {
 		return river.JobSnooze(max(time.Millisecond, time.Duration(seconds*float64(time.Second))))
 	}
-	if _, err = api.pool.Exec(ctx, `DELETE FROM `+api.posts+` WHERE channel_id=$1`, id); err != nil {
+	// Post and channel folders are erased with the rows; soft-deleted posts
+	// were erased when they were deleted, and a repeated erasure is harmless.
+	err = pgx.BeginFunc(ctx, api.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `DELETE FROM `+api.posts+` WHERE channel_id=$1 RETURNING id`, id)
+		if err != nil {
+			return err
+		}
+		ids, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+		if err != nil {
+			return err
+		}
+		if err = api.media.deletePostsTx(ctx, tx, id, ids...); err != nil {
+			return err
+		}
+		return api.media.deleteChannelTx(ctx, tx, id)
+	})
+	if err != nil {
 		return err
 	}
 	if err = api.auth.client.DeleteGroupInstanceByID(ctx, id, authkit.DeletePermissionGroupOptions{}); err != nil && !errors.Is(err, authkit.ErrGroupNotFound) {

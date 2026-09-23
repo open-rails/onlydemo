@@ -21,6 +21,8 @@ export interface Channel {
   can_manage: boolean;
   can_edit: boolean;
   has_membership: boolean;
+  avatar_url?: string;
+  banner_url?: string;
   offers: Offer[];
   deleted_at?: string | null;
 }
@@ -37,6 +39,7 @@ export interface Post {
   can_edit?: boolean;
   purchased?: boolean;
   has_membership?: boolean;
+  channel_avatar_url?: string;
   access_policy: AccessPolicy;
   offer_status: "none" | "pending" | "active" | "failed";
   offers: Offer[];
@@ -50,7 +53,7 @@ export interface Page<T> {
   total?: number;
 }
 export interface AccountData {
-  user: { id: string; username: string; email?: string };
+  user: { id: string; username: string; email?: string; avatar_url?: string };
   manageable_channels: Channel[];
   purchased_posts: Post[];
 }

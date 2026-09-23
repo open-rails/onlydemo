@@ -81,41 +81,21 @@ func smoke() error {
 	defer listener.Close()
 	base := "http://" + listener.Addr().String()
 	databaseURL := (&url.URL{Scheme: "postgres", User: url.UserPassword(db.ConnConfig.User, db.ConnConfig.Password), Host: net.JoinHostPort(db.ConnConfig.Host, strconv.Itoa(int(db.ConnConfig.Port))), Path: "/" + name, RawQuery: "sslmode=disable"}).String()
-	cfg := Config{DatabaseURL: databaseURL, PublicURL: base, AuthIssuer: base, AuthAudience: "demo-smoke", BillingPSPs: []string{"stripe"}, StripePublishableKey: "pk_test_manual_fake_only", StripeSecretKey: "sk_test_manual_fake_only", StripeAccountID: "acct_demo_test", StripeWebhookSecret: smokeWebhookSecret}
+	media, err := loadMediaConfig(func(key string) string { return os.Getenv(strings.ToUpper(key)) })
+	if err != nil {
+		return err
+	}
+	cfg := Config{Media: media, DatabaseURL: databaseURL, PublicURL: base, AuthIssuer: base, AuthAudience: "demo-smoke", BillingPSPs: []string{"stripe"}, StripePublishableKey: "pk_test_manual_fake_only", StripeSecretKey: "sk_test_manual_fake_only", StripeAccountID: "acct_demo_test", StripeWebhookSecret: smokeWebhookSecret}
 	if err = initializeDatabase(ctx, cfg, pool); err != nil {
 		return err
 	}
-	auth, err := newAuth(ctx, cfg, pool)
-	if err != nil {
-		return err
-	}
-	defer auth.Close()
 	stripe := &smokeStripe{}
-	billing, err := newBilling(ctx, cfg, pool, auth, billingOptions{StripeTransport: stripe})
+	srv, err := startServer(ctx, cfg, pool, billingOptions{StripeTransport: stripe})
 	if err != nil {
 		return err
 	}
-	defer billing.Close(context.Background())
-	channels := newChannels(pool, auth, billing, cfg)
-	posts := newPosts(channels, cfg)
-	jobs, err := newJobs(ctx, pool, cfg, auth, billing, channels, posts)
-	if err != nil {
-		return err
-	}
-	defer stopJobs(context.Background(), jobs)
-	if err = billing.requireReady(ctx); err != nil {
-		return err
-	}
-	if err = auth.runtime.Start(ctx); err != nil {
-		return err
-	}
-	if err = jobs.Start(ctx); err != nil {
-		return err
-	}
-	app, err := newApp(pool, auth, billing, cfg, channels, posts)
-	if err != nil {
-		return err
-	}
+	defer srv.Close()
+	auth, billing, channels, app := srv.auth, srv.billing, srv.channels, srv.app
 	defer app.Shutdown()
 	go func() { _ = app.Listener(listener) }()
 	owner := smokePeer(base, "127.0.0.2")

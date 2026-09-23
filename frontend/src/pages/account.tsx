@@ -23,7 +23,9 @@ import {
   FormError,
   Loading,
 } from "../components/states";
-import { PostCard, ChannelCard } from "../components/cards";
+import { Avatar, PostCard, ChannelCard } from "../components/cards";
+import { SlotUpload } from "../components/slot-upload";
+import { useSlotVersion } from "../media";
 import { useAuth } from "../session";
 
 const titles: Record<string, string> = {
@@ -47,9 +49,26 @@ export function AccountPage() {
       last.has_more && last.next_cursor ? last.next_cursor : undefined,
   });
   const current = summary.data?.pages[0];
+  const slots = useSlotVersion();
   return (
     <>
       <div className="page-title">
+        {current && (
+          <span className="avatar-slot">
+            <Avatar
+              name={current.user.username}
+              seed={current.user.id}
+              src={slots.src(current.user.avatar_url)}
+              className="avatar-lg"
+            />
+            <SlotUpload
+              target={{ kind: "user", id: current.user.id }}
+              slot="avatar"
+              label="Avatar"
+              onDone={slots.refresh}
+            />
+          </span>
+        )}
         <h1>{titles[tab] || "Account"}</h1>
         <span className="muted">@{auth.user?.username}</span>
       </div>

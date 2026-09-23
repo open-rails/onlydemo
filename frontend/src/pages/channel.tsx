@@ -58,6 +58,8 @@ import { Avatar, Cover, PostCard } from "../components/cards";
 import { membershipOffer } from "../channels";
 import { PostEditor } from "../components/post-editor";
 import { ChannelTeam } from "../components/channel-team";
+import { SlotUpload } from "../components/slot-upload";
+import { useSlotVersion } from "../media";
 import { MembershipDialog } from "../components/membership";
 
 export function ChannelPage() {
@@ -67,6 +69,7 @@ export function ChannelPage() {
   const [editor, setEditor] = useState(false);
   const [membership, setMembership] = useState(false);
   const [tab, setTab] = useState("posts");
+  const slots = useSlotVersion();
   const channel = useQuery({
     queryKey: ["channel", slug, auth.user?.id],
     queryFn: () =>
@@ -99,11 +102,12 @@ export function ChannelPage() {
     );
   const current = channel.data;
   const offer = membershipOffer(current);
+  const target = { kind: "channel", id: current.id };
   const postCount = current.post_count ?? posts.data?.length ?? 0;
   return (
     <>
       <section className="profile">
-        <Cover seed={current.id} className="profile-cover">
+        <Cover seed={current.id} src={slots.src(current.banner_url)} className="profile-cover">
           <Link to="/channels" className="cover-back" aria-label="Back">
             <HugeiconsIcon icon={ArrowLeft02Icon} size={20} />
           </Link>
@@ -113,14 +117,23 @@ export function ChannelPage() {
               {postCount} {postCount === 1 ? "post" : "posts"}
             </small>
           </div>
+          {current.can_manage && (
+            <SlotUpload target={target} slot="banner" label="Banner" onDone={slots.refresh} className="slot-upload cover-upload" />
+          )}
         </Cover>
         <div className="profile-body">
           <div className="profile-top">
-            <Avatar
-              name={current.name}
-              seed={current.id}
-              className="avatar-xl"
-            />
+            <span className="avatar-slot">
+              <Avatar
+                name={current.name}
+                seed={current.id}
+                src={slots.src(current.avatar_url)}
+                className="avatar-xl"
+              />
+              {current.can_manage && (
+                <SlotUpload target={target} slot="avatar" label="Avatar" onDone={slots.refresh} />
+              )}
+            </span>
             <div className="inline-actions">
               {current.can_edit && (
                 <Button onClick={() => setEditor(true)}>

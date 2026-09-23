@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"github.com/open-rails/contentkit/media"
 	"github.com/gofiber/fiber/v3"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails"
@@ -20,6 +21,8 @@ type channelView struct {
 	CanManage     bool                     `json:"can_manage"`
 	CanEdit       bool                     `json:"can_edit"`
 	HasMembership bool                     `json:"has_membership"`
+	AvatarURL     string                   `json:"avatar_url"`
+	BannerURL     string                   `json:"banner_url"`
 	Offers        []openrails.CatalogOffer `json:"offers"`
 }
 
@@ -38,7 +41,8 @@ func (api *channelAPI) view(c fiber.Ctx, id string, offers bool) (channelView, e
 	if group.DeletedAt != nil {
 		return channelView{}, authkit.ErrGroupNotFound
 	}
-	v := channelView{ID: id, Slug: group.InstanceSlug, Name: group.DisplayName, Offers: []openrails.CatalogOffer{}}
+	v := channelView{ID: id, Slug: group.InstanceSlug, Name: group.DisplayName, Offers: []openrails.CatalogOffer{},
+		AvatarURL: api.media.publicURL(kindChannel, id, "avatar"), BannerURL: api.media.publicURL(kindChannel, id, "banner")}
 	user := viewer(c)
 	if user != "" {
 		v.CanManage, err = api.allowed(c.Context(), user, id, "channel:settings:manage")
@@ -317,5 +321,5 @@ func (api *postAPI) me(c fiber.Ctx) error {
 		return billingUnavailable(c)
 	}
 	c.Set("Cache-Control", "no-store")
-	return c.JSON(fiber.Map{"user": fiber.Map{"id": profile.ID, "username": profile.Username, "email": profile.Email}, "manageable_channels": managed, "purchased_posts": purchased, "has_more": more, "next_cursor": next, "subscriptions": subscriptions.Data, "payments": payments.Data})
+	return c.JSON(fiber.Map{"user": fiber.Map{"id": profile.ID, "username": profile.Username, "email": profile.Email, "avatar_url": api.media.publicURL(media.UserKind, profile.ID, "avatar_320")}, "manageable_channels": managed, "purchased_posts": purchased, "has_more": more, "next_cursor": next, "subscriptions": subscriptions.Data, "payments": payments.Data})
 }

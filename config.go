@@ -33,6 +33,8 @@ type Config struct {
 	NMITokenizationKey    string
 	NMITokenizationURL    string
 	NMIWebhookSecret      string
+	ContentSchema         string
+	Media                 mediaConfig
 }
 
 func loadConfig() (Config, error) {
@@ -53,6 +55,9 @@ func loadConfig() (Config, error) {
 			case "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_KEYS_PATH", "AUTH_SCHEMA", "APP_SCHEMA", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA", "BILLING_PSPS", "STRIPE_PUBLISHABLE_KEY", "STRIPE_SECRET_KEY", "STRIPE_ACCOUNT_ID", "STRIPE_WEBHOOK_SECRET", "NMI_ACCOUNT_ID", "NMI_SANDBOX_SECURITY_KEY", "NMI_TOKENIZATION_KEY", "NMI_TOKENIZATION_URL", "NMI_WEBHOOK_SIGNING_SECRET":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
 			default:
+				if key == "CONTENT_SCHEMA" || strings.HasPrefix(key, "MEDIA_") {
+					return strings.ToLower(key), value
+				}
 				return "", nil
 			}
 		},
@@ -118,6 +123,10 @@ func loadConfig() (Config, error) {
 		NMITokenizationKey:    k.String("nmi.tokenization.key"),
 		NMITokenizationURL:    k.String("nmi.tokenization.url"),
 		NMIWebhookSecret:      k.String("nmi.webhook.signing.secret"),
+		ContentSchema:         strings.TrimSpace(k.String("content_schema")),
+	}
+	if cfg.Media, err = loadMediaConfig(k.String); err != nil {
+		return Config{}, err
 	}
 	if err := validateDatabaseSchemas(cfg); err != nil {
 		return Config{}, err
@@ -149,7 +158,7 @@ func parseBillingPSPs(raw string) ([]string, error) {
 var databaseSchemaPattern = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 
 func validateDatabaseSchemas(cfg Config) error {
-	for name, value := range map[string]string{"AUTH_SCHEMA": cfg.AuthSchema, "APP_SCHEMA": cfg.AppSchema, "BILLING_SCHEMA": cfg.BillingSchema, "RIVER_SCHEMA": cfg.RiverSchema} {
+	for name, value := range map[string]string{"AUTH_SCHEMA": cfg.AuthSchema, "APP_SCHEMA": cfg.AppSchema, "BILLING_SCHEMA": cfg.BillingSchema, "RIVER_SCHEMA": cfg.RiverSchema, "CONTENT_SCHEMA": cfg.ContentSchema} {
 		value = strings.TrimSpace(value)
 		if value != "" && (len(value) > 63 || !databaseSchemaPattern.MatchString(value) || strings.HasPrefix(value, "pg_")) {
 			return fmt.Errorf("%s must be a lowercase PostgreSQL schema identifier (at most 63 bytes, no pg_ prefix)", name)
@@ -163,4 +172,11 @@ func appSchema(cfg Config) string {
 		return schema
 	}
 	return "demo"
+}
+
+func contentSchema(cfg Config) string {
+	if schema := strings.TrimSpace(cfg.ContentSchema); schema != "" {
+		return schema
+	}
+	return "content"
 }

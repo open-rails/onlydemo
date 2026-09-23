@@ -51,6 +51,7 @@ import {
   Loading,
 } from "../components/states";
 import { PostEditor } from "../components/post-editor";
+import { PostGallery, PostMediaEditor } from "../components/post-media";
 import { Avatar } from "../components/cards";
 import { hue } from "../channels";
 import { MembershipDialog } from "../components/membership";
@@ -140,7 +141,7 @@ export function PostPage() {
         <article className="feed-card reader-main">
           <header className="feed-head">
             <Link to={`/channels/${item.channel_slug}`} className="feed-author">
-              <Avatar name={creator} seed={item.channel_id} />
+              <Avatar name={creator} seed={item.channel_id} src={item.channel_avatar_url} />
               <span>
                 <strong>
                   {creator}
@@ -177,6 +178,8 @@ export function PostPage() {
               </div>
             )}
           </div>
+          <PostGallery postID={item.id} viewer={auth.user?.id} />
+          {canEdit && <PostMediaEditor postID={item.id} />}
           {!item.can_read && (
             <div className="locked-content">
               <div
