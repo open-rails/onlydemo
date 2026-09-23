@@ -205,6 +205,11 @@ Channel writes use `client.ForCatalogOwner(channelID)` after a live AuthKit
 permission check. Root moderation uses the merchant client while preserving the
 channel catalog. Creator payouts and Stripe Connect are separate features.
 
+The demo explicitly enables `AllowCatalogUpdates` for these dynamic offers.
+OpenRails reads the active catalog from its database; the demo needs no catalog
+bootstrap YAML. This permission is independent of host-owned Stripe credentials
+and retains the same channel and merchant authorization checks.
+
 Catalog/provider work runs outside blog database transactions so a shared pool
 cannot deadlock waiting for itself. Post updates use an atomic revision check;
 concurrent edits can return 409 and should be retried after fetching the post.

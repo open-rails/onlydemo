@@ -91,7 +91,7 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 			ProviderWriteMode:               openrailsconfig.ProviderWriteModeFull,
 			MerchantConfigSource:            openrailsconfig.MerchantConfigSourceManifest,
 			NewSubscriptionCollectionPolicy: "engine",
-			CatalogSource:                   openrailsconfig.CatalogSourceAPI,
+			AllowCatalogUpdates:             true,
 			APIURL:                          strings.TrimRight(cfg.PublicURL, "/") + "/billing",
 			DB:                              &openrailsconfig.DBConfig{URL: cfg.DatabaseURL, Schema: cfg.BillingSchema},
 		},
