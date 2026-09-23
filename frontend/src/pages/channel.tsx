@@ -26,16 +26,18 @@ import { ChannelTeam } from "../components/channel-team";
 import { MembershipDialog } from "../components/membership";
 
 export function ChannelPage() {
-  const { id = "" } = useParams();
+  const { slug = "" } = useParams();
   const auth = useAuth();
   const client = useQueryClient();
   const [editor, setEditor] = useState(false);
   const [membership, setMembership] = useState(false);
   const [tab, setTab] = useState("posts");
   const channel = useQuery({
-    queryKey: ["channel", id, auth.user?.id],
-    queryFn: () => request<Channel>(`/api/v1/channels/${id}`),
+    queryKey: ["channel", slug, auth.user?.id],
+    queryFn: () =>
+      request<Channel>(`/api/v1/channels/${encodeURIComponent(slug)}`),
   });
+  const id = channel.data?.id || "";
   const postQuery = useInfiniteQuery({
     queryKey: ["channel-posts", id, auth.user?.id],
     initialPageParam: "",
@@ -44,6 +46,7 @@ export function ChannelPage() {
         `/api/v1/posts?channel_id=${encodeURIComponent(id)}${pageParam ? "&before=" + encodeURIComponent(pageParam) : ""}`,
       ),
     getNextPageParam: (last) => last.next_cursor || undefined,
+    enabled: !!id,
   });
   const posts = {
     ...postQuery,
@@ -230,7 +233,7 @@ export function ChannelPage() {
         <ChannelSettings
           channel={current}
           onUpdated={() =>
-            void client.invalidateQueries({ queryKey: ["channel", id] })
+            void client.invalidateQueries({ queryKey: ["channel", slug] })
           }
         />
       )}
@@ -395,7 +398,7 @@ export function NewChannelPage() {
           name: String(data.get("name")).trim(),
         }),
       });
-      navigate(`/channels/${channel.id}`);
+      navigate(`/channels/${channel.slug}`);
     } catch (cause) {
       setError(
         cause instanceof Error

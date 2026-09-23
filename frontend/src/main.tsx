@@ -30,7 +30,7 @@ const router = createBrowserRouter([
       { path: "/", element: <HomePage /> },
       { path: "/channels", element: <ChannelsPage /> },
       { path: "/channels/new", element: <NewChannelPage /> },
-      { path: "/channels/:id", element: <ChannelPage /> },
+      { path: "/channels/:slug", element: <ChannelPage /> },
       { path: "/posts/:id", element: <PostPage /> },
       {
         path: "/checkout/return",

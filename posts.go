@@ -38,6 +38,8 @@ type post struct {
 	ID                 int64                    `json:"id"`
 	AuthorID           string                   `json:"author_id"`
 	ChannelID          string                   `json:"channel_id"`
+	ChannelSlug        string                   `json:"channel_slug"`
+	ChannelName        string                   `json:"channel_name"`
 	Slug               string                   `json:"slug"`
 	Title              string                   `json:"title"`
 	Body               string                   `json:"body,omitempty"`
@@ -108,9 +110,13 @@ func (api *postAPI) decorate(c fiber.Ctx, posts []post, withOffers bool) error {
 	}
 	publishing := map[string]bool{}
 	editing := map[string]bool{}
+	groups := map[string]authkit.GroupInstance{}
 	for i := range posts {
 		p := &posts[i]
 		if _, ok := publishing[p.ChannelID]; !ok {
+			if groups[p.ChannelID], err = api.auth.client.GroupInstanceByID(c.Context(), p.ChannelID); err != nil && !errors.Is(err, authkit.ErrGroupNotFound) {
+				return err
+			}
 			publishing[p.ChannelID], err = api.channels.allowed(c.Context(), user, p.ChannelID, channelReadPermission)
 			if err != nil {
 				return err
@@ -120,6 +126,7 @@ func (api *postAPI) decorate(c fiber.Ctx, posts []post, withOffers bool) error {
 				return err
 			}
 		}
+		p.ChannelSlug, p.ChannelName = groups[p.ChannelID].InstanceSlug, groups[p.ChannelID].DisplayName
 		p.Purchased = access[postResource(p.BillingKey)]
 		p.SubscriptionActive = access[membershipResource(p.ChannelID)]
 		p.CanEdit = editing[p.ChannelID] || editAdmin
@@ -456,6 +463,9 @@ func (api *postAPI) settled(c fiber.Ctx, status int, id int64, job *postOfferArg
 		return databaseError(c, err)
 	}
 	p.CanRead, p.CanEdit, p.Offers = true, true, []openrails.CatalogOffer{}
+	if g, e := api.auth.client.GroupInstanceByID(c.Context(), p.ChannelID); e == nil {
+		p.ChannelSlug, p.ChannelName = g.InstanceSlug, g.DisplayName
+	}
 	if paidPolicy(p.AccessPolicy) && p.OfferStatus == "active" {
 		if offers, e := api.billing.offers(c.Context(), postResource(p.BillingKey), false); e == nil {
 			p.Offers = offers

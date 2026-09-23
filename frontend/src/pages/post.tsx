@@ -72,7 +72,7 @@ export function PostPage() {
     mutationFn: () => request(`/api/v1/posts/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       void client.invalidateQueries();
-      navigate(`/channels/${post.data?.channel_id}`);
+      navigate(`/channels/${post.data?.channel_slug}`);
     },
   });
   if (post.isPending) return <Loading />;
@@ -100,7 +100,7 @@ export function PostPage() {
     <>
       <div className="page-title">
         <Link
-          to={`/channels/${item.channel_id}`}
+          to={`/channels/${item.channel_slug}`}
           className="icon-button cover-back-inline"
           aria-label="Back to creator"
         >
@@ -111,7 +111,7 @@ export function PostPage() {
       <div className="reader-layout">
         <article className="feed-card reader-main">
           <header className="feed-head">
-            <Link to={`/channels/${item.channel_id}`} className="feed-author">
+            <Link to={`/channels/${item.channel_slug}`} className="feed-author">
               <Avatar name={creator} seed={item.channel_id} />
               <span>
                 <strong>

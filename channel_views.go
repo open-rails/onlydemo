@@ -5,9 +5,12 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails"
+	"regexp"
 	"strconv"
 	"strings"
 )
+
+var channelSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,99}$`)
 
 type channelView struct {
 	ID            string                   `json:"id"`
@@ -110,9 +113,21 @@ func (api *channelAPI) list(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{"data": data, "has_more": more, "next_cursor": next})
 }
 func (api *channelAPI) publicGet(c fiber.Ctx) error {
+	// Public reads address a channel by its AuthKit group slug or its id.
 	id, err := channelID(c.Params("id"))
 	if err != nil {
-		return clientError(c, 400, "invalid channel id")
+		slug := strings.ToLower(c.Params("id"))
+		if !channelSlug.MatchString(slug) {
+			return clientError(c, 404, "channel not found")
+		}
+		group, e := api.auth.client.GroupInstanceForSlug(c.Context(), authkit.GroupRef{Persona: channelPersona, Instance: slug})
+		if errors.Is(e, authkit.ErrGroupNotFound) {
+			return clientError(c, 404, "channel not found")
+		}
+		if e != nil {
+			return billingUnavailable(c)
+		}
+		id = group.ID
 	}
 	v, err := api.view(c, id, true)
 	if errors.Is(err, authkit.ErrGroupNotFound) {

@@ -27,6 +27,7 @@ export interface Channel {
 export interface Post {
   id: number;
   channel_id: string;
+  channel_slug: string;
   channel_name?: string;
   author_id: string;
   slug: string;

@@ -58,6 +58,9 @@ func (api *channelAPI) create(c fiber.Ctx) error {
 	if input.Slug == "" || input.Name == "" {
 		return clientError(c, http.StatusBadRequest, "slug and name are required")
 	}
+	if input.Slug == "new" {
+		return clientError(c, http.StatusBadRequest, "channel slug is reserved")
+	}
 	ref := authkit.GroupRef{Persona: channelPersona, Instance: input.Slug}
 	group, err := api.auth.client.GroupInstanceForSlug(c.Context(), ref)
 	if errors.Is(err, authkit.ErrGroupNotFound) {

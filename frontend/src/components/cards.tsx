@@ -50,7 +50,7 @@ export function PostCard({ post, handle }: { post: Post; handle?: string }) {
   return (
     <article className="feed-card">
       <header className="feed-head">
-        <Link to={`/channels/${post.channel_id}`} className="feed-author">
+        <Link to={`/channels/${post.channel_slug}`} className="feed-author">
           <Avatar name={name} seed={post.channel_id} />
           <span>
             <strong>
@@ -87,7 +87,7 @@ export function PostCard({ post, handle }: { post: Post; handle?: string }) {
           <Link
             to={
               needsMembership
-                ? `/channels/${post.channel_id}`
+                ? `/channels/${post.channel_slug}`
                 : `/posts/${post.id}`
             }
             className="button button-primary button-full"
@@ -119,7 +119,7 @@ export function PostCard({ post, handle }: { post: Post; handle?: string }) {
         >
           <Icon name="message" size={21} />
         </Link>
-        <Link to={`/channels/${post.channel_id}`} className="tip-link">
+        <Link to={`/channels/${post.channel_slug}`} className="tip-link">
           <Icon name="dollar" size={21} />
           Send tip
         </Link>
@@ -146,7 +146,7 @@ export function ChannelCard({ channel }: { channel: Channel }) {
       <div className="creator-card-body">
         <Avatar name={channel.name} seed={channel.id} className="avatar-lg" />
         <h3>
-          <Link to={`/channels/${channel.id}`}>{channel.name}</Link>
+          <Link to={`/channels/${channel.slug}`}>{channel.name}</Link>
         </h3>
         <p className="handle">@{channel.slug}</p>
         {channel.description && (
@@ -166,7 +166,7 @@ export function ChannelCard({ channel }: { channel: Channel }) {
             )
           )}
           <Link
-            to={`/channels/${channel.id}`}
+            to={`/channels/${channel.slug}`}
             className="button button-primary button-sm"
           >
             {offer && !channel.has_membership
@@ -193,7 +193,7 @@ export function SuggestedCreators({ strip = false }: { strip?: boolean }) {
       <div className="suggested-list">
         {list.map((channel) => (
           <Link
-            to={`/channels/${channel.id}`}
+            to={`/channels/${channel.slug}`}
             key={channel.id}
             className="suggested-item"
           >

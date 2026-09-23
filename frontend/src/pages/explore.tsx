@@ -33,10 +33,6 @@ function usePosts() {
 export function HomePage() {
   const posts = usePosts();
   const auth = useAuth();
-  const channels = useChannels();
-  const byID = new Map(
-    channels.data?.data.map((channel) => [channel.id, channel]),
-  );
   return (
     <>
       <div className="page-title">
@@ -67,15 +63,7 @@ export function HomePage() {
       ) : posts.data?.length ? (
         <div className="feed">
           {posts.data.map((post) => (
-            <PostCard
-              key={post.id}
-              post={{
-                ...post,
-                channel_name:
-                  post.channel_name || byID.get(post.channel_id)?.name,
-              }}
-              handle={byID.get(post.channel_id)?.slug}
-            />
+            <PostCard key={post.id} post={post} handle={post.channel_slug} />
           ))}
         </div>
       ) : (
