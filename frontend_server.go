@@ -4,7 +4,6 @@ import (
 	"embed"
 	"mime"
 	"path"
-	"slices"
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
@@ -58,27 +57,16 @@ func mountFrontend(app *fiber.App) {
 	})
 }
 
-// publicConfiguration exposes only browser-safe values: OpenRails's whitelisted
-// PSP projection (NMI tokenization key/URL) and the Stripe publishable key.
-func publicConfiguration(b *billingService, cfg Config) fiber.Handler {
+// publicConfiguration exposes OpenRails's browser-safe PSP projection.
+func publicConfiguration(b *billingService) fiber.Handler {
 	return func(c fiber.Ctx) error {
-		var key, psp any
-		if slices.Contains(cfg.BillingPSPs, "stripe") {
-			key = cfg.StripePublishableKey
-		}
 		psps := []openrails.CheckoutPSPConfig{}
 		config, err := b.client.GetCheckoutConfig(c.Context())
 		if err == nil {
 			psps = config.PSPs
-			for _, v := range config.PSPs {
-				if v.Rail == "stripe" {
-					psp = v.PSPID
-					break
-				}
-			}
 		}
 		c.Set("Cache-Control", "no-store")
-		return c.JSON(fiber.Map{"stripe_publishable_key": key, "stripe_psp_id": psp, "billing_available": err == nil, "psps": psps})
+		return c.JSON(fiber.Map{"billing_available": err == nil, "psps": psps})
 	}
 }
 

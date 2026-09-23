@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
-	"strings"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -40,69 +40,14 @@ func initializeBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool) erro
 }
 
 type billingOptions struct {
-	// StripeTransport replaces provider HTTP only in local integration tests.
-	// It is independent of sandbox credentials; nil uses the real Stripe sandbox.
-	StripeTransport http.RoundTripper
-}
-
-// providerDeclarations maps the operator's BILLING_PSPS onto OpenRails PSP
-// declarations. Every listed provider requires its sandbox credentials.
-func providerDeclarations(cfg Config) (map[string]openrailsembed.PSPConfig, error) {
-	if len(cfg.BillingPSPs) == 0 {
-		return nil, errors.New("BILLING_PSPS must list at least one provider")
-	}
-	psps := map[string]openrailsembed.PSPConfig{}
-	for _, name := range cfg.BillingPSPs {
-		switch name {
-		case "stripe":
-			if !strings.HasPrefix(cfg.StripeSecretKey, "sk_test_") && !strings.HasPrefix(cfg.StripeSecretKey, "rk_test_") {
-				return nil, errors.New("stripe requires a STRIPE_SECRET_KEY sandbox key (sk_test_ or rk_test_)")
-			}
-			if !strings.HasPrefix(cfg.StripeAccountID, "acct_") || !strings.HasPrefix(cfg.StripeWebhookSecret, "whsec_") {
-				return nil, errors.New("stripe requires STRIPE_ACCOUNT_ID and STRIPE_WEBHOOK_SECRET")
-			}
-			if !strings.HasPrefix(cfg.StripePublishableKey, "pk_test_") {
-				return nil, errors.New("stripe requires a STRIPE_PUBLISHABLE_KEY pk_test_ key")
-			}
-			psps["stripe"] = openrailsembed.PSPConfig{"stripe": {
-				AccountID: cfg.StripeAccountID,
-				Secrets: map[string]string{
-					"secret_key":             cfg.StripeSecretKey,
-					"webhook_signing_secret": cfg.StripeWebhookSecret,
-				},
-			}}
-		case "nmi":
-			for env, value := range map[string]string{"NMI_ACCOUNT_ID": cfg.NMIAccountID, "NMI_SANDBOX_SECURITY_KEY": cfg.NMISandboxSecurityKey, "NMI_TOKENIZATION_KEY": cfg.NMITokenizationKey, "NMI_WEBHOOK_SIGNING_SECRET": cfg.NMIWebhookSecret} {
-				if strings.TrimSpace(value) == "" {
-					return nil, fmt.Errorf("nmi requires %s", env)
-				}
-			}
-			settings := map[string]any{"endpoint_deployment": "gateway", "tokenization_key": cfg.NMITokenizationKey}
-			if cfg.NMITokenizationURL != "" {
-				settings["tokenization_url"] = cfg.NMITokenizationURL
-			}
-			psps["nmi"] = openrailsembed.PSPConfig{"nmi": {
-				AccountID: cfg.NMIAccountID,
-				Secrets: map[string]string{
-					"security_key":           cfg.NMISandboxSecurityKey,
-					"webhook_signing_secret": cfg.NMIWebhookSecret,
-				},
-				Settings: settings,
-			}}
-		default:
-			return nil, fmt.Errorf("unsupported billing provider %q", name)
-		}
-	}
-	return psps, nil
+	// Test adjusts the runtime options, only in local integration tests
+	// (fake provider transports).
+	Test func(*openrailsembed.Options)
 }
 
 // newBilling is deliberately sandbox-only: OpenRails runs in sandbox posture
 // and each declared provider must carry test credentials.
 func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth, options billingOptions) (_ *billingService, err error) {
-	psps, err := providerDeclarations(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("billing: %w", err)
-	}
 	if pool == nil {
 		return nil, errors.New("billing requires the host PostgreSQL pool")
 	}
@@ -120,7 +65,7 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 		}}},
 		Merchant: &openrailsembed.MerchantDeclaration{Slug: billingMerchantSlug, Config: openrailsembed.MerchantConfig{
 			DisplayName: "OnlyDemo",
-			PSPs:        psps,
+			PSPs:        cfg.PSPs,
 		}},
 		Config: &openrailsconfig.Config{
 			TestMode:            openrailsconfig.CredentialPostureSandbox,
@@ -128,11 +73,13 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 			AllowCatalogUpdates: true,
 			DB:                  &openrailsconfig.DBConfig{URL: cfg.DatabaseURL, Schema: cfg.BillingSchema},
 		},
-		PGXPool:         pool,
-		River:           openrailsembed.RiverFromHost(),
-		StripeTransport: options.StripeTransport,
+		PGXPool: pool,
+		River:   openrailsembed.RiverFromHost(),
 	}
 
+	if options.Test != nil {
+		options.Test(&opts)
+	}
 	runtime, err := openrailsembed.New(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("start OpenRails: %w", err)
@@ -148,7 +95,7 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 	}
 	// This assignment precedes shared-fleet startup and HTTP publication.
 	auth.billing = client
-	return &billingService{runtime: runtime, client: client, psps: cfg.BillingPSPs, postDeletion: cfg.PostDeletion}, nil
+	return &billingService{runtime: runtime, client: client, psps: slices.Sorted(maps.Keys(cfg.PSPs)), postDeletion: cfg.PostDeletion}, nil
 }
 
 func (b *billingService) RiverJobs() riverkit.Contribution { return b.runtime.RiverJobs() }

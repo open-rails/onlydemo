@@ -28,6 +28,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails"
+	openrailsembed "github.com/open-rails/openrails/embed"
 	"github.com/riverqueue/river"
 )
 
@@ -85,16 +86,20 @@ func smoke() error {
 	if err != nil {
 		return err
 	}
+<<<<<<< Updated upstream
 	postDeletion, err := parsePostDeletionPolicy("", "")
 	if err != nil {
 		return err
 	}
 	cfg := Config{PostDeletion: postDeletion, Media: media, DatabaseURL: databaseURL, PublicURL: base, AuthIssuer: base, AuthAudience: "demo-smoke", BillingPSPs: []string{"stripe"}, StripePublishableKey: "pk_test_manual_fake_only", StripeSecretKey: "sk_test_manual_fake_only", StripeAccountID: "acct_demo_test", StripeWebhookSecret: smokeWebhookSecret}
+=======
+	cfg := Config{Media: media, DatabaseURL: databaseURL, PublicURL: base, AuthIssuer: base, AuthAudience: "demo-smoke", PSPs: fakeStripePSP(smokeWebhookSecret)}
+>>>>>>> Stashed changes
 	if err = initializeDatabase(ctx, cfg, pool); err != nil {
 		return err
 	}
 	stripe := &smokeStripe{}
-	srv, err := startServer(ctx, cfg, pool, billingOptions{StripeTransport: stripe})
+	srv, err := startServer(ctx, cfg, pool, billingOptions{Test: func(o *openrailsembed.Options) { o.StripeTransport = stripe }})
 	if err != nil {
 		return err
 	}
@@ -504,6 +509,13 @@ func (s smokeClient) register(name string) (string, error) {
 		return "", fmt.Errorf("login returned no access token")
 	}
 	return token, nil
+}
+
+// fakeStripePSP declares the Stripe sandbox account the fake transport serves.
+func fakeStripePSP(webhookSecret string) map[string]openrailsembed.PSPConfig {
+	return map[string]openrailsembed.PSPConfig{"stripe": {"stripe": {AccountID: "acct_demo_test",
+		Secrets:  map[string]string{"secret_key": "sk_test_fake_only", "webhook_signing_secret": webhookSecret},
+		Settings: map[string]any{"publishable_key": "pk_test_fake_only"}}}}
 }
 
 // Every request is handled locally or rejected. There is no network fallback.

@@ -24,6 +24,7 @@ importers:
         specifier: https://github.com/open-rails/auth-ui/releases/download/v0.3.1/openrails-auth-ui-0.3.1.tgz
         version: https://github.com/open-rails/auth-ui/releases/download/v0.3.1/openrails-auth-ui-0.3.1.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@openrails/billing-ui':
+<<<<<<< Updated upstream
         specifier: https://github.com/open-rails/billing-ui/releases/download/v0.7.0/openrails-billing-ui-0.7.0.tgz
         version: https://github.com/open-rails/billing-ui/releases/download/v0.7.0/openrails-billing-ui-0.7.0.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@stripe/react-stripe-js':
@@ -32,6 +33,10 @@ importers:
       '@stripe/stripe-js':
         specifier: ^9.17.0
         version: 9.17.0
+=======
+        specifier: https://github.com/open-rails/billing-ui/releases/download/v0.8.0/openrails-billing-ui-0.8.0.tgz
+        version: https://github.com/open-rails/billing-ui/releases/download/v0.8.0/openrails-billing-ui-0.8.0.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+>>>>>>> Stashed changes
       '@tanstack/react-query':
         specifier: ^5.100.11
         version: 5.103.2(react@19.3.0)
@@ -443,9 +448,15 @@ packages:
       '@solana/wallet-adapter-react':
         optional: true
 
+<<<<<<< Updated upstream
   '@openrails/billing-ui@https://github.com/open-rails/billing-ui/releases/download/v0.7.0/openrails-billing-ui-0.7.0.tgz':
     resolution: {integrity: sha512-SBHZYT3uEEL3HqiCEFX+0fdVrTsPaGxto+CI+GYX8hVzJZ4Cl9TaSEzB3MuzxQACKcaGd95JbpQV65GcA3EMMQ==, tarball: https://github.com/open-rails/billing-ui/releases/download/v0.7.0/openrails-billing-ui-0.7.0.tgz}
     version: 0.7.0
+=======
+  '@openrails/billing-ui@https://github.com/open-rails/billing-ui/releases/download/v0.8.0/openrails-billing-ui-0.8.0.tgz':
+    resolution: {integrity: sha512-87lNQk9UefQx3crr+otwE2zJvhTKS0OceulufLMvPAxyYYm81DgfiE7GJWZId1Bx9ZjjG6O/UTuwJJ4IPAQ4Fw==, tarball: https://github.com/open-rails/billing-ui/releases/download/v0.8.0/openrails-billing-ui-0.8.0.tgz}
+    version: 0.8.0
+>>>>>>> Stashed changes
     engines: {node: '>=22.12.0'}
     peerDependencies:
       react: '>=19 <20'
@@ -559,13 +570,6 @@ packages:
   '@sindresorhus/merge-streams@4.0.0':
     resolution: {integrity: sha512-tlqY9xq5ukxTUZBmoOp+m61cqwQD5pHJtFY3Mn8CA8ps6yghLH/Hw8UPdqg4OLmFW3IFlcXnQNmo/dh8HzXYIQ==}
     engines: {node: '>=18'}
-
-  '@stripe/react-stripe-js@6.11.0':
-    resolution: {integrity: sha512-u5Nydu7UZ3llHbmumzhFe0u/E7+rz0syjZ6T1fXJEafjuVBIHt6o0438/InHsn73pRfjchGGKx1zXNlWlzS93A==}
-    peerDependencies:
-      '@stripe/stripe-js': '>=9.16.0 <10.0.0'
-      react: '>=16.8.0 <20.0.0'
-      react-dom: '>=16.8.0 <20.0.0'
 
   '@stripe/stripe-js@9.17.0':
     resolution: {integrity: sha512-uidL4OJum5kivsOAQnVfQmYLJ2zdgirtmT0zWgskASZ4TPXxpXQ0MNrzW4NsXB90uEqmPHpSEtciLFbF1QQvNA==}
@@ -2779,11 +2783,16 @@ snapshots:
       - '@types/react'
       - date-fns
 
+<<<<<<< Updated upstream
   '@openrails/billing-ui@https://github.com/open-rails/billing-ui/releases/download/v0.7.0/openrails-billing-ui-0.7.0.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
+=======
+  '@openrails/billing-ui@https://github.com/open-rails/billing-ui/releases/download/v0.8.0/openrails-billing-ui-0.8.0.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
+>>>>>>> Stashed changes
     dependencies:
       '@base-ui/react': 1.8.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@hugeicons/core-free-icons': 4.3.5
       '@hugeicons/react': 1.1.10(react@19.3.0)
+      '@stripe/stripe-js': 9.17.0
       class-variance-authority: 0.7.1
       cn: 0.4.0
       react: 19.3.0
@@ -2846,13 +2855,6 @@ snapshots:
   '@sec-ant/readable-stream@0.4.1': {}
 
   '@sindresorhus/merge-streams@4.0.0': {}
-
-  '@stripe/react-stripe-js@6.11.0(@stripe/stripe-js@9.17.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
-    dependencies:
-      '@stripe/stripe-js': 9.17.0
-      prop-types: 15.8.1
-      react: 19.3.0
-      react-dom: 19.3.0(react@19.3.0)
 
   '@stripe/stripe-js@9.17.0': {}
 

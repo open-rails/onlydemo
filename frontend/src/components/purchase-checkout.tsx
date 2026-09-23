@@ -2,7 +2,9 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Checkout as BillingCheckout,
+  checkoutRails,
   checkoutSessionSchema,
+  savedMethodsFor,
   type CheckoutSource,
   type PayRequest,
   type PayResult,
@@ -76,20 +78,6 @@ function makeSource(
       "The checkout offer changed. Reload the post before payment.",
     );
   const scope = `post:${buyer}:${post.id}`;
-  // Preserve an earlier Stripe attempt created by the previous frontend.
-  const legacy = getAttempt(`${scope}:${offer.price_id}`);
-  if (
-    !getAttempt(scope).submitted &&
-    !getAttempt(scope).checkoutID &&
-    (legacy.request || legacy.checkoutID)
-  ) {
-    saveAttempt(scope, {
-      ...legacy,
-      submitted: true,
-      offer: { priceID: offer.price_id, plan: document.plan },
-    });
-    clearAttempt(`${scope}:${offer.price_id}`);
-  }
   const frozenPlan = () => getAttempt(scope).offer?.plan || document.plan;
   const assertBuyer = () => {
     if (sessionKey() !== generation)
@@ -100,36 +88,7 @@ function makeSource(
       );
   };
   let current: Checkout | undefined;
-  const rails = document.options.flatMap((option) => {
-    const psp = document.psps.find(
-      (item) => item.psp_id === option.psp_id && item.key === option.selector,
-    );
-    if (
-      !psp ||
-      !["stripe", "nmi"].includes(option.rail) ||
-      psp.custodian !== "psp"
-    )
-      return [];
-    if (
-      option.rail === "nmi" &&
-      (!psp.config?.tokenization_key ||
-        !psp.config?.tokenization_url ||
-        psp.config.tokenization_key.startsWith("preview_"))
-    )
-      return [];
-    return [
-      {
-        id: option.psp_id,
-        rail: option.rail,
-        mode: option.mode as "one_off" | "subscription",
-        driver:
-          option.rail === "nmi"
-            ? ("collect_js" as const)
-            : ("redirect" as const),
-        public_config: psp.config,
-      },
-    ];
-  });
+  const rails = checkoutRails(document.options, document.psps);
   const view = (): PaymentView =>
     checkoutSessionSchema.parse({
       id: current?.id || getAttempt(scope).key,
@@ -150,22 +109,7 @@ function makeSource(
       tax: "0",
       due_today: frozenPlan().unit_amount,
       rails,
-      saved_methods: methods
-        .filter(
-          (method) =>
-            method.rail === "nmi" &&
-            method.health?.active !== false &&
-            rails.some((rail) => rail.id === method.psp_id),
-        )
-        .map((method) => ({
-          id: method.id,
-          option_id: method.psp_id,
-          rail: method.rail,
-          brand: method.card?.brand,
-          last_four: method.card?.last4,
-          exp_month: method.card?.exp_month,
-          exp_year: method.card?.exp_year,
-        })),
+      saved_methods: savedMethodsFor(methods, rails),
       payment_id: current?.payment_id || undefined,
       subscription_id: current?.subscription_id || undefined,
       expires_at: null,
@@ -342,7 +286,7 @@ export function PurchaseCheckout({
       setRevision((value) => value + 1);
       if (result.url && result.status === "requires_action") {
         const url = new URL(result.url);
-        if (url.protocol !== "https:" || url.hostname !== "checkout.stripe.com")
+        if (url.protocol !== "https:")
           throw new Error("Unexpected checkout destination.");
         location.assign(url.href);
       }
@@ -404,10 +348,9 @@ export function PurchaseCheckout({
         (() => {
           try {
             const target = new URL(current.url);
-            return target.protocol === "https:" &&
-              target.hostname === "checkout.stripe.com" ? (
+            return target.protocol === "https:" ? (
               <Button variant="link" nativeButton={false} render={<a href={target.href} />}>
-                Continue the accepted Stripe checkout
+                Continue the accepted checkout
               </Button>
             ) : null;
           } catch {

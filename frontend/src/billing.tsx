@@ -2,15 +2,9 @@ import type { ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { BillingUiProvider } from "@openrails/billing-ui";
-import { createBillingClient } from "@openrails/billing-ui/client";
 import { BillingProvider } from "@openrails/billing-ui/react";
 import { sessionIdentity, useSession } from "@openrails/auth-ui/react";
-import { auth } from "./api";
-
-const billing = createBillingClient({
-  baseUrl: "/billing/v1",
-  fetch: auth.authFetch,
-});
+import { billing } from "./api";
 
 export function BillingHost({ children }: { children: ReactNode }) {
   const navigate = useNavigate();

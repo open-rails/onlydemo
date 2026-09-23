@@ -37,30 +37,30 @@ The frontend follows the shared UI standard: shadcn `base-vega` on
 hand-edit them except for `// Local:` deltas. `frontend/dist` is committed and
 embedded, so rebuild it with every frontend change.
 
-Billing is required and sandbox-only. `BILLING_PSPS` lists the providers the site
-offers (`stripe`, `nmi`, or `stripe,nmi`; default `stripe`); each listed provider
-requires its credentials at startup and unlisted ones need none. The browser
-chooses among the rails OpenRails reports for each offer.
+Billing is required and sandbox-only. Enabling a provider is configuration only:
+list its key in `BILLING_PSPS` (e.g. `stripe,nmi`) and set its variables.
+OpenRails's `embed.PSPFromEnv` reads `<KEY>_ACCOUNT_ID` plus the rail's secrets and
+settings (`<KEY>_RAIL` when the key is not the rail name) and refuses a missing
+required secret; startup refuses a PSP whose credentials are not sandbox. The
+browser receives OpenRails's browser-safe PSP config and `@openrails/billing-ui`
+picks each flow (hosted redirect, Collect.js, Stripe Elements); there is no
+provider-specific code here.
 
-- Stripe: **test** secret/restricted key, account ID, webhook signing secret and
-  the same account's `pk_test_` publishable key. Purchases redirect to hosted
-  Stripe Checkout.
-- NMI: gateway ID, test-mode security key, webhook signing secret and Collect.js
-  tokenization key/URL. Cards are tokenized in the page by Collect.js; the API
-  only sees opaque tokens. Requires OpenRails with NMI `endpoint_deployment`
-  qualification (after v0.159.0).
+| Provider | Variables |
+| --- | --- |
+| Stripe | `STRIPE_ACCOUNT_ID`, `STRIPE_SECRET_KEY` (`sk_test_`/`rk_test_`), `STRIPE_WEBHOOK_SIGNING_SECRET`, `STRIPE_PUBLISHABLE_KEY` (`pk_test_`, for in-page card setup) |
+| NMI | `NMI_ACCOUNT_ID` (gateway ID), `NMI_SECURITY_KEY` (test mode), `NMI_WEBHOOK_SIGNING_SECRET`, `NMI_TOKENIZATION_KEY`, optional `NMI_TOKENIZATION_URL`, `NMI_ENDPOINT_DEPLOYMENT` (`gateway` or `sandbox`) |
 
-Public configuration carries only browser-safe values.
+Declared PSP settings seed a new database; an existing PSP row keeps its stored
+settings.
 
-```sh
-task stripe:listen
-```
-
-The task finds `stripe` on PATH, then `.runtime/bin/stripe`. Copy its displayed
-`whsec_...` into `.env` and keep the listener running. It forwards snapshot events
-to `/billing/v1/webhooks/stripe/<STRIPE_ACCOUNT_ID>`. Restricted Stripe keys need
-appropriate API permissions, including Debugging Tools: Write for the listener.
-Do not put executable paths or obsolete billing encryption keys in `.env`.
+Webhooks go to `/billing/v1/webhooks/<rail>/<ACCOUNT_ID>`. For Stripe run
+`task stripe:listen`, copy its `whsec_...` into `STRIPE_WEBHOOK_SIGNING_SECRET` and
+keep it running (it finds `stripe` on PATH, then `.runtime/bin/stripe`; restricted
+keys need Debugging Tools: Write). NMI posts only to a public HTTPS URL: register
+`https://<public-host>/billing/v1/webhooks/nmi/<NMI_ACCOUNT_ID>` in the NMI portal
+with the signing key, through a tunnel when local. Locally it is optional: NMI
+results are synchronous and OpenRails reconciles from the gateway.
 
 | Setting | Purpose |
 | --- | --- |
@@ -69,15 +69,13 @@ Do not put executable paths or obsolete billing encryption keys in `.env`.
 | `AUTH_ISSUER`, `AUTH_AUDIENCE` | Token issuer/audience; origin issuer matches root discovery |
 | `AUTH_KEYS_PATH` | Dev signing and TOTP key directory (default `.runtime/auth`), so sessions and authenticator apps survive restarts |
 | `AUTH_SCHEMA`, `APP_SCHEMA`, `BILLING_SCHEMA`, `RIVER_SCHEMA` | Optional independent schema names; shared `public` is supported |
-| `BILLING_PSPS` | Enabled providers: `stripe`, `nmi` or both (default `stripe`) |
+| `BILLING_PSPS` | Enabled PSP keys, e.g. `stripe,nmi`; each needs its variables (above) |
 | `POST_DELETION_REFUND`, `POST_DELETION_REFUND_WINDOW` | Deleting a paid post: `refund` (default), `review` or `none` for one-time purchases made within the window before deletion (default `720h`). A post that becomes free refunds nothing |
 | `CONTENT_SCHEMA` | ContentKit baseline schema (default `content`); holds the upload limiter's counters |
 | `MEDIA_S3_*` | Media bucket: `ENDPOINT`, `PUBLIC_ENDPOINT` (browser presign host), `BUCKET`, `REGION`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY` |
 | `MEDIA_URL`, `MEDIA_DELIVERY`, `MEDIA_COOKIE_DOMAIN` | media-access origin; `cookie` (default) or `url` delivery |
 | `MEDIA_TOKEN_KEY`, `MEDIA_TOKEN_KEY_PREVIOUS` | `{kid}:{base64 32+ bytes}` signing keys shared with media-access |
 | `MEDIA_UPLOAD_FILES_PER_HOUR`, `MEDIA_UPLOAD_BYTES_PER_DAY`, `MEDIA_CHANNEL_QUOTA_BYTES` | Upload limits (defaults 60, 2 GiB, 5 GiB) |
-| `STRIPE_SECRET_KEY`, `STRIPE_ACCOUNT_ID`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PUBLISHABLE_KEY` | Stripe sandbox credentials (when enabled) |
-| `NMI_ACCOUNT_ID`, `NMI_SANDBOX_SECURITY_KEY`, `NMI_WEBHOOK_SIGNING_SECRET`, `NMI_TOKENIZATION_KEY`, `NMI_TOKENIZATION_URL` | NMI gateway ID, test-mode credentials and Collect.js settings (when enabled; URL optional) |
 
 There is no separate billing database URL or billing encryption key. Credentials
 are supplied as a host-owned snapshot. The app and billing library use fresh
@@ -141,7 +139,7 @@ is published); the app presigns and commits (`/api/v1/media/upload/*`).
 ## Buying and membership
 
 One-time purchases go from the frontend to the post purchase endpoint, then through the
-portable OpenRails Client to hosted Stripe Checkout or an embedded NMI card form.
+portable OpenRails Client to the provider's hosted page or an in-page card form.
 The host checks only content
 and channel policy; OpenRails decides offer validity, repeat purchase eligibility,
 accepted terms and payment state. An exact idempotency lookup happens before
@@ -150,7 +148,7 @@ payment or lose its original terms. The UI persists the attempt key.
 After a post is physically removed, its purchase endpoint returns 404; an already
 accepted checkout and its financial history remain available by checkout ID.
 
-Membership uses native customer card setup (Stripe or NMI), a saved method, an immutable
+Membership uses in-page customer card setup, a saved method, an immutable
 membership quote and an explicit payer confirmation. The browser uses the native
 `/billing/v1/me/checkout/:id` read/confirm routes. Generic billing checkout creation
 is omitted from this profile, so it cannot bypass the app's admission rules.
@@ -159,7 +157,7 @@ A redirect is never proof of payment; the UI reads the verified session state.
 `/me` shows managed channels and a paginated purchased-post library. Its Billing
 tab is `@openrails/billing-ui`'s `AccountBilling` on the embedded `/billing/v1/me`
 API: subscriptions (cancel with feedback, resume, change card), saved cards
-(add via NMI Collect.js when NMI is enabled, remove, default) and payment history.
+(add with any PSP that supports in-page card setup, remove, default) and payment history.
 No provider-owned legacy schedule is migrated by this example.
 
 ## Deletion and identity

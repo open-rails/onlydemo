@@ -3,8 +3,8 @@ package main
 import (
 	"fmt"
 	"net/url"
+	"os"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
 
@@ -12,32 +12,24 @@ import (
 	"github.com/knadh/koanf/providers/env/v2"
 	"github.com/knadh/koanf/v2"
 	"github.com/open-rails/openrails"
+	openrailsembed "github.com/open-rails/openrails/embed"
 )
 
 type Config struct {
-	Port                  int
-	DatabaseURL           string
-	AuthIssuer            string
-	AuthAudience          string
-	AuthKeysPath          string
-	PublicURL             string
-	AuthSchema            string
-	AppSchema             string
-	BillingSchema         string
-	RiverSchema           string
-	BillingPSPs           []string
-	StripePublishableKey  string
-	StripeSecretKey       string
-	StripeAccountID       string
-	StripeWebhookSecret   string
-	NMIAccountID          string
-	NMISandboxSecurityKey string
-	NMITokenizationKey    string
-	NMITokenizationURL    string
-	NMIWebhookSecret      string
-	ContentSchema         string
-	Media                 mediaConfig
-	PostDeletion          postDeletionPolicy
+	Port          int
+	DatabaseURL   string
+	AuthIssuer    string
+	AuthAudience  string
+	AuthKeysPath  string
+	PublicURL     string
+	AuthSchema    string
+	AppSchema     string
+	BillingSchema string
+	RiverSchema   string
+	PSPs          map[string]openrailsembed.PSPConfig
+	ContentSchema string
+	Media         mediaConfig
+	PostDeletion  postDeletionPolicy
 }
 
 // postDeletionPolicy is what deleting a paid post does to its recent purchases.
@@ -61,7 +53,7 @@ func loadConfig() (Config, error) {
 				return strings.ToLower(key), value
 			case "DATABASE_URL":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
-			case "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_KEYS_PATH", "AUTH_SCHEMA", "APP_SCHEMA", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA", "BILLING_PSPS", "STRIPE_PUBLISHABLE_KEY", "STRIPE_SECRET_KEY", "STRIPE_ACCOUNT_ID", "STRIPE_WEBHOOK_SECRET", "NMI_ACCOUNT_ID", "NMI_SANDBOX_SECURITY_KEY", "NMI_TOKENIZATION_KEY", "NMI_TOKENIZATION_URL", "NMI_WEBHOOK_SIGNING_SECRET":
+			case "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_KEYS_PATH", "AUTH_SCHEMA", "APP_SCHEMA", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA", "BILLING_PSPS":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
 			default:
 				if key == "CONTENT_SCHEMA" || key == "POST_DELETION_REFUND" || key == "POST_DELETION_REFUND_WINDOW" || strings.HasPrefix(key, "MEDIA_") {
@@ -106,33 +98,24 @@ func loadConfig() (Config, error) {
 		return Config{}, fmt.Errorf("PUBLIC_URL must be an http(s) origin without a path, credentials, query, or fragment")
 	}
 
-	psps, err := parseBillingPSPs(k.String("billing.psps"))
+	psps, err := loadPSPs(k.String("billing.psps"), os.LookupEnv)
 	if err != nil {
 		return Config{}, err
 	}
 
 	cfg := Config{
-		Port:                  port,
-		DatabaseURL:           databaseURL,
-		AuthIssuer:            authIssuer,
-		AuthAudience:          authAudience,
-		AuthKeysPath:          authKeysPath,
-		PublicURL:             publicURL,
-		AuthSchema:            strings.TrimSpace(k.String("auth.schema")),
-		AppSchema:             strings.TrimSpace(k.String("app.schema")),
-		BillingSchema:         strings.TrimSpace(k.String("billing.schema")),
-		RiverSchema:           strings.TrimSpace(k.String("river.schema")),
-		BillingPSPs:           psps,
-		StripePublishableKey:  k.String("stripe.publishable.key"),
-		StripeSecretKey:       k.String("stripe.secret.key"),
-		StripeAccountID:       k.String("stripe.account.id"),
-		StripeWebhookSecret:   k.String("stripe.webhook.secret"),
-		NMIAccountID:          k.String("nmi.account.id"),
-		NMISandboxSecurityKey: k.String("nmi.sandbox.security.key"),
-		NMITokenizationKey:    k.String("nmi.tokenization.key"),
-		NMITokenizationURL:    k.String("nmi.tokenization.url"),
-		NMIWebhookSecret:      k.String("nmi.webhook.signing.secret"),
-		ContentSchema:         strings.TrimSpace(k.String("content_schema")),
+		Port:          port,
+		DatabaseURL:   databaseURL,
+		AuthIssuer:    authIssuer,
+		AuthAudience:  authAudience,
+		AuthKeysPath:  authKeysPath,
+		PublicURL:     publicURL,
+		AuthSchema:    strings.TrimSpace(k.String("auth.schema")),
+		AppSchema:     strings.TrimSpace(k.String("app.schema")),
+		BillingSchema: strings.TrimSpace(k.String("billing.schema")),
+		RiverSchema:   strings.TrimSpace(k.String("river.schema")),
+		PSPs:          psps,
+		ContentSchema: strings.TrimSpace(k.String("content_schema")),
 	}
 	if cfg.PostDeletion, err = parsePostDeletionPolicy(k.String("post_deletion_refund"), k.String("post_deletion_refund_window")); err != nil {
 		return Config{}, err
@@ -146,21 +129,25 @@ func loadConfig() (Config, error) {
 	return cfg, nil
 }
 
-// parseBillingPSPs reads the operator's provider list; unset means Stripe only.
-func parseBillingPSPs(raw string) ([]string, error) {
-	if strings.TrimSpace(raw) == "" {
-		return []string{"stripe"}, nil
+// loadPSPs declares each provider listed in BILLING_PSPS from its own
+// variables; OpenRails knows each rail's credentials and settings.
+func loadPSPs(raw string, lookup func(string) (string, bool)) (map[string]openrailsembed.PSPConfig, error) {
+	psps := map[string]openrailsembed.PSPConfig{}
+	for _, key := range strings.Split(raw, ",") {
+		if key = strings.ToLower(strings.TrimSpace(key)); key == "" {
+			continue
+		}
+		if _, dup := psps[key]; dup {
+			return nil, fmt.Errorf("BILLING_PSPS: duplicate provider %q", key)
+		}
+		psp, err := openrailsembed.PSPFromEnv(key, lookup)
+		if err != nil {
+			return nil, fmt.Errorf("BILLING_PSPS: %w", err)
+		}
+		psps[key] = psp
 	}
-	var psps []string
-	for _, name := range strings.Split(raw, ",") {
-		name = strings.ToLower(strings.TrimSpace(name))
-		if name != "stripe" && name != "nmi" {
-			return nil, fmt.Errorf("BILLING_PSPS: unsupported provider %q (supported: stripe, nmi)", name)
-		}
-		if slices.Contains(psps, name) {
-			return nil, fmt.Errorf("BILLING_PSPS: duplicate provider %q", name)
-		}
-		psps = append(psps, name)
+	if len(psps) == 0 {
+		return nil, fmt.Errorf("BILLING_PSPS must list at least one provider")
 	}
 	return psps, nil
 }

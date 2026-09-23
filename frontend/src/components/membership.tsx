@@ -1,15 +1,16 @@
-import { lazy, Suspense, useState, useMemo, type FormEvent } from "react";
+import { useState } from "react";
 import {
-  Elements,
-  PaymentElement,
-  useElements,
-  useStripe,
-} from "@stripe/react-stripe-js";
-import type { TokenizedCardData } from "@openrails/billing-ui";
-import { loadStripe } from "@stripe/stripe-js";
+  SavePaymentMethod,
+  authenticatePayment,
+  canAuthenticatePayment,
+  canSavePaymentMethod,
+  type PspConfig,
+} from "@openrails/billing-ui";
+import { useBillingClient } from "@openrails/billing-ui/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { sessionKey, request } from "../api";
+import { AccountBillingScope } from "../billing";
 import { useAuth } from "../session";
 import {
   clearAttempt,
@@ -28,7 +29,6 @@ import {
   type Page,
   type PaymentMethod,
   type PaymentOptionsDocument,
-  type PublicProvider,
 } from "../models";
 import { money, duration } from "../format";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -58,18 +58,9 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { ErrorState, FormError, Loading } from "./states";
 
-const TokenizedCardForm = lazy(() =>
-  import("@openrails/billing-ui").then((module) => ({
-    default: module.TokenizedCardForm,
-  })),
-);
+const setupReturnURL = (id: string) =>
+  `${location.origin}/me?tab=billing&setup_id=${encodeURIComponent(id)}`;
 
-interface Setup {
-  id: string;
-  status: string;
-  client_secret?: string;
-  payment_method_id?: string;
-}
 export function MembershipDialog({
   channel,
   open,
@@ -96,11 +87,13 @@ export function MembershipDialog({
           </DialogDescription>
         </DialogHeader>
         {open && (
-          <MembershipFlow
-            key={`${auth.user?.id}:${sessionKey()}:${channel.id}`}
-            channel={channel}
-            onClose={onClose}
-          />
+          <AccountBillingScope>
+            <MembershipFlow
+              key={`${auth.user?.id}:${sessionKey()}:${channel.id}`}
+              channel={channel}
+              onClose={onClose}
+            />
+          </AccountBillingScope>
         )}
       </DialogContent>
     </Dialog>
@@ -140,17 +133,14 @@ function MembershipFlow({
       ),
     enabled: !!price,
   });
-  const available = (options.data?.options || []).filter(
-    (option) =>
-      ["stripe", "nmi"].includes(option.rail) &&
-      options.data?.psps.some(
-        (psp) => psp.psp_id === option.psp_id && psp.custodian === "psp",
-      ),
+  // A membership renews on a saved card, so only PSPs that can save one here.
+  const available = (options.data?.options || []).filter((option) =>
+    options.data?.psps.some(
+      (psp) => psp.psp_id === option.psp_id && canSavePaymentMethod(psp),
+    ),
   );
   const selected =
-    available.find((option) => option.psp_id === providerID) ||
-    available.find((option) => option.rail === "stripe") ||
-    available[0];
+    available.find((option) => option.psp_id === providerID) || available[0];
   const provider = options.data?.psps.find(
     (psp) => psp.psp_id === selected?.psp_id,
   );
@@ -236,7 +226,7 @@ function MembershipFlow({
     return (
       <MembershipConfirmation
         checkout={existing}
-        publishableKey={config.data?.stripe_publishable_key || null}
+        psps={config.data?.psps || []}
         onDone={async (status) => {
           if (status !== "expired") {
             clearAttempt(currentScope);
@@ -257,24 +247,11 @@ function MembershipFlow({
         </AlertDescription>
       </Alert>
     );
-  if (
-    selected.rail === "stripe" &&
-    !config.data?.stripe_publishable_key?.startsWith("pk_test_")
-  )
-    return (
-      <Alert>
-        <AlertDescription>
-          Stripe test card entry is not configured.
-        </AlertDescription>
-      </Alert>
-    );
   const current = offers.find((offer) => offer.price_id === price);
   const saved =
     methods.data?.data.filter(
       (card) =>
-        card.rail === selected.rail &&
-        card.psp_id === selected.psp_id &&
-        card.health?.active !== false,
+        card.psp_id === selected.psp_id && card.health?.active !== false,
     ) || [];
   return (
     <div className="flex flex-col gap-4">
@@ -313,8 +290,7 @@ function MembershipFlow({
                 <NativeSelectOption key={option.psp_id} value={option.psp_id}>
                   {options.data?.psps.find(
                     (psp) => psp.psp_id === option.psp_id,
-                  )?.display_name || option.selector}{" "}
-                  · {option.rail === "nmi" ? "NMI sandbox" : "Stripe test"}
+                  )?.display_name || option.selector}
                 </NativeSelectOption>
               ))}
             </NativeSelect>
@@ -338,26 +314,17 @@ function MembershipFlow({
             </Field>
           )}
           {addCard || saved.length === 0 ? (
-            selected.rail === "nmi" ? (
-              <NMICardSetup
-                key={`${sessionKey()}:${provider.psp_id}`}
-                provider={provider}
-                onSaved={(id) => {
-                  setMethod(id);
-                  setAddCard(false);
-                  void methods.refetch();
-                }}
-              />
-            ) : (
-              <CardSetup
-                config={{ ...config.data!, stripe_psp_id: selected.psp_id }}
-                onSaved={(id) => {
-                  setMethod(id);
-                  setAddCard(false);
-                  void methods.refetch();
-                }}
-              />
-            )
+            <SavePaymentMethod
+              key={`${sessionKey()}:${provider.psp_id}`}
+              psp={provider}
+              returnURL={setupReturnURL}
+              appearance={{ theme: "inherit" }}
+              onSaved={(id) => {
+                setMethod(id);
+                setAddCard(false);
+                void methods.refetch();
+              }}
+            />
           ) : (
             <Button variant="outline" onClick={() => setAddCard(true)}>
               <HugeiconsIcon icon={Add01Icon} data-icon="inline-start" />
@@ -418,165 +385,17 @@ function OfferSummary({ offer }: { offer: Offer }) {
     </Alert>
   );
 }
-function CardSetup({
-  config,
-  onSaved,
-}: {
-  config: AppConfig;
-  onSaved: (id: string) => void;
-}) {
-  const [consent, setConsent] = useState(false);
-  const [setup, setSetup] = useState<Setup | null>(null);
-  const { user } = useAuth();
-  const create = useMutation({
-    mutationFn: () =>
-      request<Setup>("/billing/v1/me/payment-methods/stripe-setup", {
-        method: "POST",
-        headers: {
-          "Idempotency-Key": getAttempt(`card-setup:${user?.id}`).key,
-        },
-        body: JSON.stringify({ psp_id: config.stripe_psp_id, consent: true }),
-      }),
-    onSuccess: (value) => {
-      if (value.payment_method_id) {
-        clearAttempt(`card-setup:${user?.id}`);
-        onSaved(value.payment_method_id);
-      } else setSetup(value);
-    },
-  });
-  const stripe = useMemo(
-    () =>
-      config.stripe_publishable_key?.startsWith("pk_test_")
-        ? loadStripe(config.stripe_publishable_key)
-        : null,
-    [config.stripe_publishable_key],
-  );
-  const dark = document.documentElement.classList.contains("dark");
-  if (setup?.client_secret && stripe)
-    return (
-      <Elements
-        stripe={stripe}
-        options={{
-          clientSecret: setup.client_secret,
-          appearance: {
-            theme: dark ? "night" : "stripe",
-            variables: {
-              colorPrimary: dark ? "#f05a6a" : "#c92135",
-              borderRadius: "7px",
-            },
-          },
-        }}
-      >
-        <SaveCard
-          setup={setup}
-          onSaved={(id) => {
-            clearAttempt(`card-setup:${user?.id}`);
-            onSaved(id);
-          }}
-        />
-      </Elements>
-    );
-  return (
-    <div className="flex flex-col gap-4">
-      <Field orientation="horizontal">
-        <Checkbox
-          id="stripe-card-consent"
-          checked={consent}
-          onCheckedChange={(value) => setConsent(value === true)}
-        />
-        <FieldLabel htmlFor="stripe-card-consent" className="font-normal">
-          I allow this card to be saved for future payments that I separately
-          agree to.
-        </FieldLabel>
-      </Field>
-      <Button
-        variant="outline"
-        disabled={!consent || create.isPending}
-        onClick={() => create.mutate()}
-      >
-        {create.isPending && <Spinner data-icon="inline-start" />}
-        Enter card details securely
-      </Button>
-      <FormError>{create.error?.message}</FormError>
-    </div>
-  );
-}
-function SaveCard({
-  setup,
-  onSaved,
-}: {
-  setup: Setup;
-  onSaved: (id: string) => void;
-}) {
-  const stripe = useStripe();
-  const elements = useElements();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!stripe || !elements) return;
-    setBusy(true);
-    setError("");
-    try {
-      const validation = await elements.submit();
-      if (validation.error) throw new Error(validation.error.message);
-      const result = await stripe.confirmSetup({
-        elements,
-        confirmParams: {
-          return_url: `${location.origin}/me?tab=billing&setup_id=${encodeURIComponent(setup.id)}`,
-        },
-        redirect: "if_required",
-      });
-      if (result.error) throw new Error(result.error.message);
-      const verified = await request<Setup>(
-        `/billing/v1/me/payment-methods/stripe-setup/${setup.id}/confirm`,
-        { method: "POST" },
-      );
-      if (!verified.payment_method_id)
-        throw new Error(
-          "Card verification is pending. Open Billing in My library to check it before trying again.",
-        );
-      onSaved(verified.payment_method_id);
-    } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "Card setup could not be confirmed.",
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <form
-      className="flex flex-col gap-4"
-      onSubmit={(event) => {
-        void submit(event);
-      }}
-    >
-      <PaymentElement />
-      <FormError>{error}</FormError>
-      <Button
-        type="submit"
-        variant="outline"
-        disabled={!stripe || !elements || busy}
-      >
-        {busy && <Spinner data-icon="inline-start" />}
-        Save test card
-      </Button>
-    </form>
-  );
-}
 export function MembershipConfirmation({
   checkout,
-  publishableKey,
+  psps,
   onDone,
 }: {
   checkout: Checkout;
-  publishableKey: string | null;
+  psps: PspConfig[];
   onDone: (status: string) => void;
 }) {
   const client = useQueryClient();
+  const billing = useBillingClient();
   const [accepted, setAccepted] = useState(false);
   const [error, setError] = useState("");
   const [authenticating, setAuthenticating] = useState(false);
@@ -625,31 +444,22 @@ export function MembershipConfirmation({
   });
   const current = state.data;
   const quote = current.membership_quote || checkout.membership_quote;
+  const psp = psps.find(
+    (item) =>
+      item.key === (current.payment?.rail || current.rail_data?.rail),
+  );
   const authenticate = async () => {
-    if (
-      !current.operation ||
-      current.payment?.rail !== "stripe" ||
-      !publishableKey?.startsWith("pk_test_")
-    )
-      return;
+    if (!current.operation || !psp) return;
     setAuthenticating(true);
     setError("");
     try {
-      const details = await request<{ client_secret?: string }>(
-        `/billing/v1/me/payment-operations/${current.operation.id}/authentication`,
-      );
-      if (!details.client_secret)
+      if (
+        (await authenticatePayment(billing, current.operation.id, psp)) ===
+        "not_required"
+      )
         throw new Error(
           "No additional card authentication is currently available. Check status again.",
         );
-      const stripe = await loadStripe(publishableKey);
-      if (!stripe) throw new Error("Could not load Stripe.");
-      const result = await stripe.confirmCardPayment(details.client_secret);
-      if (result.error) throw new Error(result.error.message);
-      await request(
-        `/billing/v1/me/payment-operations/${current.operation.id}/authentication/confirm`,
-        { method: "POST" },
-      );
       await state.refetch();
     } catch (cause) {
       setError(
@@ -734,7 +544,8 @@ export function MembershipConfirmation({
             </AlertDescription>
           </Alert>
           {!terminalCheckout(current.status) &&
-            current.payment?.rail === "stripe" && (
+            psp &&
+            canAuthenticatePayment(psp) && (
               <Button
                 disabled={authenticating}
                 onClick={() => {
@@ -778,9 +589,7 @@ export function MembershipConfirmation({
               !accepted ||
               !current.amount ||
               !quote ||
-              !["stripe", "nmi"].includes(
-                current.payment?.rail || current.rail_data?.rail || "",
-              )
+              !psp
             }
             onClick={() => confirm.mutate()}
           >
@@ -795,79 +604,4 @@ export function MembershipConfirmation({
 }
 function finishAttempt(id: string) {
   finishCheckout(id);
-}
-
-function NMICardSetup({
-  provider,
-  onSaved,
-}: {
-  provider: PublicProvider;
-  onSaved: (id: string) => void;
-}) {
-  const [consent, setConsent] = useState(false);
-  const [error, setError] = useState("");
-  const generation = sessionKey();
-  const key = provider.config?.tokenization_key;
-  const url = provider.config?.tokenization_url;
-  if (!key || !url || key.startsWith("preview_"))
-    return (
-      <Alert>
-        <AlertDescription>
-          This provider’s secure card entry is unavailable.
-        </AlertDescription>
-      </Alert>
-    );
-  const save = async (card: TokenizedCardData) => {
-    if (sessionKey() !== generation)
-      throw new Error("Your account changed. Reopen card setup.");
-    setError("");
-    try {
-      const method = await request<PaymentMethod>(
-        "/billing/v1/me/payment-methods",
-        {
-          method: "POST",
-          body: JSON.stringify({ ...card, provider: provider.key }),
-        },
-      );
-      if (!method.id)
-        throw new Error(
-          "The server did not confirm a saved card. Check your saved payment methods.",
-        );
-      onSaved(method.id);
-    } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "Card setup could not be confirmed.",
-      );
-      throw cause;
-    }
-  };
-  return (
-    <div className="flex flex-col gap-4">
-      <Field orientation="horizontal">
-        <Checkbox
-          id="nmi-card-consent"
-          checked={consent}
-          onCheckedChange={(value) => setConsent(value === true)}
-        />
-        <FieldLabel htmlFor="nmi-card-consent" className="font-normal">
-          I allow this card to be saved for future payments that I separately
-          agree to.
-        </FieldLabel>
-      </Field>
-      <Suspense fallback={<Loading />}>
-        <TokenizedCardForm
-          key={`${generation}:${provider.psp_id}`}
-          tokenizationKey={key}
-          tokenizationURL={url}
-          disabled={!consent}
-          onTokenized={save}
-          submitLabel="Save sandbox card"
-          appearance={{ theme: "inherit" }}
-        />
-      </Suspense>
-      <FormError>{error}</FormError>
-    </div>
-  );
 }

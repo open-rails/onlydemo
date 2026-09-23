@@ -395,7 +395,7 @@ export function CheckoutReturnPage() {
     onSuccess: (result) => {
       if (result.url && !terminalCheckout(result.status)) {
         const url = new URL(result.url);
-        if (url.protocol !== "https:" || url.hostname !== "checkout.stripe.com")
+        if (url.protocol !== "https:")
           throw new Error("Unexpected checkout destination.");
         location.assign(url.href);
       } else void status.refetch();
@@ -473,7 +473,7 @@ export function CheckoutReturnPage() {
           ? "The server confirmed your payment. Your purchased access remains after membership ends."
           : ended
             ? "No successful purchase was confirmed for this attempt. Check your payment history before trying again; an expired provider page can still require reconciliation."
-            : "Waiting for the provider’s verified result. Closing Stripe is not a payment confirmation or a cancellation receipt. Do not start another payment while this is unresolved."}
+            : "Waiting for the provider’s verified result. Closing the payment page is not a payment confirmation or a cancellation receipt. Do not start another payment while this is unresolved."}
       </EmptyState>
     </div>
   );

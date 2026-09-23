@@ -14,7 +14,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { request } from "../api";
+import { billing, request } from "../api";
 import { AccountBillingScope } from "../billing";
 import type { AccountData, AppConfig } from "../models";
 import {
@@ -199,19 +199,15 @@ function Billing() {
     queryKey: ["config"],
     queryFn: () => request<AppConfig>("/api/v1/config", {}, false),
   });
-  const nmi = config.data?.psps.find((psp) => psp.rail === "nmi");
-  const key = nmi?.config?.tokenization_key;
-  const url = nmi?.config?.tokenization_url;
-  const cardSetup =
-    nmi && key && url && !key.startsWith("preview_")
-      ? { provider: nmi.key, tokenizationKey: key, tokenizationURL: url }
-      : undefined;
   if (config.isPending) return <Loading />;
   return (
     <AccountBillingScope>
       <AccountBilling
         plansHref="/channels"
-        cardSetup={cardSetup}
+        psps={config.data?.psps}
+        cardSetupReturnURL={(id) =>
+          `${location.origin}/me?tab=billing&setup_id=${encodeURIComponent(id)}`
+        }
         defaultCurrency="USD"
       />
     </AccountBillingScope>
@@ -219,18 +215,11 @@ function Billing() {
 }
 function SetupReturn({ id }: { id: string }) {
   const confirm = useMutation({
-    mutationFn: () =>
-      request<{ payment_method_id?: string; status: string }>(
-        `/billing/v1/me/payment-methods/stripe-setup/${encodeURIComponent(id)}/confirm`,
-        { method: "POST" },
-      ),
+    mutationFn: () => billing.confirmCardSetup(id),
   });
   const setup = useQuery({
     queryKey: ["setup-return", id],
-    queryFn: () =>
-      request<{ payment_method_id?: string; status: string }>(
-        `/billing/v1/me/payment-methods/stripe-setup/${encodeURIComponent(id)}`,
-      ),
+    queryFn: () => billing.getCardSetup(id),
   });
   const done = !!(
     setup.data?.payment_method_id || confirm.data?.payment_method_id
@@ -248,7 +237,7 @@ function SetupReturn({ id }: { id: string }) {
         <p>
           {done
             ? "Return to the channel to review and start your membership."
-            : "Confirm the setup with the server after returning from Stripe. This does not start a membership."}
+            : "Confirm the setup with the server after returning from card verification. This does not start a membership."}
         </p>
         {!done && (
           <Button disabled={confirm.isPending} onClick={() => confirm.mutate()}>

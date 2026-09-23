@@ -1,7 +1,12 @@
 import { createAuthClient } from "@openrails/auth-ui/client";
+import { createBillingClient } from "@openrails/billing-ui/client";
 import { sessionIdentity } from "@openrails/auth-ui/react";
 
 export const auth = createAuthClient({ baseUrl: "/auth/v1" });
+export const billing = createBillingClient({
+  baseUrl: "/billing/v1",
+  fetch: auth.authFetch,
+});
 // Changes on sign-in, sign-out, expiry and user switch, not on refresh.
 export const sessionKey = () => sessionIdentity(auth.getSnapshot());
 export const subscribeSession = auth.subscribe;
