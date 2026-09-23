@@ -149,7 +149,10 @@ permission checks still read current role authority.
 The frontend uses `@openrails/auth-ui`: the access token stays in memory and the
 refresh token is an HttpOnly cookie on `/auth/v1/token`. Email verification is
 optional and two-factor (authenticator app or email) is opt-in from Account.
-The demo has no mail provider: verification codes, 2FA email codes and reset
+Sign-in, registration, 2FA, recovery and the Account security panels are
+auth-ui's styled components; AuthKit's emailed links land on `/verify`
+(`VerifyLink`) and `/reset` (`ResetPasswordForm`), OIDC on `/login/callback`.
+The demo has no mail provider: verification codes, 2FA email codes and those
 links are written to the server log as `[outbox]` lines.
 
 Operator commands use the same application connection:
