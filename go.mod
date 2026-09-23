@@ -16,7 +16,7 @@ require (
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.47.0 // indirect
 )
 
-require github.com/open-rails/openrails/adapters/fiber v0.151.0
+require github.com/open-rails/openrails/adapters/fiber v0.153.0
 
 require (
 	github.com/open-rails/helpers v0.3.0

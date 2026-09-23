@@ -263,6 +263,8 @@ github.com/open-rails/openrails v0.157.0 h1:eaB9lJ5y82y9NnY1T4/uacpXg4Mytjku6yb4
 github.com/open-rails/openrails v0.157.0/go.mod h1:UGo4jHZ8oRfJICEsTU6AFfOJfI85VfE4tUpcE4OLN3Q=
 github.com/open-rails/openrails/adapters/fiber v0.151.0 h1:e9uy4ZxR3wKb8H+y81QJ0YOxorPBfemSYjdIYxeWVxw=
 github.com/open-rails/openrails/adapters/fiber v0.151.0/go.mod h1:O7zg/lED8/O2a7GT2xyOeqXP0rv2pxpy42fp9Njl/aw=
+github.com/open-rails/openrails/adapters/fiber v0.153.0 h1:S2PWlprKwtE/xQXVBmLcxmgiA4MY7THM4B+271fmfBI=
+github.com/open-rails/openrails/adapters/fiber v0.153.0/go.mod h1:687XkZg6NimXKORa/NdZSE72JCOhkx7N79ia0Iny8Qw=
 github.com/opencontainers/go-digest v1.0.0 h1:apOUWs51W5PlhuyGyz9FCeeBIOUDA/6nW8Oi/yOhh5U=
 github.com/opencontainers/go-digest v1.0.0/go.mod h1:0JzlMkj0TRzQZfJkVvzbP0HBR3IKzErnv2BNG4W4MAM=
 github.com/opencontainers/image-spec v1.1.1 h1:y0fUlFfIZhPF1W537XOLg0/fcx6zcHCJwooC2xJA040=
