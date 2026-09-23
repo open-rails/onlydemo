@@ -18,8 +18,8 @@ importers:
         specifier: ^1.1.10
         version: 1.1.10(react@19.3.0)
       '@openrails/auth-ui':
-        specifier: https://github.com/open-rails/auth-ui/releases/download/v0.1.0/openrails-auth-ui-0.1.0.tgz
-        version: https://github.com/open-rails/auth-ui/releases/download/v0.1.0/openrails-auth-ui-0.1.0.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+        specifier: https://github.com/open-rails/auth-ui/releases/download/v0.2.0/openrails-auth-ui-0.2.0.tgz
+        version: https://github.com/open-rails/auth-ui/releases/download/v0.2.0/openrails-auth-ui-0.2.0.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@openrails/billing-ui':
         specifier: https://github.com/open-rails/billing-ui/releases/download/v0.6.0/openrails-billing-ui-0.6.0.tgz
         version: https://github.com/open-rails/billing-ui/releases/download/v0.6.0/openrails-billing-ui-0.6.0.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -414,9 +414,9 @@ packages:
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
 
-  '@openrails/auth-ui@https://github.com/open-rails/auth-ui/releases/download/v0.1.0/openrails-auth-ui-0.1.0.tgz':
-    resolution: {integrity: sha512-JlhIN2v2k0YZNsWzaQ82xg2RCKgLuS0r465X+Om+Awrj7Jvi+YLXFEJ7JfKBXhkzEGcwW7Xv4mN4NQdKcA3zNg==, tarball: https://github.com/open-rails/auth-ui/releases/download/v0.1.0/openrails-auth-ui-0.1.0.tgz}
-    version: 0.1.0
+  '@openrails/auth-ui@https://github.com/open-rails/auth-ui/releases/download/v0.2.0/openrails-auth-ui-0.2.0.tgz':
+    resolution: {integrity: sha512-SLiMl53RAmz7kLvQXEtfMYB7PZOjSWiNNO7v+rnyx7r0OeIl6JTpegKSx/a9BUmFk4oKnUZfVJpJ5FJauljK8g==, tarball: https://github.com/open-rails/auth-ui/releases/download/v0.2.0/openrails-auth-ui-0.2.0.tgz}
+    version: 0.2.0
     engines: {node: '>=22.12.0'}
     peerDependencies:
       '@solana/wallet-adapter-react': '>=0.15 <1'
@@ -2738,7 +2738,7 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.3
 
-  '@openrails/auth-ui@https://github.com/open-rails/auth-ui/releases/download/v0.1.0/openrails-auth-ui-0.1.0.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
+  '@openrails/auth-ui@https://github.com/open-rails/auth-ui/releases/download/v0.2.0/openrails-auth-ui-0.2.0.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:
       '@base-ui/react': 1.8.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@hugeicons/core-free-icons': 4.3.5

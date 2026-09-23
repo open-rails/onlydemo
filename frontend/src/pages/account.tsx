@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { request } from "../api";
+import { AccountBillingScope } from "../billing";
 import type { AccountData, AppConfig } from "../models";
 import {
   EmptyState,
@@ -188,11 +189,13 @@ function Billing() {
       : undefined;
   if (config.isPending) return <Loading />;
   return (
-    <AccountBilling
-      plansHref="/channels"
-      cardSetup={cardSetup}
-      defaultCurrency="USD"
-    />
+    <AccountBillingScope>
+      <AccountBilling
+        plansHref="/channels"
+        cardSetup={cardSetup}
+        defaultCurrency="USD"
+      />
+    </AccountBillingScope>
   );
 }
 function SetupReturn({ id }: { id: string }) {

@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { AuthCallback, ResetPasswordForm } from "@openrails/auth-ui";
+import { AuthCallback, ResetPasswordForm, VerifyLink } from "@openrails/auth-ui";
 import { readLinkFragment } from "@openrails/auth-ui/client";
 import { useAuth } from "../session";
 
@@ -24,6 +24,19 @@ export function AuthCallbackPage() {
   return (
     <div className="page-narrow">
       <AuthCallback navigate={(to) => navigate(to, { replace: true })} />
+    </div>
+  );
+}
+
+// AuthKit's email verification link lands here (Frontend.VerifyPath).
+export function VerifyLinkPage() {
+  const navigate = useNavigate();
+  return (
+    <div className="page-narrow">
+      <VerifyLink
+        token={readLinkFragment(location.hash)?.token}
+        navigate={(to) => navigate(to, { replace: true })}
+      />
     </div>
   );
 }

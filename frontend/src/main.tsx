@@ -9,7 +9,11 @@ import { ChannelPage, NewChannelPage } from "./pages/channel";
 import { PostPage, CheckoutReturnPage } from "./pages/post";
 import { AccountPage } from "./pages/account";
 import { InvitePage } from "./components/channel-team";
-import { AuthCallbackPage, ResetPasswordPage } from "./pages/auth-links";
+import {
+  AuthCallbackPage,
+  ResetPasswordPage,
+  VerifyLinkPage,
+} from "./pages/auth-links";
 import "./styles.css";
 
 const queryClient = new QueryClient({
@@ -33,6 +37,7 @@ const router = createBrowserRouter([
       { path: "/channels/:slug", element: <ChannelPage /> },
       { path: "/posts/:id", element: <PostPage /> },
       { path: "/reset", element: <ResetPasswordPage /> },
+      { path: "/verify", element: <VerifyLinkPage /> },
       { path: "/login/callback", element: <AuthCallbackPage /> },
       {
         path: "/checkout/return",

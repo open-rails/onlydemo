@@ -13,22 +13,29 @@ const billing = createBillingClient({
 });
 
 export function BillingHost({ children }: { children: ReactNode }) {
-  const queryClient = useQueryClient();
   const navigate = useNavigate();
-  // Remount per identity so one account's billing never shows for the next.
-  const identity = sessionIdentity(useSession());
   return (
     <BillingUiProvider
       appearance={{ theme: "inherit" }}
       navigate={(to) => navigate(to)}
     >
-      <BillingProvider
-        key={identity}
-        client={billing}
-        onChange={() => void queryClient.invalidateQueries()}
-      >
-        {children}
-      </BillingProvider>
+      {children}
     </BillingUiProvider>
+  );
+}
+
+// Account billing state, remounted per identity so one account's billing
+// never shows for the next.
+export function AccountBillingScope({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
+  const identity = sessionIdentity(useSession());
+  return (
+    <BillingProvider
+      key={identity}
+      client={billing}
+      onChange={() => void queryClient.invalidateQueries()}
+    >
+      {children}
+    </BillingProvider>
   );
 }
