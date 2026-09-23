@@ -17,11 +17,14 @@ Use Go 1.26.6, Node 24, pnpm 11 and PostgreSQL 18. Copy `.env.example` to `.env`
 task db:up
 task migrate
 task run
+task seed   # optional display channels and posts, created through the API
 ```
 
-`task run` builds the frontend before starting the API. For frontend development,
-run `task frontend:dev` alongside the Go server; Vite forwards API requests to
-port 3000. Open http://localhost:3000 for the complete application.
+`task run` serves Go with Air and the frontend with Vite, both reloading on
+change; open http://localhost:5173. `task run:embedded` builds the frontend into
+the single Go binary and serves everything from http://localhost:3000.
+`task seed` targets http://127.0.0.1:3000; pass `-- --url <base>` for another
+server. It is idempotent.
 For payment flows while browsing Vite, start the backend with
 `PUBLIC_URL=http://localhost:5173 task run` and keep using that exact browser
 origin. Sessions and pending checkout attempts are stored per origin; switching

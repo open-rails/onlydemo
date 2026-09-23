@@ -31,7 +31,6 @@ export type IconName =
   | "message"
   | "dollar"
   | "bookmark"
-  | "verified"
   | "image";
 const paths: Record<IconName, ReactNode> = {
   arrow: <path d="M5 12h14m-6-6 6 6-6 6" />,
@@ -141,12 +140,6 @@ const paths: Record<IconName, ReactNode> = {
     </>
   ),
   bookmark: <path d="M6 3h12v18l-6-4-6 4V3Z" />,
-  verified: (
-    <>
-      <path d="m12 2 2.4 1.8 3-.2.9 2.9 2.5 1.7-1 2.8 1 2.8-2.5 1.7-.9 2.9-3-.2L12 22l-2.4-1.8-3 .2-.9-2.9-2.5-1.7 1-2.8-1-2.8 2.5-1.7.9-2.9 3 .2L12 2Z" fill="currentColor" />
-      <path d="m8.5 12 2.3 2.3 4.7-4.6" stroke="#fff" />
-    </>
-  ),
   image: (
     <>
       <rect x="3" y="4" width="18" height="16" rx="2" />

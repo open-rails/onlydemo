@@ -104,7 +104,6 @@ export function ChannelPage() {
           </div>
           <h1 className="profile-name">
             {current.name}
-            <Icon name="verified" size={20} className="verified" />
           </h1>
           <p className="handle">
             @{current.slug} · <span className="online">Available now</span>

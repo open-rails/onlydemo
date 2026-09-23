@@ -51,6 +51,11 @@ tasks:
     cmds:
       - go run . serve
 
+  seed:
+    desc: Create display channels and posts through the running server's API
+    cmds:
+      - go run . seed {{.CLI_ARGS}}
+
   frontend:build:
     desc: Build the React application
     cmds:

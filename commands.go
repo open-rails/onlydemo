@@ -45,7 +45,15 @@ func newRootCommand() *cobra.Command {
 		adminCommand("grant", "Grant the admin role", grantAdmin),
 		adminCommand("revoke", "Revoke the admin role", revokeAdmin),
 	)
-	root.AddCommand(admin)
+	var seedURL string
+	seedCommand := &cobra.Command{
+		Use: "seed", Short: "Create display channels and posts through a running server's API", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return seed(cmd.Context(), strings.TrimRight(seedURL, "/"), cmd.OutOrStdout())
+		},
+	}
+	seedCommand.Flags().StringVar(&seedURL, "url", "http://127.0.0.1:3000", "running server base URL")
+	root.AddCommand(admin, seedCommand)
 	return root
 }
 

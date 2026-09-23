@@ -113,7 +113,6 @@ export function PostPage() {
               <span>
                 <strong>
                   {creator}
-                  <Icon name="verified" size={15} className="verified" />
                 </strong>
                 {channel.data && <small>@{channel.data.slug}</small>}
               </span>

@@ -55,7 +55,6 @@ export function PostCard({ post, handle }: { post: Post; handle?: string }) {
           <span>
             <strong>
               {name}
-              <Icon name="verified" size={15} className="verified" />
             </strong>
             {handle && <small>@{handle}</small>}
           </span>
@@ -146,7 +145,6 @@ export function ChannelCard({ channel }: { channel: Channel }) {
         <Avatar name={channel.name} seed={channel.id} className="avatar-lg" />
         <h3>
           <Link to={`/channels/${channel.id}`}>{channel.name}</Link>
-          <Icon name="verified" size={15} className="verified" />
         </h3>
         <p className="handle">@{channel.slug}</p>
         {channel.description && (

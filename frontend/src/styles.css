@@ -375,11 +375,6 @@ svg {
   font-size: 2.6rem;
   border: 5px solid var(--card);
 }
-.verified {
-  color: var(--primary);
-  margin-left: 4px;
-  vertical-align: -2px;
-}
 .button {
   display: inline-flex;
   align-items: center;
