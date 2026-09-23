@@ -56,6 +56,8 @@ export function PostPage() {
   const post = useQuery({
     queryKey: ["post", id, auth.user?.id],
     queryFn: () => request<Post>(`/api/v1/posts/${id}`),
+    refetchInterval: (query) =>
+      query.state.data?.offer_status === "pending" ? 2000 : false,
   });
   const channel = useQuery({
     queryKey: ["channel", post.data?.channel_id, auth.user?.id],
@@ -87,6 +89,7 @@ export function PostPage() {
     policy === "membership" ||
     (policy === "members_ppv" && !channel.data?.has_membership);
   const canEdit = item.can_edit || channel.data?.can_edit;
+  const pricePending = item.offer_status === "pending" && !mustJoin;
   const creator = channel.data?.name || item.channel_name || "Creator";
   const action = () => {
     if (!auth.user) auth.openLogin();
@@ -119,6 +122,9 @@ export function PostPage() {
             </Link>
             <span className="feed-date">
               {item.purchased && <Badge tone="success">Purchased</Badge>}{" "}
+              {canEdit && item.offer_status === "pending" && (
+                <Badge tone="warning">Price pending</Badge>
+              )}{" "}
               {date(item.created_at)}
             </span>
           </header>
@@ -167,7 +173,11 @@ export function PostPage() {
                       ? "Subscribers can unlock this post. Once unlocked, it stays yours even after your subscription ends."
                       : "Unlock this post once and keep it forever."}
                 </p>
-                {offer || mustJoin ? (
+                {pricePending ? (
+                  <Button className="button-full" disabled>
+                    Price pending
+                  </Button>
+                ) : offer || mustJoin ? (
                   <Button className="button-full" onClick={action}>
                     <Icon name="lock" size={16} />
                     {!auth.user
@@ -207,12 +217,17 @@ export function PostPage() {
                   ? "Available while your channel membership is active."
                   : "A one-time purchase. No recurring charge for this post."}
           </p>
-          {!item.can_read && offer && (
+          {!item.can_read && pricePending && (
+            <div className="purchase-price">
+              <small>Price pending</small>
+            </div>
+          )}
+          {!item.can_read && !pricePending && offer && (
             <div className="purchase-price">
               {money(offer.unit_amount, offer.currency)} <small>one time</small>
             </div>
           )}
-          {!item.can_read && (offer || mustJoin) && (
+          {!item.can_read && !pricePending && (offer || mustJoin) && (
             <Button
               className="button-full"
               disabled={

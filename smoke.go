@@ -97,7 +97,8 @@ func smoke() error {
 	}
 	defer billing.Close(context.Background())
 	channels := newChannels(pool, auth, billing, cfg)
-	jobs, err := newJobs(ctx, pool, cfg, auth, billing, channels)
+	posts := newPosts(channels, cfg)
+	jobs, err := newJobs(ctx, pool, cfg, auth, billing, channels, posts)
 	if err != nil {
 		return err
 	}
@@ -108,7 +109,7 @@ func smoke() error {
 	if err = jobs.Start(ctx); err != nil {
 		return err
 	}
-	app, err := newApp(pool, auth, billing, cfg, channels)
+	app, err := newApp(pool, auth, billing, cfg, channels, posts)
 	if err != nil {
 		return err
 	}
@@ -133,6 +134,9 @@ func smoke() error {
 		return err
 	}
 	path := fmt.Sprintf("/api/v1/posts/%.0f", post["id"].(float64))
+	if post, err = owner.activeOffer(path, ownerToken); err != nil {
+		return err
+	}
 	preview, err := buyer.call("GET", path, buyerToken, nil, "", 200)
 	if err != nil {
 		return err
@@ -222,6 +226,9 @@ func smoke() error {
 	}
 	gated, err := owner.call("POST", "/api/v1/posts", ownerToken, map[string]any{"channel_id": ch["id"], "slug": "members-extra", "title": "Members buy separately", "body": "Extra permanent purchase", "access_policy": "members_ppv", "price": map[string]any{"unit_amount": "4990000", "currency": "USD"}}, "", 201)
 	if err != nil {
+		return err
+	}
+	if gated, err = owner.activeOffer(fmt.Sprintf("/api/v1/posts/%.0f", gated["id"].(float64)), ownerToken); err != nil {
 		return err
 	}
 	gatedPath := fmt.Sprintf("/api/v1/posts/%.0f/checkout", gated["id"].(float64))
@@ -380,6 +387,30 @@ func smoke() error {
 	if retainedPurchase["purchased"] != true || retainedPurchase["can_read"] != true {
 		return fmt.Errorf("policy edit removed permanent purchase")
 	}
+	doomed, err := owner.call("POST", "/api/v1/posts", ownerToken, map[string]any{"channel_id": channelID, "slug": "doomed-post", "title": "Deleted later", "body": "Soon gone", "access_policy": "ppv", "price": map[string]any{"unit_amount": "4990000", "currency": "USD"}}, "", 201)
+	if err != nil {
+		return err
+	}
+	doomedPath := fmt.Sprintf("/api/v1/posts/%.0f", doomed["id"].(float64))
+	if doomed, err = owner.activeOffer(doomedPath, ownerToken); err != nil {
+		return err
+	}
+	if _, err = owner.call("DELETE", doomedPath, ownerToken, nil, "", 204); err != nil {
+		return err
+	}
+	if _, err = owner.call("GET", doomedPath, ownerToken, nil, "", 404); err != nil {
+		return err
+	}
+	if _, err = buyer.call("POST", doomedPath+"/checkout", buyerToken, map[string]any{"price_id": doomed["offers"].([]any)[0].(map[string]any)["price_id"]}, "deleted-post", 404); err != nil {
+		return err
+	}
+	var billingKey string
+	if err = pool.QueryRow(ctx, `SELECT billing_key::text FROM demo.posts WHERE id=$1 AND deleted_at IS NOT NULL`, int64(doomed["id"].(float64))).Scan(&billingKey); err != nil {
+		return fmt.Errorf("deleted post row was not retained: %w", err)
+	}
+	if product, e := billing.client.Products.RetrieveByKey(ctx, postResource(billingKey)); e != nil || !product.Archived {
+		return fmt.Errorf("deleted post product was not archived: %v", e)
+	}
 	if _, err = owner.call("DELETE", "/api/v1/channels/"+channelID, ownerToken, nil, "", 202); err != nil {
 		return err
 	}
@@ -407,7 +438,7 @@ func smoke() error {
 	if _, err = owner.call("DELETE", "/auth/v1/user", ownerToken, map[string]any{"password": "Manual-smoke-password-42!"}, "", 204); err != nil {
 		return fmt.Errorf("retired channel still blocked owner account deletion: %w", err)
 	}
-	fmt.Println("Manual smoke passed: native auth, resource offers/reprice replay, permanent paid access, members-only purchase refusal, native saved-card membership/quote/confirmation/cancellation, future included posts, separate publishing roles, retained soft deletion and owner account deletion. Zero real provider requests.")
+	fmt.Println("Manual smoke passed: native auth, resource offers/reprice replay, permanent paid access, members-only purchase refusal, native saved-card membership/quote/confirmation/cancellation, future included posts, separate publishing roles, post soft deletion with archived product, retained channel soft deletion and owner account deletion. Zero real provider requests.")
 	return nil
 }
 
@@ -419,6 +450,21 @@ type smokeClient struct {
 func smokePeer(base, address string) smokeClient {
 	dialer := &net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP(address)}}
 	return smokeClient{base, &http.Client{Timeout: 20 * time.Second, Transport: &http.Transport{DialContext: dialer.DialContext}}}
+}
+// Offers are applied after the post commits; poll until the offer is active.
+func (s smokeClient) activeOffer(path, token string) (map[string]any, error) {
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(200 * time.Millisecond) {
+		p, err := s.call("GET", path, token, nil, "", 200)
+		if err != nil {
+			return nil, err
+		}
+		if p["offer_status"] == "active" && len(p["offers"].([]any)) > 0 {
+			return p, nil
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("%s offer is still %v", path, p["offer_status"])
+		}
+	}
 }
 func (s smokeClient) call(method, path, token string, body any, key string, status int) (map[string]any, error) {
 	data, err := json.Marshal(body)

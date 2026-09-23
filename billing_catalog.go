@@ -53,6 +53,20 @@ func (b *billingService) offers(ctx context.Context, key string, recurring bool)
 	return page.Data, nil
 }
 
+func checkPrice(price *offerPrice) (string, error) {
+	if price == nil || price.UnitAmount < 500000 || price.UnitAmount > 999999990000 {
+		return "", errors.New("price must be between 0.50 and 999999.99 in native currency")
+	}
+	currency := strings.ToUpper(strings.TrimSpace(price.Currency))
+	if currency == "" {
+		currency = "USD"
+	}
+	if len(currency) != 3 {
+		return "", errors.New("currency must be a three-letter code")
+	}
+	return currency, nil
+}
+
 // The host has already authorized the publisher against the channel. Catalog
 // owns offer versions and history; no commercial fields are stored on a post.
 func (b *billingService) setOffer(ctx context.Context, channelID, resource, title string, price *offerPrice, recurring, archived bool) error {
@@ -62,15 +76,9 @@ func (b *billingService) setOffer(ctx context.Context, channelID, resource, titl
 	}
 	product := openrails.CatalogApplyProduct{Key: resource, Archived: openrails.CatalogValue(archived)}
 	if !archived {
-		if price == nil || price.UnitAmount < 500000 || price.UnitAmount > 999999990000 {
-			return errors.New("price must be between 0.50 and 999999.99 in native currency")
-		}
-		currency := strings.ToUpper(strings.TrimSpace(price.Currency))
-		if currency == "" {
-			currency = "USD"
-		}
-		if len(currency) != 3 {
-			return errors.New("currency must be a three-letter code")
+		currency, err := checkPrice(price)
+		if err != nil {
+			return err
 		}
 		product.DisplayName = openrails.CatalogValue(title)
 		product.EntitlementsSpec = openrails.CatalogValue(map[string]*int{resource: nil})
@@ -103,6 +111,12 @@ func (b *billingService) archiveResource(ctx context.Context, resource string) e
 	yes := true
 	_, err = b.client.Products.Update(ctx, product.ID, &openrails.ProductUpdateParams{Archived: &yes})
 	return err
+}
+// archivePostProduct retires a deleted post's product. It never deletes the
+// product, so purchase history and entitlements stay intact; host refund
+// policy for deleted content belongs here.
+func (b *billingService) archivePostProduct(ctx context.Context, resource string) error {
+	return b.archiveResource(ctx, resource)
 }
 func (b *billingService) ArchiveChannelCatalog(ctx context.Context, id string) error {
 	catalog, err := b.client.GetCatalogForOwner(ctx, id)

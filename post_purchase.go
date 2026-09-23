@@ -80,15 +80,18 @@ func (api *postAPI) checkout(c fiber.Ctx, publicURL string) error {
 		return databaseError(c, err)
 	}
 	defer release()
-	post, err = scanPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1 AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL)`, id))
+	post, err = scanPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1 AND deleted_at IS NULL AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL)`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, 404, "post not found")
 	}
 	if err != nil {
 		return databaseError(c, err)
 	}
-	if post.AccessPolicy != "ppv" && post.AccessPolicy != "members_ppv" {
+	if !paidPolicy(post.AccessPolicy) {
 		return clientError(c, 409, "post is not sold separately")
+	}
+	if post.OfferStatus != "active" {
+		return clientError(c, 409, "post price is pending")
 	}
 	editorial, err := api.channels.allowed(c.Context(), viewer(c), post.ChannelID, channelReadPermission)
 	if err != nil {

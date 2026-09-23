@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	authkitfiber "github.com/open-rails/authkit/adapters/fiber"
 )
@@ -98,7 +97,8 @@ func serve(ctx context.Context) error {
 	}
 	defer billing.Close(context.Background())
 	channels := newChannels(pool, authService, billing, config)
-	jobs, err := newJobs(ctx, pool, config, authService, billing, channels)
+	posts := newPosts(channels, config)
+	jobs, err := newJobs(ctx, pool, config, authService, billing, channels, posts)
 	if err != nil {
 		return fmt.Errorf("compose application jobs: %w", err)
 	}
@@ -116,7 +116,7 @@ func serve(ctx context.Context) error {
 		return fmt.Errorf("start application jobs: %w", err)
 	}
 
-	app, err := newApp(pool, authService, billing, config, channels)
+	app, err := newApp(pool, authService, billing, config, channels, posts)
 	if err != nil {
 		return fmt.Errorf("create application: %w", err)
 	}
@@ -130,9 +130,8 @@ func serve(ctx context.Context) error {
 	return app.Listen(fmt.Sprintf(":%d", config.Port))
 }
 
-func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, cfg Config, channels *channelAPI) (*fiber.App, error) {
+func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, cfg Config, channels *channelAPI, posts *postAPI) (*fiber.App, error) {
 	app := fiber.New()
-	posts := &postAPI{pool: pool, auth: authService, billing: billing, channels: channels, table: pgx.Identifier{appSchema(cfg), "posts"}.Sanitize()}
 
 	app.Get("/dev/routes", homepage(app))
 

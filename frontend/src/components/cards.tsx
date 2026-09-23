@@ -95,7 +95,9 @@ export function PostCard({ post, handle }: { post: Post; handle?: string }) {
             <Icon name="lock" size={16} />
             {needsMembership
               ? "Subscribe to unlock"
-              : price
+              : post.offer_status === "pending"
+                ? "Price pending"
+                : price
                 ? `Unlock for ${money(price.unit_amount, price.currency)}`
                 : "Unlock post"}
           </Link>

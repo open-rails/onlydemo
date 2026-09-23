@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -13,10 +14,12 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
 	authkitfiber "github.com/open-rails/authkit/adapters/fiber"
 	"github.com/open-rails/openrails"
+	"github.com/riverqueue/river"
 )
 
 type postAPI struct {
@@ -25,7 +28,12 @@ type postAPI struct {
 	billing  *billingService
 	table    string
 	channels *channelAPI
+	jobs     *river.Client[pgx.Tx]
 }
+func newPosts(channels *channelAPI, cfg Config) *postAPI {
+	return &postAPI{pool: channels.pool, auth: channels.auth, billing: channels.billing, channels: channels, table: pgx.Identifier{appSchema(cfg), "posts"}.Sanitize()}
+}
+
 type post struct {
 	ID                 int64                    `json:"id"`
 	AuthorID           string                   `json:"author_id"`
@@ -34,6 +42,8 @@ type post struct {
 	Title              string                   `json:"title"`
 	Body               string                   `json:"body,omitempty"`
 	AccessPolicy       string                   `json:"access_policy"`
+	OfferStatus        string                   `json:"offer_status"`
+	OfferRevision      int64                    `json:"-"`
 	CanRead            bool                     `json:"can_read"`
 	CanEdit            bool                     `json:"can_edit"`
 	Purchased          bool                     `json:"purchased"`
@@ -52,11 +62,11 @@ type postInput struct {
 	Price        *offerPrice `json:"price"`
 }
 
-const postColumns = `id,author_id::text,channel_id::text,billing_key::text,slug,title,body,access_policy,created_at,updated_at`
+const postColumns = `id,author_id::text,channel_id::text,billing_key::text,slug,title,body,access_policy,offer_status,offer_revision,created_at,updated_at`
 
 func scanPost(row interface{ Scan(...any) error }) (post, error) {
 	var p post
-	err := row.Scan(&p.ID, &p.AuthorID, &p.ChannelID, &p.BillingKey, &p.Slug, &p.Title, &p.Body, &p.AccessPolicy, &p.CreatedAt, &p.UpdatedAt)
+	err := row.Scan(&p.ID, &p.AuthorID, &p.ChannelID, &p.BillingKey, &p.Slug, &p.Title, &p.Body, &p.AccessPolicy, &p.OfferStatus, &p.OfferRevision, &p.CreatedAt, &p.UpdatedAt)
 	return p, err
 }
 func postID(c fiber.Ctx) (int64, error) {
@@ -118,7 +128,7 @@ func (api *postAPI) decorate(c fiber.Ctx, posts []post, withOffers bool) error {
 			p.Body = ""
 		}
 		p.Offers = []openrails.CatalogOffer{}
-		if withOffers && (p.AccessPolicy == "ppv" || p.AccessPolicy == "members_ppv") {
+		if withOffers && paidPolicy(p.AccessPolicy) && p.OfferStatus == "active" {
 			p.Offers, err = api.billing.offers(c.Context(), postResource(p.BillingKey), false)
 			if err != nil {
 				return err
@@ -150,7 +160,7 @@ func (api *postAPI) list(c fiber.Ctx) error {
 			return clientError(c, 400, "invalid channel_id")
 		}
 	}
-	rows, err := api.pool.Query(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE ($1::text='' OR channel_id::text=$1) AND ($2::bigint=0 OR id<$2) AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL) ORDER BY id DESC LIMIT $3`, channel, before, limit+1)
+	rows, err := api.pool.Query(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE deleted_at IS NULL AND ($1::text='' OR channel_id::text=$1) AND ($2::bigint=0 OR id<$2) AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL) ORDER BY id DESC LIMIT $3`, channel, before, limit+1)
 	if err != nil {
 		return databaseError(c, err)
 	}
@@ -185,7 +195,7 @@ func (api *postAPI) get(c fiber.Ctx) error {
 	if err != nil {
 		return clientError(c, 400, err.Error())
 	}
-	p, err := scanPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1 AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL)`, id))
+	p, err := scanPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1 AND deleted_at IS NULL AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL)`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, 404, "post not found")
 	}
@@ -227,6 +237,21 @@ func (api *postAPI) create(c fiber.Ctx) error {
 	if err != nil {
 		return clientError(c, 400, "invalid channel_id")
 	}
+	p := post{AuthorID: viewer(c), ChannelID: id, BillingKey: uuid.NewString(), Slug: *in.Slug, Title: *in.Title, Body: *in.Body, AccessPolicy: "public", OfferStatus: "none"}
+	if in.AccessPolicy != nil {
+		p.AccessPolicy = *in.AccessPolicy
+	}
+	if err = validatePost(p); err != nil {
+		return clientError(c, 400, err.Error())
+	}
+	var job *postOfferArgs
+	if paidPolicy(p.AccessPolicy) {
+		if _, err = checkPrice(in.Price); err != nil {
+			return clientError(c, 400, err.Error())
+		}
+		p.OfferStatus, p.OfferRevision = "pending", 1
+		job = &postOfferArgs{Revision: 1, Price: in.Price}
+	}
 	release, err := api.channels.lock(c.Context(), id)
 	if err != nil {
 		return databaseError(c, err)
@@ -239,25 +264,19 @@ func (api *postAPI) create(c fiber.Ctx) error {
 	if !allowed {
 		return clientError(c, 404, "channel not found")
 	}
-	p := post{AuthorID: viewer(c), ChannelID: id, BillingKey: uuid.NewString(), Slug: *in.Slug, Title: *in.Title, Body: *in.Body, AccessPolicy: "public"}
-	if in.AccessPolicy != nil {
-		p.AccessPolicy = *in.AccessPolicy
-	}
-	if err = validatePost(p); err != nil {
-		return clientError(c, 400, err.Error())
-	}
-	if p.AccessPolicy == "ppv" || p.AccessPolicy == "members_ppv" {
-		if err = api.billing.setOffer(c.Context(), id, postResource(p.BillingKey), p.Title, in.Price, false, false); err != nil {
-			return clientError(c, 400, "offer could not be saved")
+	err = api.inTx(c, func(tx pgx.Tx) error {
+		p, err = scanPost(tx.QueryRow(c.Context(), `INSERT INTO `+api.table+`(author_id,channel_id,billing_key,slug,title,body,access_policy,offer_status,offer_revision) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING `+postColumns, p.AuthorID, id, p.BillingKey, p.Slug, p.Title, p.Body, p.AccessPolicy, p.OfferStatus, p.OfferRevision))
+		if err != nil || job == nil {
+			return err
 		}
-	}
-	p, err = scanPost(api.pool.QueryRow(c.Context(), `INSERT INTO `+api.table+`(author_id,channel_id,billing_key,slug,title,body,access_policy) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING `+postColumns, p.AuthorID, id, p.BillingKey, p.Slug, p.Title, p.Body, p.AccessPolicy))
+		job.PostID = p.ID
+		_, err = api.jobs.InsertTx(c.Context(), tx, *job, nil)
+		return err
+	})
 	if err != nil {
-		return databaseError(c, err)
+		return writeError(c, err)
 	}
-	p.CanRead, p.CanEdit = true, true
-	p.Offers, _ = api.billing.offers(c.Context(), postResource(p.BillingKey), false)
-	return c.Status(201).JSON(p)
+	return api.settled(c, 201, p.ID, job)
 }
 func (api *postAPI) update(c fiber.Ctx) error {
 	if viewer(c) == "" {
@@ -274,12 +293,14 @@ func (api *postAPI) update(c fiber.Ctx) error {
 	if in.ChannelID != nil {
 		return clientError(c, 400, "channel_id is immutable")
 	}
-	p, err := scanPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1`, id))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return clientError(c, 404, "post not found")
+	if in.Price != nil {
+		if _, err = checkPrice(in.Price); err != nil {
+			return clientError(c, 400, err.Error())
+		}
 	}
+	p, err := api.live(c.Context(), id)
 	if err != nil {
-		return databaseError(c, err)
+		return readError(c, err)
 	}
 	release, err := api.channels.lock(c.Context(), p.ChannelID)
 	if err != nil {
@@ -301,14 +322,10 @@ func (api *postAPI) update(c fiber.Ctx) error {
 	if !active || (!allowed && !admin) {
 		return clientError(c, 404, "post not found")
 	}
-	p, err = scanPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1`, id))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return clientError(c, 404, "post not found")
+	if p, err = api.live(c.Context(), id); err != nil {
+		return readError(c, err)
 	}
-	if err != nil {
-		return databaseError(c, err)
-	}
-	revision := p.UpdatedAt
+	revision, wasPaid := p.UpdatedAt, paidPolicy(p.AccessPolicy)
 	if in.Slug != nil {
 		p.Slug = *in.Slug
 	}
@@ -324,33 +341,34 @@ func (api *postAPI) update(c fiber.Ctx) error {
 	if err = validatePost(p); err != nil {
 		return clientError(c, 400, err.Error())
 	}
-	if p.AccessPolicy == "ppv" || p.AccessPolicy == "members_ppv" {
-		if in.Price != nil {
-			if err = api.billing.setOffer(c.Context(), p.ChannelID, postResource(p.BillingKey), p.Title, in.Price, false, false); err != nil {
-				return clientError(c, 400, "offer could not be saved")
-			}
-		} else {
-			offers, e := api.billing.offers(c.Context(), postResource(p.BillingKey), false)
-			if e != nil {
-				return billingUnavailable(c)
-			}
-			if len(offers) == 0 {
-				return clientError(c, 400, "a purchase offer is required")
-			}
-		}
-	} else if err = api.billing.archiveResource(c.Context(), postResource(p.BillingKey)); err != nil {
-		return billingUnavailable(c)
+	var job *postOfferArgs
+	switch isPaid := paidPolicy(p.AccessPolicy); {
+	case isPaid && in.Price != nil:
+		p.OfferStatus, job = "pending", &postOfferArgs{Price: in.Price}
+	case isPaid && !wasPaid:
+		return clientError(c, 400, "a purchase offer is required")
+	case !isPaid && wasPaid:
+		p.OfferStatus, job = "none", &postOfferArgs{}
 	}
-	p, err = scanPost(api.pool.QueryRow(c.Context(), `UPDATE `+api.table+` SET slug=$1,title=$2,body=$3,access_policy=$4,updated_at=NOW() WHERE id=$5 AND updated_at=$6 RETURNING `+postColumns, p.Slug, p.Title, p.Body, p.AccessPolicy, id, revision))
+	if job != nil {
+		p.OfferRevision++
+		job.PostID, job.Revision = id, p.OfferRevision
+	}
+	err = api.inTx(c, func(tx pgx.Tx) error {
+		p, err = scanPost(tx.QueryRow(c.Context(), `UPDATE `+api.table+` SET slug=$1,title=$2,body=$3,access_policy=$4,offer_status=$5,offer_revision=$6,updated_at=NOW() WHERE id=$7 AND updated_at=$8 AND deleted_at IS NULL RETURNING `+postColumns, p.Slug, p.Title, p.Body, p.AccessPolicy, p.OfferStatus, p.OfferRevision, id, revision))
+		if err != nil || job == nil {
+			return err
+		}
+		_, err = api.jobs.InsertTx(c.Context(), tx, *job, nil)
+		return err
+	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, 409, "post changed; reload and retry")
 	}
 	if err != nil {
-		return databaseError(c, err)
+		return writeError(c, err)
 	}
-	p.CanRead, p.CanEdit = true, true
-	p.Offers, _ = api.billing.offers(c.Context(), postResource(p.BillingKey), false)
-	return c.JSON(p)
+	return api.settled(c, 200, id, job)
 }
 func (api *postAPI) delete(c fiber.Ctx) error {
 	if viewer(c) == "" {
@@ -360,12 +378,9 @@ func (api *postAPI) delete(c fiber.Ctx) error {
 	if err != nil {
 		return clientError(c, 400, err.Error())
 	}
-	p, err := scanPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1`, id))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return clientError(c, 404, "post not found")
-	}
+	p, err := api.live(c.Context(), id)
 	if err != nil {
-		return databaseError(c, err)
+		return readError(c, err)
 	}
 	release, err := api.channels.lock(c.Context(), p.ChannelID)
 	if err != nil {
@@ -383,14 +398,83 @@ func (api *postAPI) delete(c fiber.Ctx) error {
 	if !allowed && !admin {
 		return clientError(c, 404, "post not found")
 	}
-	if err = api.billing.archiveResource(c.Context(), postResource(p.BillingKey)); err != nil {
-		return billingUnavailable(c)
+	err = api.inTx(c, func(tx pgx.Tx) error {
+		result, err := tx.Exec(c.Context(), `UPDATE `+api.table+` SET deleted_at=NOW() WHERE id=$1 AND deleted_at IS NULL`, id)
+		if err != nil {
+			return err
+		}
+		if result.RowsAffected() == 0 {
+			return pgx.ErrNoRows
+		}
+		_, err = api.jobs.InsertTx(c.Context(), tx, postArchiveArgs{PostID: id}, &river.InsertOpts{UniqueOpts: river.UniqueOpts{ByArgs: true}})
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return clientError(c, 404, "post not found")
 	}
-	_, err = api.pool.Exec(c.Context(), `DELETE FROM `+api.table+` WHERE id=$1`, id)
+	if err != nil {
+		return writeError(c, err)
+	}
+	inline(c.Context(), "post archive", func(ctx context.Context) error { return api.archivePost(ctx, id) })
+	return c.SendStatus(204)
+}
+
+func (api *postAPI) live(ctx context.Context, id int64) (post, error) {
+	return scanPost(api.pool.QueryRow(ctx, `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1 AND deleted_at IS NULL`, id))
+}
+func readError(c fiber.Ctx, err error) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return clientError(c, 404, "post not found")
+	}
+	return databaseError(c, err)
+}
+
+// inTx commits the post row together with its catalog job.
+func (api *postAPI) inTx(c fiber.Ctx, fn func(pgx.Tx) error) error {
+	if api.jobs == nil {
+		return errJobsUnavailable
+	}
+	tx, err := api.pool.Begin(c.Context())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(c.Context())
+	if err = fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit(c.Context())
+}
+
+// settled runs the committed offer job inline (caller holds the channel lock)
+// and answers with the post's resulting offer state.
+func (api *postAPI) settled(c fiber.Ctx, status int, id int64, job *postOfferArgs) error {
+	if job != nil {
+		inline(c.Context(), "post offer sync", func(ctx context.Context) error { return api.syncOffer(ctx, *job) })
+	}
+	p, err := scanPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1`, id))
 	if err != nil {
 		return databaseError(c, err)
 	}
-	return c.SendStatus(204)
+	p.CanRead, p.CanEdit, p.Offers = true, true, []openrails.CatalogOffer{}
+	if paidPolicy(p.AccessPolicy) && p.OfferStatus == "active" {
+		if offers, e := api.billing.offers(c.Context(), postResource(p.BillingKey), false); e == nil {
+			p.Offers = offers
+		}
+	}
+	return c.Status(status).JSON(p)
+}
+
+var errJobsUnavailable = errors.New("background workers are unavailable")
+
+func writeError(c fiber.Ctx, err error) error {
+	var pgErr *pgconn.PgError
+	switch {
+	case errors.Is(err, errJobsUnavailable):
+		return clientError(c, 503, err.Error())
+	case errors.As(err, &pgErr) && pgErr.Code == "23505":
+		return clientError(c, 409, "slug is already in use")
+	}
+	return databaseError(c, err)
 }
 func (api *postAPI) canModerate(c fiber.Ctx, user, permission string) (bool, error) {
 	if user == "" {

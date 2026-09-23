@@ -37,6 +37,7 @@ export interface Post {
   purchased?: boolean;
   has_membership?: boolean;
   access_policy: AccessPolicy;
+  offer_status: "none" | "pending" | "active" | "failed";
   offers: Offer[];
   created_at: string;
   updated_at: string;
