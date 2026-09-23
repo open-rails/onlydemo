@@ -21,7 +21,7 @@ import (
 type channelAPI struct {
 	pool         *pgxpool.Pool
 	auth         *appAuth
-	billing      postBilling
+	billing      *billingService
 	table, posts string
 	jobs         *river.Client[pgx.Tx]
 	locks        chan struct{}
@@ -33,7 +33,7 @@ type channel struct {
 	Name string `json:"name"`
 }
 
-func newChannels(pool *pgxpool.Pool, auth *appAuth, billing postBilling, cfg Config) *channelAPI {
+func newChannels(pool *pgxpool.Pool, auth *appAuth, billing *billingService, cfg Config) *channelAPI {
 	return &channelAPI{pool: pool, auth: auth, billing: billing, table: pgx.Identifier{appSchema(cfg), "channels"}.Sanitize(), posts: pgx.Identifier{appSchema(cfg), "blog_posts"}.Sanitize(), locks: make(chan struct{}, 4)}
 }
 
@@ -270,10 +270,8 @@ func (api *channelAPI) finishDeletion(ctx context.Context, id string) error {
 	if !deleting {
 		return errors.New("channel deletion was not accepted")
 	}
-	if api.billing != nil {
-		if err = api.billing.ArchiveChannelCatalog(ctx, id); err != nil {
-			return fmt.Errorf("archive channel catalog: %w", err)
-		}
+	if err = api.billing.ArchiveChannelCatalog(ctx, id); err != nil {
+		return fmt.Errorf("archive channel catalog: %w", err)
 	}
 	if _, err = api.pool.Exec(ctx, `DELETE FROM `+api.posts+` WHERE channel_id=$1`, id); err != nil {
 		return err

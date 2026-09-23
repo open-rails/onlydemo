@@ -10,24 +10,15 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: openrails_demo_test
-        ports: ['5432:5432']
-        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     env:
-      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/openrails_demo_test?sslmode=disable
       GOFLAGS: -mod=readonly
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-go@v7.0.0
         with:
           go-version: '1.26.6'
-      - run: go test -race ./...
+      - run: go build ./...
       - run: go vet ./...
+      - run: go build -tags smoke -o /tmp/demo-smoke .

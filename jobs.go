@@ -17,12 +17,9 @@ func newJobs(ctx context.Context, pool *pgxpool.Pool, cfg Config, auth *appAuth,
 	contributions := []riverkit.Contribution{
 		auth.runtime.RiverJobs(),
 		channels.RiverJobs(),
+		billing.RiverJobs(),
 	}
-	queues := map[string]river.QueueConfig{}
-	if billing != nil {
-		contributions = append(contributions, billing.runtime.RiverJobs())
-		queues[openrailsembed.QueueBilling] = river.QueueConfig{MaxWorkers: 4}
-	}
+	queues := map[string]river.QueueConfig{openrailsembed.QueueBilling: {MaxWorkers: 4}}
 	return riverkit.New(ctx, pool, &river.Config{Schema: cfg.RiverSchema, Queues: queues}, contributions...)
 }
 

@@ -45,9 +45,8 @@ The homepage is an API directory; use the API examples below to create posts
 and open the returned Stripe Checkout URL to pay with a
 [Stripe test card](https://docs.stripe.com/testing).
 
-Without `STRIPE_SECRET_KEY`, registration, ordinary posts and moderation still
-work; selling and checkout return 503. Partial billing configuration fails at
-startup. `GET /health` checks the database and configured billing runtime.
+Billing is required. Startup refuses missing Stripe test credentials, account or
+webhook configuration. `GET /health` checks both the database and billing runtime.
 
 PostgreSQL uses port `55433`; the API uses `3000`. Task loads `.env`; plain
 `go run .` reads exported environment variables through Koanf. Configuration:
@@ -102,8 +101,8 @@ demo uses its supported embedded runtime.
 This demo chooses one host-owned River fleet. `migrations.go` calls
 `riverkit.ApplyMigrations` to initialize its schema. After services and merchant
 configuration are ready, `jobs.go` calls `riverkit.New` with AuthKit, channel and
-optional OpenRails contributions. It returns one unstarted client with producers
-already bound. Without billing, AuthKit and channel jobs still share the fleet.
+OpenRails contributions. It returns one unstarted client with all producers
+already bound; every demo instance includes billing workers.
 The host starts and stops workers before closing library services, then closes
 its pool. OpenRails and River borrow that pool.
 AuthKit creates and owns a schema-bound pool from the same connection settings;
@@ -302,29 +301,23 @@ go run . admin grant --user-id <registered-user-id>
 go run . admin revoke --user-id <registered-user-id>
 ```
 
-## Verify
+## Build and manual walkthrough
 
 ```sh
-go test ./...
+go build ./...
 go vet ./...
-TEST_DATABASE_URL='postgres://postgres:postgres@localhost:55433/openrails_demo?sslmode=disable' go test -race ./...
+SMOKE_DATABASE_URL='postgres://postgres:postgres@localhost:55433/postgres?sslmode=disable' scripts/smoke.sh
 ```
 
-Integration tests create and remove isolated databases and normal database-owner
-logins, so use an administrative test connection. All application/library
-initialization and runtime then use the same owner pool without role memberships.
-The full purchase journey runs with default schemas and `MaxConns=1`, and again
-with custom billing/River schemas and all four components sharing `public`.
-Shared-schema cases also test initializer order, concurrent/repeated initialization,
-managed River migrations, and CLI migration/admin commands. Tests verify both libraries' scheduled jobs,
-borrowed-pool shutdown ownership, distinct author catalogs, moderator pricing,
-and zero persisted provider-secret rows without an encryption key. A concurrent
-edit regression borrows the same pool during billing handoff and checks the 409
-revision conflict preserves the committed content.
-They run real AuthKit, OpenRails, migrations and PostgreSQL with the supported
-Stripe HTTP transport seam. Coverage also includes owner/buyer isolation, hidden
-bodies, server-selected checkout terms, signed payment confirmation, replay,
-repricing and delisting. CI never contacts Stripe. A real sandbox checkout additionally
-requires account credentials, a running webhook listener and browser payment.
+The optional manual walkthrough creates and removes its own fresh local database.
+It exercises real native registration/login, channel/post creation, catalog checkout,
+idempotent replay, a signed fake paid webhook, purchased access and billing history.
+Its Stripe transport handles requests locally and refuses unexpected requests;
+no real provider credentials or network writes are used. PostgreSQL must be on a
+loopback address and the supplied login must be allowed to create databases.
+
+This demo has no automated test suite. CI builds and vets the application; the
+libraries retain their own tests. Run `task smoke` explicitly when changing the
+example's integration. Real sandbox payments remain a separate manual activity.
 
 The feed checks purchase access only for products in the selected page. When `X-Next-Cursor` is present, request the next page with `?before=<cursor>`; a page may contain fewer visible posts after private posts are filtered. Checkout return URLs are navigation only. The signed Stripe webhook establishes access.

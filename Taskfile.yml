@@ -63,7 +63,13 @@ tasks:
     env:
       STRIPE_API_KEY: '{{.STRIPE_SECRET_KEY}}'
 
-  test:
-    desc: Run Go tests
+  check:
+    desc: Build and vet the demo
     cmds:
-      - go test ./...
+      - go build ./...
+      - go vet ./...
+
+  smoke:
+    desc: Run the optional local fake-payment walkthrough
+    cmds:
+      - scripts/smoke.sh

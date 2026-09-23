@@ -24,9 +24,6 @@ func (api *blogAPI) checkout(c fiber.Ctx) error {
 	if key == "" || len(key) > 200 {
 		return clientError(c, http.StatusBadRequest, "Idempotency-Key must contain between 1 and 200 characters")
 	}
-	if api.billing == nil {
-		return billingUnavailable(c)
-	}
 	// Select the current immutable offer before billing borrows the same pool.
 	// Later price edits create a new offer; this checkout retains these terms.
 	// Request JSON never selects a customer or price.
@@ -71,9 +68,6 @@ func (api *blogAPI) getCheckout(c fiber.Ctx) error {
 	user, ok := authkitfiber.UserClaims(c)
 	if !ok {
 		return clientError(c, http.StatusUnauthorized, "a user access token is required")
-	}
-	if api.billing == nil {
-		return billingUnavailable(c)
 	}
 	session, err := api.billing.GetCheckout(c.Context(), user.UserID, c.Params("id"))
 	if errors.Is(err, openrails.ErrNotFound) || errors.Is(err, openrails.ErrInvalid) || errors.Is(err, openrails.ErrDenied) {

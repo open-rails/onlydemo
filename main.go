@@ -4,25 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	authkitfiber "github.com/open-rails/authkit/adapters/fiber"
-	openrailsfiber "github.com/open-rails/openrails/adapters/fiber"
 )
-
-func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	if err := run(ctx, os.Args[1:], os.Stdout); err != nil {
-		log.Fatal(err)
-	}
-}
 
 func openDatabase(ctx context.Context) (Config, *pgxpool.Pool, error) {
 	config, err := loadConfig()
@@ -108,15 +96,8 @@ func serve(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("initialize OpenRails: %w", err)
 	}
-	var postsBilling postBilling
-	if billing != nil {
-		defer billing.Close(context.Background())
-
-		postsBilling = billing
-	} else {
-		log.Print("Stripe is not configured; post sales are disabled")
-	}
-	channels := newChannels(pool, authService, postsBilling, config)
+	defer billing.Close(context.Background())
+	channels := newChannels(pool, authService, billing, config)
 	jobs, err := newJobs(ctx, pool, config, authService, billing, channels)
 	if err != nil {
 		return fmt.Errorf("compose application jobs: %w", err)
@@ -135,7 +116,7 @@ func serve(ctx context.Context) error {
 		return fmt.Errorf("start application jobs: %w", err)
 	}
 
-	app, err := newApp(pool, authService, postsBilling, config, channels)
+	app, err := newApp(pool, authService, billing, config, channels)
 	if err != nil {
 		return fmt.Errorf("create application: %w", err)
 	}
@@ -149,7 +130,7 @@ func serve(ctx context.Context) error {
 	return app.Listen(fmt.Sprintf(":%d", config.Port))
 }
 
-func newApp(pool *pgxpool.Pool, authService *appAuth, billing postBilling, cfg Config, channels *channelAPI) (*fiber.App, error) {
+func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, cfg Config, channels *channelAPI) (*fiber.App, error) {
 	app := fiber.New()
 	blogAPI := &blogAPI{pool: pool, auth: authService, billing: billing, channels: channels, table: pgx.Identifier{appSchema(cfg), "blog_posts"}.Sanitize()}
 
@@ -164,12 +145,8 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing postBilling, cfg C
 				"error":  "database is unavailable",
 			})
 		}
-		if readiness, ok := billing.(interface{ Ready(context.Context) error }); ok {
-			if err := readiness.Ready(pingContext); err != nil {
-				return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-					"status": "unavailable", "error": "billing workers are unavailable",
-				})
-			}
+		if err := billing.Ready(pingContext); err != nil {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"status": "unavailable", "error": "billing workers are unavailable"})
 		}
 
 		return c.JSON(fiber.Map{
@@ -188,14 +165,8 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing postBilling, cfg C
 	app.Delete("/api/v1/posts/:id", required, blogAPI.delete)
 	app.Post("/api/v1/posts/:id/checkout", required, blogAPI.checkout)
 	app.Get("/api/v1/checkouts/:id", required, blogAPI.getCheckout)
-	if billing, ok := billing.(*billingService); ok && billing != nil {
-		routes, err := openrailsfiber.Routes(billing.runtime)
-		if err != nil {
-			return nil, err
-		}
-		if err := routes.Mount(app.Group("/billing")); err != nil {
-			return nil, err
-		}
+	if err := billing.Mount(app.Group("/billing")); err != nil {
+		return nil, err
 	}
 
 	// Register AuthKit endpoints on Fiber so they appear in its route table.

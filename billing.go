@@ -11,9 +11,12 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	riverkit "github.com/open-rails/helpers/river"
 	"github.com/open-rails/openrails"
+	openrailsfiber "github.com/open-rails/openrails/adapters/fiber"
 	openrailsconfig "github.com/open-rails/openrails/config"
 	openrailsembed "github.com/open-rails/openrails/embed"
 	openrailsauthkit "github.com/open-rails/openrails/embed/authkit"
@@ -24,18 +27,6 @@ const (
 	minPostPriceCents   int64 = 50
 	maxPostPriceCents   int64 = 99_999_999
 )
-
-// postBilling keeps payment confirmation and access grants in OpenRails. The
-// demo stores only the product/price IDs that connect a post to its offer.
-type postBilling interface {
-	EnsurePostOffer(context.Context, string, string, string, int64) (string, string, error)
-	EnsurePostOfferAsAdmin(context.Context, string, string, string, int64) (string, string, error)
-	ArchiveChannelCatalog(context.Context, string) error
-	HasPostAccess(context.Context, string, string) (bool, error)
-	CheckPostAccess(context.Context, string, []string) (map[string]bool, error)
-	CreateCheckout(context.Context, string, string, string, string) (*openrails.CheckoutSession, error)
-	GetCheckout(context.Context, string, string) (*openrails.CheckoutSession, error)
-}
 
 type billingService struct {
 	runtime   *openrailsembed.Runtime
@@ -56,11 +47,11 @@ type billingOptions struct {
 	StripeTransport http.RoundTripper
 }
 
-// newBilling is deliberately sandbox-only. A missing Stripe key leaves selling
-// disabled; supplying a key requires the host-owned account and webhook config.
+// newBilling is deliberately sandbox-only. Startup requires the host-owned
+// Stripe account, test credential and webhook configuration.
 func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth, options billingOptions) (_ *billingService, err error) {
 	if cfg.StripeSecretKey == "" {
-		return nil, nil
+		return nil, errors.New("billing requires STRIPE_SECRET_KEY")
 	}
 	if !strings.HasPrefix(cfg.StripeSecretKey, "sk_test_") && !strings.HasPrefix(cfg.StripeSecretKey, "rk_test_") {
 		return nil, errors.New("this demo requires a Stripe sk_test_ or rk_test_ sandbox key")
@@ -125,6 +116,16 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 		return nil, err
 	}
 	return &billingService{runtime: runtime, client: client, publicURL: strings.TrimRight(cfg.PublicURL, "/")}, nil
+}
+
+func (b *billingService) RiverJobs() riverkit.Contribution { return b.runtime.RiverJobs() }
+
+func (b *billingService) Mount(router fiber.Router) error {
+	routes, err := openrailsfiber.Routes(b.runtime)
+	if err != nil {
+		return err
+	}
+	return routes.Mount(router)
 }
 
 func (b *billingService) Close(ctx context.Context) error {

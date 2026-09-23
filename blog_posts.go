@@ -18,7 +18,7 @@ import (
 type blogAPI struct {
 	pool     *pgxpool.Pool
 	auth     *appAuth
-	billing  postBilling
+	billing  *billingService
 	table    string
 	channels *channelAPI
 }
@@ -119,9 +119,6 @@ func (api *blogAPI) list(c fiber.Ctx) error {
 	}
 	access := map[string]bool{}
 	if len(products) != 0 {
-		if api.billing == nil {
-			return billingUnavailable(c)
-		}
 		access, err = api.billing.CheckPostAccess(c.Context(), userID, products)
 		if err != nil {
 			return billingUnavailable(c)
@@ -164,9 +161,6 @@ func (api *blogAPI) get(c fiber.Ctx) error {
 		}
 	}
 	if !canRead && userID != "" && post.ProductID != "" {
-		if api.billing == nil {
-			return billingUnavailable(c)
-		}
 		canRead, err = api.billing.HasPostAccess(c.Context(), userID, post.ProductID)
 		if err != nil {
 			return billingUnavailable(c)
@@ -217,9 +211,6 @@ func (api *blogAPI) create(c fiber.Ctx) error {
 	}
 	if err := validatePost(&post); err != nil {
 		return clientError(c, http.StatusBadRequest, err.Error())
-	}
-	if post.PriceCents != nil && api.billing == nil {
-		return billingUnavailable(c)
 	}
 	// Publish the post after its offer exists. Holding an application
 	// transaction while billing borrows the same pool can exhaust that pool.
@@ -308,9 +299,6 @@ func (api *blogAPI) update(c fiber.Ctx) error {
 		return clientError(c, http.StatusBadRequest, err.Error())
 	}
 	if post.PriceCents != nil && (oldPrice == nil || *oldPrice != *post.PriceCents) {
-		if api.billing == nil {
-			return billingUnavailable(c)
-		}
 		if allowed {
 			post.ProductID, post.PriceID, err = api.billing.EnsurePostOffer(c.Context(), post.ChannelID, post.BillingKey, post.Title, *post.PriceCents)
 		} else {
