@@ -30,6 +30,7 @@ type postAPI struct {
 	channels *channelAPI
 	jobs     *river.Client[pgx.Tx]
 }
+
 func newPosts(channels *channelAPI, cfg Config) *postAPI {
 	return &postAPI{pool: channels.pool, auth: channels.auth, billing: channels.billing, channels: channels, table: pgx.Identifier{appSchema(cfg), "posts"}.Sanitize()}
 }

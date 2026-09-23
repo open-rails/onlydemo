@@ -109,6 +109,9 @@ func serve(ctx context.Context) error {
 			log.Printf("close background jobs: %v", err)
 		}
 	}()
+	if err := billing.requireReady(ctx); err != nil {
+		return err
+	}
 	if err := authService.runtime.Start(ctx); err != nil {
 		return fmt.Errorf("start AuthKit: %w", err)
 	}

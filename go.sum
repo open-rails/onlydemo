@@ -269,6 +269,8 @@ github.com/open-rails/migratekit v1.0.4 h1:i/azuFFLY3Si5nUz3hKAIqngynAGa5TIMUe+G
 github.com/open-rails/migratekit v1.0.4/go.mod h1:ONDMUycRcwAB+eKlPvho6mnNAZf9gf9+yqwCKDRuO9g=
 github.com/open-rails/openrails v0.159.0 h1:81AUARIP23V9N5/3yCfxMXlp1pTrhg5WKJMXgMGRTHg=
 github.com/open-rails/openrails v0.159.0/go.mod h1:TaCMFHRfTYTppJB278PMNxBgGUClOsW6GRa/QEMtDA4=
+github.com/open-rails/openrails v0.160.0 h1:hRx0xIS/GNjDsHMq4IEfZNEwrJF/jn6/jZzAKTo9DvU=
+github.com/open-rails/openrails v0.160.0/go.mod h1:TaCMFHRfTYTppJB278PMNxBgGUClOsW6GRa/QEMtDA4=
 github.com/opencontainers/go-digest v1.0.0 h1:apOUWs51W5PlhuyGyz9FCeeBIOUDA/6nW8Oi/yOhh5U=
 github.com/opencontainers/go-digest v1.0.0/go.mod h1:0JzlMkj0TRzQZfJkVvzbP0HBR3IKzErnv2BNG4W4MAM=
 github.com/opencontainers/image-spec v1.1.1 h1:y0fUlFfIZhPF1W537XOLg0/fcx6zcHCJwooC2xJA040=

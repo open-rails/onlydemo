@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -26,7 +27,6 @@ const (
 type billingService struct {
 	runtime *openrailsembed.Runtime
 	client  *openrails.Client
-	psps    []string
 }
 
 func initializeBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool) error {
@@ -145,7 +145,7 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 	}
 	// This assignment precedes shared-fleet startup and HTTP publication.
 	auth.billing = client
-	return &billingService{runtime: runtime, client: client, psps: cfg.BillingPSPs}, nil
+	return &billingService{runtime: runtime, client: client}, nil
 }
 
 func (b *billingService) RiverJobs() riverkit.Contribution { return b.runtime.RiverJobs() }
@@ -164,4 +164,15 @@ func (b *billingService) Close(ctx context.Context) error {
 
 func (b *billingService) Ready(ctx context.Context) error {
 	return b.runtime.Ready(ctx)
+}
+
+// requireReady refuses to serve unless every declared PSP's sandbox posture
+// was verified. Call it after River composition, which Ready also checks.
+func (b *billingService) requireReady(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := b.runtime.Ready(ctx); err != nil {
+		return fmt.Errorf("OpenRails is not ready; refusing to serve (a disarmed PSP means its credentials were not verified as sandbox): %w", err)
+	}
+	return nil
 }

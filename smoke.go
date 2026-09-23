@@ -103,6 +103,9 @@ func smoke() error {
 		return err
 	}
 	defer stopJobs(context.Background(), jobs)
+	if err = billing.requireReady(ctx); err != nil {
+		return err
+	}
 	if err = auth.runtime.Start(ctx); err != nil {
 		return err
 	}
@@ -453,6 +456,7 @@ func smokePeer(base, address string) smokeClient {
 	dialer := &net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP(address)}}
 	return smokeClient{base, &http.Client{Timeout: 20 * time.Second, Transport: &http.Transport{DialContext: dialer.DialContext}}}
 }
+
 // Offers are applied after the post commits; poll until the offer is active.
 func (s smokeClient) activeOffer(path, token string) (map[string]any, error) {
 	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(200 * time.Millisecond) {
