@@ -132,7 +132,7 @@ func serve(ctx context.Context) error {
 
 func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, cfg Config, channels *channelAPI) (*fiber.App, error) {
 	app := fiber.New()
-	blogAPI := &blogAPI{pool: pool, auth: authService, billing: billing, channels: channels, table: pgx.Identifier{appSchema(cfg), "blog_posts"}.Sanitize()}
+	posts := &postAPI{pool: pool, auth: authService, billing: billing, channels: channels, table: pgx.Identifier{appSchema(cfg), "posts"}.Sanitize()}
 
 	app.Get("/dev/routes", homepage(app))
 
@@ -165,18 +165,18 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, c
 	app.Get("/api/v1/channels/:id/members", required, channels.members)
 	app.Post("/api/v1/channels/:id/members", required, channels.members)
 	app.Delete("/api/v1/channels/:id/members/:user_id", required, channels.members)
-	app.Get("/api/v1/me", required, blogAPI.me)
+	app.Get("/api/v1/me", required, posts.me)
 	app.Get("/api/v1/config", publicConfiguration(billing, cfg))
 	app.Get("/api/v1/checkout/options", checkoutOptions(billing))
-	app.Get("/api/v1/posts", optional, blogAPI.list)
-	app.Post("/api/v1/posts", required, blogAPI.create)
-	app.Get("/api/v1/posts/:id", optional, blogAPI.get)
-	app.Patch("/api/v1/posts/:id", required, blogAPI.update)
-	app.Delete("/api/v1/posts/:id", required, blogAPI.delete)
+	app.Get("/api/v1/posts", optional, posts.list)
+	app.Post("/api/v1/posts", required, posts.create)
+	app.Get("/api/v1/posts/:id", optional, posts.get)
+	app.Patch("/api/v1/posts/:id", required, posts.update)
+	app.Delete("/api/v1/posts/:id", required, posts.delete)
 	app.Post("/api/v1/posts/:id/checkout", required, func(c fiber.Ctx) error {
-		return blogAPI.checkout(c, cfg.PublicURL)
+		return posts.checkout(c, cfg.PublicURL)
 	})
-	app.Get("/api/v1/checkouts/:id", required, blogAPI.getCheckout)
+	app.Get("/api/v1/checkouts/:id", required, posts.getCheckout)
 	if err := billing.Mount(app.Group("/billing")); err != nil {
 		return nil, err
 	}

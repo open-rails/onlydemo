@@ -398,7 +398,7 @@ func smoke() error {
 		return fmt.Errorf("early cleanup did not defer hard deletion: %w", err)
 	}
 	var retained bool
-	if err = pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM demo.channels c JOIN demo.blog_posts p ON p.channel_id=c.id WHERE c.id=$1 AND c.deleted_at IS NOT NULL)`, channelID).Scan(&retained); err != nil {
+	if err = pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM demo.channels c JOIN demo.posts p ON p.channel_id=c.id WHERE c.id=$1 AND c.deleted_at IS NOT NULL)`, channelID).Scan(&retained); err != nil {
 		return err
 	}
 	if !retained {

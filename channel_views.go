@@ -225,7 +225,7 @@ func (api *channelAPI) members(c fiber.Ctx) error {
 	}
 	return c.Status(201).JSON(fiber.Map{"user_id": user.ID, "role": in.Role})
 }
-func (api *blogAPI) me(c fiber.Ctx) error {
+func (api *postAPI) me(c fiber.Ctx) error {
 	if viewer(c) == "" {
 		return clientError(c, 401, "a user access token is required")
 	}
@@ -262,9 +262,9 @@ func (api *blogAPI) me(c fiber.Ctx) error {
 	if err != nil {
 		return databaseError(c, err)
 	}
-	posts := []blogPost{}
+	posts := []post{}
 	for rows.Next() {
-		p, e := scanBlogPost(rows)
+		p, e := scanPost(rows)
 		if e != nil {
 			rows.Close()
 			return databaseError(c, e)
@@ -287,7 +287,7 @@ func (api *blogAPI) me(c fiber.Ctx) error {
 	if err = api.decorate(c, posts, false); err != nil {
 		return billingUnavailable(c)
 	}
-	purchased := []blogPost{}
+	purchased := []post{}
 	for _, p := range posts {
 		if p.Purchased {
 			purchased = append(purchased, p)

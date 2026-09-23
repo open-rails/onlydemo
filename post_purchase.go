@@ -40,7 +40,7 @@ func checkoutError(c fiber.Ctx, err error) error {
 	}
 	return billingUnavailable(c)
 }
-func (api *blogAPI) checkout(c fiber.Ctx, publicURL string) error {
+func (api *postAPI) checkout(c fiber.Ctx, publicURL string) error {
 	if viewer(c) == "" {
 		return clientError(c, 401, "a user access token is required")
 	}
@@ -54,7 +54,7 @@ func (api *blogAPI) checkout(c fiber.Ctx, publicURL string) error {
 	}
 	// Identity-only lookup includes soft-deleted content so accepted exact-key
 	// retries can resolve before mutable content/membership admission checks.
-	post, err := scanBlogPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1`, id))
+	post, err := scanPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, 404, "post not found")
 	}
@@ -80,7 +80,7 @@ func (api *blogAPI) checkout(c fiber.Ctx, publicURL string) error {
 		return databaseError(c, err)
 	}
 	defer release()
-	post, err = scanBlogPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1 AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL)`, id))
+	post, err = scanPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1 AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL)`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, 404, "post not found")
 	}
@@ -167,7 +167,7 @@ func (api *channelAPI) subscribe(c fiber.Ctx, publicURL string) error {
 	}
 	return c.Status(201).JSON(result)
 }
-func (api *blogAPI) getCheckout(c fiber.Ctx) error {
+func (api *postAPI) getCheckout(c fiber.Ctx) error {
 	if viewer(c) == "" {
 		return clientError(c, 401, "a user access token is required")
 	}

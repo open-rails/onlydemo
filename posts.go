@@ -19,14 +19,14 @@ import (
 	"github.com/open-rails/openrails"
 )
 
-type blogAPI struct {
+type postAPI struct {
 	pool     *pgxpool.Pool
 	auth     *appAuth
 	billing  *billingService
 	table    string
 	channels *channelAPI
 }
-type blogPost struct {
+type post struct {
 	ID                 int64                    `json:"id"`
 	AuthorID           string                   `json:"author_id"`
 	ChannelID          string                   `json:"channel_id"`
@@ -43,7 +43,7 @@ type blogPost struct {
 	BillingKey         string                   `json:"-"`
 	Offers             []openrails.CatalogOffer `json:"offers"`
 }
-type blogPostInput struct {
+type postInput struct {
 	ChannelID    *string     `json:"channel_id"`
 	Slug         *string     `json:"slug"`
 	Title        *string     `json:"title"`
@@ -54,8 +54,8 @@ type blogPostInput struct {
 
 const postColumns = `id,author_id::text,channel_id::text,billing_key::text,slug,title,body,access_policy,created_at,updated_at`
 
-func scanBlogPost(row interface{ Scan(...any) error }) (blogPost, error) {
-	var p blogPost
+func scanPost(row interface{ Scan(...any) error }) (post, error) {
+	var p post
 	err := row.Scan(&p.ID, &p.AuthorID, &p.ChannelID, &p.BillingKey, &p.Slug, &p.Title, &p.Body, &p.AccessPolicy, &p.CreatedAt, &p.UpdatedAt)
 	return p, err
 }
@@ -72,7 +72,7 @@ func viewer(c fiber.Ctx) string {
 	}
 	return ""
 }
-func (api *blogAPI) decorate(c fiber.Ctx, posts []blogPost, withOffers bool) error {
+func (api *postAPI) decorate(c fiber.Ctx, posts []post, withOffers bool) error {
 	user := viewer(c)
 	keys := make([]string, 0, len(posts)*2)
 	seen := map[string]bool{}
@@ -127,7 +127,7 @@ func (api *blogAPI) decorate(c fiber.Ctx, posts []blogPost, withOffers bool) err
 	}
 	return nil
 }
-func (api *blogAPI) list(c fiber.Ctx) error {
+func (api *postAPI) list(c fiber.Ctx) error {
 	limit := 25
 	if raw := c.Query("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
@@ -154,9 +154,9 @@ func (api *blogAPI) list(c fiber.Ctx) error {
 	if err != nil {
 		return databaseError(c, err)
 	}
-	posts := []blogPost{}
+	posts := []post{}
 	for rows.Next() {
-		p, e := scanBlogPost(rows)
+		p, e := scanPost(rows)
 		if e != nil {
 			rows.Close()
 			return databaseError(c, e)
@@ -180,26 +180,26 @@ func (api *blogAPI) list(c fiber.Ctx) error {
 	c.Set("Cache-Control", "no-store")
 	return c.JSON(posts)
 }
-func (api *blogAPI) get(c fiber.Ctx) error {
+func (api *postAPI) get(c fiber.Ctx) error {
 	id, err := postID(c)
 	if err != nil {
 		return clientError(c, 400, err.Error())
 	}
-	p, err := scanBlogPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1 AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL)`, id))
+	p, err := scanPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1 AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL)`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, 404, "post not found")
 	}
 	if err != nil {
 		return databaseError(c, err)
 	}
-	posts := []blogPost{p}
+	posts := []post{p}
 	if err = api.decorate(c, posts, true); err != nil {
 		return billingUnavailable(c)
 	}
 	c.Set("Cache-Control", "no-store")
 	return c.JSON(posts[0])
 }
-func validatePost(p blogPost) error {
+func validatePost(p post) error {
 	if strings.TrimSpace(p.Slug) == "" || strings.TrimSpace(p.Title) == "" || strings.TrimSpace(p.Body) == "" {
 		return errors.New("slug, title and body are required")
 	}
@@ -212,11 +212,11 @@ func validatePost(p blogPost) error {
 	}
 	return errors.New("invalid access_policy")
 }
-func (api *blogAPI) create(c fiber.Ctx) error {
+func (api *postAPI) create(c fiber.Ctx) error {
 	if viewer(c) == "" {
 		return clientError(c, 401, "a user access token is required")
 	}
-	var in blogPostInput
+	var in postInput
 	if err := bindJSON(c, &in); err != nil {
 		return clientError(c, 400, "invalid JSON")
 	}
@@ -239,7 +239,7 @@ func (api *blogAPI) create(c fiber.Ctx) error {
 	if !allowed {
 		return clientError(c, 404, "channel not found")
 	}
-	p := blogPost{AuthorID: viewer(c), ChannelID: id, BillingKey: uuid.NewString(), Slug: *in.Slug, Title: *in.Title, Body: *in.Body, AccessPolicy: "public"}
+	p := post{AuthorID: viewer(c), ChannelID: id, BillingKey: uuid.NewString(), Slug: *in.Slug, Title: *in.Title, Body: *in.Body, AccessPolicy: "public"}
 	if in.AccessPolicy != nil {
 		p.AccessPolicy = *in.AccessPolicy
 	}
@@ -251,7 +251,7 @@ func (api *blogAPI) create(c fiber.Ctx) error {
 			return clientError(c, 400, "offer could not be saved")
 		}
 	}
-	p, err = scanBlogPost(api.pool.QueryRow(c.Context(), `INSERT INTO `+api.table+`(author_id,channel_id,billing_key,slug,title,body,access_policy) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING `+postColumns, p.AuthorID, id, p.BillingKey, p.Slug, p.Title, p.Body, p.AccessPolicy))
+	p, err = scanPost(api.pool.QueryRow(c.Context(), `INSERT INTO `+api.table+`(author_id,channel_id,billing_key,slug,title,body,access_policy) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING `+postColumns, p.AuthorID, id, p.BillingKey, p.Slug, p.Title, p.Body, p.AccessPolicy))
 	if err != nil {
 		return databaseError(c, err)
 	}
@@ -259,7 +259,7 @@ func (api *blogAPI) create(c fiber.Ctx) error {
 	p.Offers, _ = api.billing.offers(c.Context(), postResource(p.BillingKey), false)
 	return c.Status(201).JSON(p)
 }
-func (api *blogAPI) update(c fiber.Ctx) error {
+func (api *postAPI) update(c fiber.Ctx) error {
 	if viewer(c) == "" {
 		return clientError(c, 401, "a user access token is required")
 	}
@@ -267,14 +267,14 @@ func (api *blogAPI) update(c fiber.Ctx) error {
 	if err != nil {
 		return clientError(c, 400, err.Error())
 	}
-	var in blogPostInput
+	var in postInput
 	if err = bindJSON(c, &in); err != nil {
 		return clientError(c, 400, "invalid JSON")
 	}
 	if in.ChannelID != nil {
 		return clientError(c, 400, "channel_id is immutable")
 	}
-	p, err := scanBlogPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1`, id))
+	p, err := scanPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, 404, "post not found")
 	}
@@ -301,7 +301,7 @@ func (api *blogAPI) update(c fiber.Ctx) error {
 	if !active || (!allowed && !admin) {
 		return clientError(c, 404, "post not found")
 	}
-	p, err = scanBlogPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1`, id))
+	p, err = scanPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, 404, "post not found")
 	}
@@ -341,7 +341,7 @@ func (api *blogAPI) update(c fiber.Ctx) error {
 	} else if err = api.billing.archiveResource(c.Context(), postResource(p.BillingKey)); err != nil {
 		return billingUnavailable(c)
 	}
-	p, err = scanBlogPost(api.pool.QueryRow(c.Context(), `UPDATE `+api.table+` SET slug=$1,title=$2,body=$3,access_policy=$4,updated_at=NOW() WHERE id=$5 AND updated_at=$6 RETURNING `+postColumns, p.Slug, p.Title, p.Body, p.AccessPolicy, id, revision))
+	p, err = scanPost(api.pool.QueryRow(c.Context(), `UPDATE `+api.table+` SET slug=$1,title=$2,body=$3,access_policy=$4,updated_at=NOW() WHERE id=$5 AND updated_at=$6 RETURNING `+postColumns, p.Slug, p.Title, p.Body, p.AccessPolicy, id, revision))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, 409, "post changed; reload and retry")
 	}
@@ -352,7 +352,7 @@ func (api *blogAPI) update(c fiber.Ctx) error {
 	p.Offers, _ = api.billing.offers(c.Context(), postResource(p.BillingKey), false)
 	return c.JSON(p)
 }
-func (api *blogAPI) delete(c fiber.Ctx) error {
+func (api *postAPI) delete(c fiber.Ctx) error {
 	if viewer(c) == "" {
 		return clientError(c, 401, "a user access token is required")
 	}
@@ -360,7 +360,7 @@ func (api *blogAPI) delete(c fiber.Ctx) error {
 	if err != nil {
 		return clientError(c, 400, err.Error())
 	}
-	p, err := scanBlogPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1`, id))
+	p, err := scanPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, 404, "post not found")
 	}
@@ -392,7 +392,7 @@ func (api *blogAPI) delete(c fiber.Ctx) error {
 	}
 	return c.SendStatus(204)
 }
-func (api *blogAPI) canModerate(c fiber.Ctx, user, permission string) (bool, error) {
+func (api *postAPI) canModerate(c fiber.Ctx, user, permission string) (bool, error) {
 	if user == "" {
 		return false, nil
 	}

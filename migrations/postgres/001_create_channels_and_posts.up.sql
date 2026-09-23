@@ -9,7 +9,7 @@ CREATE TABLE channels (
     deleted_at TIMESTAMPTZ
 );
 
-CREATE TABLE blog_posts (
+CREATE TABLE posts (
     id BIGSERIAL PRIMARY KEY,
     channel_id UUID NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
     author_id UUID NOT NULL,
@@ -22,5 +22,5 @@ CREATE TABLE blog_posts (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX blog_posts_channel_id_idx ON blog_posts (channel_id);
-CREATE UNIQUE INDEX blog_posts_billing_key_idx ON blog_posts (billing_key);
+CREATE INDEX posts_channel_id_idx ON posts (channel_id);
+CREATE UNIQUE INDEX posts_billing_key_idx ON posts (billing_key);

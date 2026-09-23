@@ -1,7 +1,8 @@
-# OpenRails channel demo
+# OnlyDemo
 
-A React/Fiber channel blog using AuthKit for people and publishing roles, and
-OpenRails for product offers, purchases, recurring memberships and payment history.
+A React/Fiber creator app: creators run channels and publish posts on them.
+AuthKit handles people and publishing roles; OpenRails handles product offers,
+purchases, recurring memberships and payment history.
 
 The application API is `/api/v1`, identity JSON API is `/auth/v1`, and customer
 billing is `/billing/v1`. The React app lives at `/`; the searchable native route
@@ -83,7 +84,7 @@ month. Repricing moves a stable price key and preserves already accepted terms.
 
 ## Buying and membership
 
-One-time purchases go from the frontend to the blog wrapper, then through the
+One-time purchases go from the frontend to the post purchase endpoint, then through the
 portable OpenRails Client to hosted Stripe Checkout. The host checks only content
 and channel policy; OpenRails decides offer validity, repeat purchase eligibility,
 accepted terms and payment state. An exact idempotency lookup happens before
@@ -95,7 +96,7 @@ accepted checkout and its financial history remain available by checkout ID.
 Membership uses native customer Stripe card setup, a saved method, an immutable
 membership quote and an explicit payer confirmation. The browser uses the native
 `/billing/v1/me/checkout/:id` read/confirm routes. Generic billing checkout creation
-is omitted from this profile, so it cannot bypass the blog's admission rules.
+is omitted from this profile, so it cannot bypass the app's admission rules.
 A redirect is never proof of payment; the UI reads the verified session state.
 
 `/me` shows managed channels, a paginated purchased-post library, subscriptions and

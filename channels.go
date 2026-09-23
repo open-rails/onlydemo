@@ -34,7 +34,7 @@ type channel struct {
 }
 
 func newChannels(pool *pgxpool.Pool, auth *appAuth, billing *billingService, cfg Config) *channelAPI {
-	return &channelAPI{pool: pool, auth: auth, billing: billing, table: pgx.Identifier{appSchema(cfg), "channels"}.Sanitize(), posts: pgx.Identifier{appSchema(cfg), "blog_posts"}.Sanitize(), locks: make(chan struct{}, 4)}
+	return &channelAPI{pool: pool, auth: auth, billing: billing, table: pgx.Identifier{appSchema(cfg), "channels"}.Sanitize(), posts: pgx.Identifier{appSchema(cfg), "posts"}.Sanitize(), locks: make(chan struct{}, 4)}
 }
 
 func (api *channelAPI) mount(app fiber.Router, required fiber.Handler) {
