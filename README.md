@@ -30,6 +30,12 @@ For payment flows while browsing Vite, start the backend with
 origin. Sessions and pending checkout attempts are stored per origin; switching
 from 5173 to 3000 during a payment loses that browser context.
 
+The frontend follows the shared UI standard: shadcn `base-vega` on
+`@base-ui/react` (zinc, hugeicons, Tailwind 4, `cn@0.4.0`). Primitives in
+`frontend/src/components/ui` come from `pnpm dlx shadcn@4.21.0 add <name>`; never
+hand-edit them except for `// Local:` deltas. `frontend/dist` is committed and
+embedded, so rebuild it with every frontend change.
+
 Billing is required and sandbox-only. `BILLING_PSPS` lists the providers the site
 offers (`stripe`, `nmi`, or `stripe,nmi`; default `stripe`); each listed provider
 requires its credentials at startup and unlisted ones need none. The browser

@@ -1,8 +1,19 @@
 import { Link } from "react-router-dom";
 import { useState, type CSSProperties, type ReactNode } from "react";
-import { clsx } from "clsx";
+import { cn } from "cn";
+import { HugeiconsIcon } from "@hugeicons/react";
+import {
+  Bookmark02Icon,
+  DollarCircleIcon,
+  FavouriteIcon,
+  Image01Icon,
+  Message01Icon,
+  SquareLock02Icon,
+  Tick02Icon,
+} from "@hugeicons/core-free-icons";
 import { money, date, duration } from "../format";
-import { Badge, Icon } from "./ui";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { policyLabels, type Channel, type Post } from "../models";
 import { hue, membershipOffer, useChannels } from "../channels";
 
@@ -19,7 +30,7 @@ export function Avatar({
   className?: string;
 }) {
   return (
-    <span className={clsx("avatar", className)} style={tint(seed)}>
+    <span className={cn("avatar", className)} style={tint(seed)}>
       {(name || "?").slice(0, 1).toUpperCase()}
     </span>
   );
@@ -34,7 +45,7 @@ export function Cover({
   children?: ReactNode;
 }) {
   return (
-    <div className={clsx("cover", className)} style={tint(seed)}>
+    <div className={cn("cover", className)} style={tint(seed)}>
       {children}
     </div>
   );
@@ -75,24 +86,30 @@ export function PostCard({ post, handle }: { post: Post; handle?: string }) {
           aria-label={`Unlock ${post.title}`}
         >
           <span className="lock-badge">
-            <Icon name="lock" size={30} />
+            <HugeiconsIcon icon={SquareLock02Icon} size={30} />
           </span>
           <span className="media-meta">
-            <Icon name="image" size={15} /> {policyLabels[policy]}
+            <HugeiconsIcon icon={Image01Icon} size={15} /> {policyLabels[policy]}
           </span>
         </Link>
       )}
       {!post.can_read && (
         <div className="feed-unlock">
-          <Link
-            to={
-              needsMembership
-                ? `/channels/${post.channel_slug}`
-                : `/posts/${post.id}`
+          <Button
+            size="lg"
+            className="w-full"
+            nativeButton={false}
+            render={
+              <Link
+                to={
+                  needsMembership
+                    ? `/channels/${post.channel_slug}`
+                    : `/posts/${post.id}`
+                }
+              />
             }
-            className="button button-primary button-full"
           >
-            <Icon name="lock" size={16} />
+            <HugeiconsIcon icon={SquareLock02Icon} data-icon="inline-start" />
             {needsMembership
               ? "Subscribe to unlock"
               : post.offer_status === "pending"
@@ -100,39 +117,43 @@ export function PostCard({ post, handle }: { post: Post; handle?: string }) {
                 : price
                 ? `Unlock for ${money(price.unit_amount, price.currency)}`
                 : "Unlock post"}
-          </Link>
+          </Button>
         </div>
       )}
       <footer className="feed-actions">
-        <button
-          className={clsx("icon-button", liked && "liked")}
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn(liked && "liked")}
           aria-label="Like"
           aria-pressed={liked}
           onClick={() => setLiked(!liked)}
         >
-          <Icon name="heart" size={21} />
-        </button>
-        <Link
-          to={`/posts/${post.id}`}
-          className="icon-button"
+          <HugeiconsIcon icon={FavouriteIcon} size={21} />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
           aria-label="Open post"
+          nativeButton={false}
+          render={<Link to={`/posts/${post.id}`} />}
         >
-          <Icon name="message" size={21} />
-        </Link>
+          <HugeiconsIcon icon={Message01Icon} size={21} />
+        </Button>
         <Link to={`/channels/${post.channel_slug}`} className="tip-link">
-          <Icon name="dollar" size={21} />
+          <HugeiconsIcon icon={DollarCircleIcon} size={21} />
           Send tip
         </Link>
         <span className="feed-actions-end">
           {post.purchased ? (
-            <Badge tone="success">
-              <Icon name="check" size={11} />
+            <Badge className="bg-success/10 text-success">
+              <HugeiconsIcon icon={Tick02Icon} data-icon="inline-start" />
               Purchased
             </Badge>
           ) : (
-            policy === "public" && <Badge>Free</Badge>
+            policy === "public" && <Badge variant="secondary">Free</Badge>
           )}
-          <Icon name="bookmark" size={20} className="muted" />
+          <HugeiconsIcon icon={Bookmark02Icon} size={20} className="muted" />
         </span>
       </footer>
     </article>
@@ -154,9 +175,9 @@ export function ChannelCard({ channel }: { channel: Channel }) {
         )}
         <div className="creator-card-footer">
           {channel.can_manage || channel.can_edit ? (
-            <Badge tone="brand">{channel.can_manage ? "Owner" : "Editor"}</Badge>
+            <Badge>{channel.can_manage ? "Owner" : "Editor"}</Badge>
           ) : channel.has_membership ? (
-            <Badge tone="success">Subscribed</Badge>
+            <Badge className="bg-success/10 text-success">Subscribed</Badge>
           ) : (
             channel.post_count != null && (
               <span className="muted">
@@ -165,14 +186,15 @@ export function ChannelCard({ channel }: { channel: Channel }) {
               </span>
             )
           )}
-          <Link
-            to={`/channels/${channel.slug}`}
-            className="button button-primary button-sm"
+          <Button
+            size="sm"
+            nativeButton={false}
+            render={<Link to={`/channels/${channel.slug}`} />}
           >
             {offer && !channel.has_membership
               ? `${money(offer.unit_amount, offer.currency)} ${duration(offer.access_duration_hours).replace("every ", "/ ")}`
               : "View profile"}
-          </Link>
+          </Button>
         </div>
       </div>
     </article>
@@ -183,12 +205,12 @@ export function SuggestedCreators({ strip = false }: { strip?: boolean }) {
   const list = channels.data?.data.slice(0, strip ? 10 : 5) || [];
   if (!list.length) return null;
   return (
-    <section className={clsx("suggested", strip && "suggested-strip")}>
+    <section className={cn("suggested", strip && "suggested-strip")}>
       <div className="suggested-heading">
         <h2>Suggestions</h2>
-        <Link to="/channels" className="text-button">
+        <Button variant="link" size="sm" nativeButton={false} render={<Link to="/channels" />}>
           See all
-        </Link>
+        </Button>
       </div>
       <div className="suggested-list">
         {list.map((channel) => (

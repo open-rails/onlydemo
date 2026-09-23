@@ -31,7 +31,9 @@ import {
   type PaymentOptionsDocument,
   type Post,
 } from "../models";
-import { Button, ErrorState, Loading } from "./ui";
+import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
+import { ErrorState, FormError, Loading } from "./states";
 
 // One-use gateway tokens stay in memory, never in browser storage or URLs.
 const pendingRequests = new Map<string, { generation: number; body: object }>();
@@ -355,7 +357,7 @@ export function PurchaseCheckout({
     }
   };
   return (
-    <div className="stack">
+    <div className="flex flex-col gap-4">
       <BillingCheckout
         source={composed.source}
         layout="compact"
@@ -389,14 +391,15 @@ export function PurchaseCheckout({
             The payment result is unresolved. Any retry below uses the original
             request and key, without collecting another token.
           </p>
-          <Button variant="secondary" busy={busy} onClick={() => void retry()}>
+          <Button variant="outline" disabled={busy} onClick={() => void retry()}>
+            {busy && <Spinner data-icon="inline-start" />}
             Retry the original request
           </Button>
         </>
       )}
       {current && ["failed", "canceled"].includes(current.status) && (
         <Button
-          variant="secondary"
+          variant="outline"
           onClick={() => {
             clearAttempt(composed.scope);
             pendingRequests.delete(composed.scope);
@@ -415,27 +418,28 @@ export function PurchaseCheckout({
             const target = new URL(current.url);
             return target.protocol === "https:" &&
               target.hostname === "checkout.stripe.com" ? (
-              <a className="text-button" href={target.href}>
+              <Button variant="link" nativeButton={false} render={<a href={target.href} />}>
                 Continue the accepted Stripe checkout
-              </a>
+              </Button>
             ) : null;
           } catch {
             return null;
           }
         })()}
       {current?.id && !terminalCheckout(current.status) && (
-        <a
-          className="text-button"
-          href={`/checkout/return?checkout_id=${encodeURIComponent(current.id)}`}
+        <Button
+          variant="link"
+          nativeButton={false}
+          render={
+            <a
+              href={`/checkout/return?checkout_id=${encodeURIComponent(current.id)}`}
+            />
+          }
         >
           View verified checkout status
-        </a>
+        </Button>
       )}
-      {error && (
-        <p className="form-error" role="alert">
-          {error}
-        </p>
-      )}
+      <FormError>{error}</FormError>
     </div>
   );
 }

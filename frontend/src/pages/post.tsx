@@ -17,15 +17,38 @@ import {
   type Post,
 } from "../models";
 import { money, date } from "../format";
+import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  Badge,
-  Button,
+  Alert02Icon,
+  ArrowLeft02Icon,
+  ArrowRight02Icon,
+  PencilEdit02Icon,
+  SquareLock02Icon,
+  Tick02Icon,
+  Wallet01Icon,
+} from "@hugeicons/core-free-icons";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Field, FieldLabel } from "@/components/ui/field";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@/components/ui/native-select";
+import { Spinner } from "@/components/ui/spinner";
+import {
   EmptyState,
   ErrorState,
-  Icon,
+  FormError,
   Loading,
-  Modal,
-} from "../components/ui";
+} from "../components/states";
 import { PostEditor } from "../components/post-editor";
 import { Avatar } from "../components/cards";
 import { hue } from "../channels";
@@ -99,13 +122,15 @@ export function PostPage() {
   return (
     <>
       <div className="page-title">
-        <Link
-          to={`/channels/${item.channel_slug}`}
-          className="icon-button cover-back-inline"
+        <Button
+          variant="ghost"
+          size="icon"
           aria-label="Back to creator"
+          nativeButton={false}
+          render={<Link to={`/channels/${item.channel_slug}`} />}
         >
-          <Icon name="arrow" size={20} />
-        </Link>
+          <HugeiconsIcon icon={ArrowLeft02Icon} />
+        </Button>
         <h1>Post</h1>
       </div>
       <div className="reader-layout">
@@ -121,9 +146,11 @@ export function PostPage() {
               </span>
             </Link>
             <span className="feed-date">
-              {item.purchased && <Badge tone="success">Purchased</Badge>}{" "}
+              {item.purchased && (
+                <Badge className="bg-success/10 text-success">Purchased</Badge>
+              )}{" "}
               {canEdit && item.offer_status === "pending" && (
-                <Badge tone="warning">Price pending</Badge>
+                <Badge className="bg-warning/10 text-warning">Price pending</Badge>
               )}{" "}
               {date(item.created_at)}
             </span>
@@ -132,19 +159,11 @@ export function PostPage() {
             <h2 className="reader-title">{item.title}</h2>
             {canEdit && (
               <div className="inline-actions">
-                <Button
-                  variant="secondary"
-                  className="button-sm"
-                  onClick={() => setEditor(true)}
-                >
-                  <Icon name="edit" size={15} />
+                <Button variant="outline" size="sm" onClick={() => setEditor(true)}>
+                  <HugeiconsIcon icon={PencilEdit02Icon} data-icon="inline-start" />
                   Edit post
                 </Button>
-                <Button
-                  variant="ghost"
-                  className="button-sm"
-                  onClick={() => setDeleting(true)}
-                >
+                <Button variant="ghost" size="sm" onClick={() => setDeleting(true)}>
                   Delete post
                 </Button>
               </div>
@@ -162,7 +181,7 @@ export function PostPage() {
                 style={{ "--h": hue(item.channel_id) } as CSSProperties}
               >
                 <span className="lock-badge">
-                  <Icon name="lock" size={30} />
+                  <HugeiconsIcon icon={SquareLock02Icon} size={30} />
                 </span>
               </div>
               <div className="feed-unlock">
@@ -174,12 +193,12 @@ export function PostPage() {
                       : "Unlock this post once and keep it forever."}
                 </p>
                 {pricePending ? (
-                  <Button className="button-full" disabled>
+                  <Button size="lg" className="w-full" disabled>
                     Price pending
                   </Button>
                 ) : offer || mustJoin ? (
-                  <Button className="button-full" onClick={action}>
-                    <Icon name="lock" size={16} />
+                  <Button size="lg" className="w-full" onClick={action}>
+                    <HugeiconsIcon icon={SquareLock02Icon} data-icon="inline-start" />
                     {!auth.user
                       ? "Sign in to unlock"
                       : mustJoin
@@ -195,13 +214,10 @@ export function PostPage() {
         </article>
         <aside className="panel purchase-panel">
           <Badge
-            tone={
-              item.purchased
-                ? "success"
-                : policy === "public"
-                  ? "neutral"
-                  : "brand"
+            variant={
+              item.purchased || policy === "public" ? "secondary" : "default"
             }
+            className={item.purchased ? "bg-success/10 text-success" : undefined}
           >
             {item.purchased
               ? "Permanent purchased access"
@@ -229,7 +245,8 @@ export function PostPage() {
           )}
           {!item.can_read && !pricePending && (offer || mustJoin) && (
             <Button
-              className="button-full"
+              size="lg"
+              className="w-full"
               disabled={
                 mustJoin &&
                 (!channel.data ||
@@ -241,7 +258,7 @@ export function PostPage() {
             </Button>
           )}
           <div className="purchase-note">
-            <Icon name="lock" size={14} />
+            <HugeiconsIcon icon={SquareLock02Icon} size={14} />
             <span>
               Stripe test payments. Access is granted only after verified
               payment confirmation.
@@ -249,28 +266,32 @@ export function PostPage() {
           </div>
         </aside>
       </div>
-      <Modal
-        open={purchaseOpen}
-        onOpenChange={setPurchaseOpen}
-        title="Review your purchase"
-        description="One-time payment. Purchased reading access remains permanent after membership ends."
-      >
-        <div className="stack">
+      <Dialog open={purchaseOpen} onOpenChange={setPurchaseOpen}>
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Review your purchase</DialogTitle>
+          <DialogDescription>
+            One-time payment. Purchased reading access remains permanent after
+            membership ends.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-4">
           <h3>{item.title}</h3>
           {offers.length > 1 && (
-            <label className="field">
-              <span>Choose price</span>
-              <select
+            <Field>
+              <FieldLabel htmlFor="purchase-price">Choose price</FieldLabel>
+              <NativeSelect
+                id="purchase-price"
                 value={offer?.price_id}
                 onChange={(event) => setSelectedPrice(event.target.value)}
               >
                 {offers.map((value) => (
-                  <option key={value.price_id} value={value.price_id}>
+                  <NativeSelectOption key={value.price_id} value={value.price_id}>
                     {money(value.unit_amount, value.currency)}
-                  </option>
+                  </NativeSelectOption>
                 ))}
-              </select>
-            </label>
+              </NativeSelect>
+            </Field>
           )}
           {offer && (
             <div className="purchase-price">
@@ -291,37 +312,39 @@ export function PostPage() {
             </Suspense>
           )}
         </div>
-      </Modal>
+        </DialogContent>
+      </Dialog>
       <PostEditor
         post={item}
         channelID={item.channel_id}
         open={editor}
         onClose={() => setEditor(false)}
       />
-      <Modal
-        open={deleting}
-        onOpenChange={setDeleting}
-        title="Delete this post?"
-        description="The post is removed from the channel. Financial and purchased-access records remain in billing history."
-      >
-        <div className="form-actions">
-          <Button variant="ghost" onClick={() => setDeleting(false)}>
-            Keep post
-          </Button>
-          <Button
-            variant="danger"
-            busy={remove.isPending}
-            onClick={() => remove.mutate()}
-          >
-            Delete post
-          </Button>
-        </div>
-        {remove.error && (
-          <p className="form-error" role="alert">
-            {remove.error.message}
-          </p>
-        )}
-      </Modal>
+      <Dialog open={deleting} onOpenChange={setDeleting}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete this post?</DialogTitle>
+            <DialogDescription>
+              The post is removed from the channel. Financial and
+              purchased-access records remain in billing history.
+            </DialogDescription>
+          </DialogHeader>
+          <FormError>{remove.error?.message}</FormError>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setDeleting(false)}>
+              Keep post
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={remove.isPending}
+              onClick={() => remove.mutate()}
+            >
+              {remove.isPending && <Spinner data-icon="inline-start" />}
+              Delete post
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {channel.data && (
         <MembershipDialog
           channel={channel.data}
@@ -375,12 +398,12 @@ export function CheckoutReturnPage() {
   if (!id)
     return (
       <EmptyState
-        icon="warning"
+        icon={Alert02Icon}
         title="No checkout reference in this browser."
         action={
-          <Link className="button button-secondary" to="/me">
+          <Button variant="outline" nativeButton={false} render={<Link to="/me" />}>
             View purchased
-          </Link>
+          </Button>
         }
       >
         Sign in using the same browser tab that started checkout, or check your
@@ -397,68 +420,55 @@ export function CheckoutReturnPage() {
   const ended = terminalCheckout(value.status);
   return (
     <div className="centered-page">
-      <div
-        className="empty-icon"
-        style={{ color: complete ? "var(--success)" : undefined }}
+      <EmptyState
+        icon={complete ? Tick02Icon : ended ? Alert02Icon : Wallet01Icon}
+        title={
+          complete
+            ? "Unlocked."
+            : ended
+              ? "This attempt is not complete."
+              : "We’re checking your payment."
+        }
+        action={
+          <>
+            {!ended && <Loading label="Checking securely…" />}
+            {value.status === "created" && (
+              <Button disabled={resume.isPending} onClick={() => resume.mutate()}>
+                {resume.isPending && <Spinner data-icon="inline-start" />}
+                Continue the same checkout
+              </Button>
+            )}
+            <FormError>{resume.error?.message}</FormError>
+            <div className="inline-actions">
+              <Button nativeButton={false} render={<Link to="/me?tab=library" />}>
+                View purchased
+                <HugeiconsIcon icon={ArrowRight02Icon} data-icon="inline-end" />
+              </Button>
+              <Button variant="outline" nativeButton={false} render={<Link to="/" />}>
+                Back home
+              </Button>
+              {!complete && (
+                <Button variant="ghost" onClick={() => void status.refetch()}>
+                  Check again
+                </Button>
+              )}
+            </div>
+          </>
+        }
       >
-        <Icon
-          name={complete ? "check" : ended ? "warning" : "wallet"}
-          size={29}
-        />
-      </div>
-      <span className="eyebrow">
-        {complete
-          ? "Purchase confirmed"
-          : ended
-            ? `Checkout ${value.status}`
-            : "Payment confirmation"}
-      </span>
-      <h1 style={{ marginTop: 16 }}>
-        {complete
-          ? "Unlocked."
-          : ended
-            ? "This attempt is not complete."
-            : "We’re checking your payment."}
-      </h1>
-      <p>
+        <span className="eyebrow">
+          {complete
+            ? "Purchase confirmed"
+            : ended
+              ? `Checkout ${value.status}`
+              : "Payment confirmation"}
+        </span>{" "}
         {complete
           ? "The server confirmed your payment. Your purchased access remains after membership ends."
           : ended
             ? "No successful purchase was confirmed for this attempt. Check your payment history before trying again; an expired provider page can still require reconciliation."
             : "Waiting for the provider’s verified result. Closing Stripe is not a payment confirmation or a cancellation receipt. Do not start another payment while this is unresolved."}
-      </p>
-      {!ended && (
-        <div className="loading">
-          <span className="spinner" />
-          Checking securely…
-        </div>
-      )}
-      {value.status === "created" && (
-        <div className="inline-actions">
-          <Button busy={resume.isPending} onClick={() => resume.mutate()}>
-            Continue the same checkout
-          </Button>
-        </div>
-      )}
-      {resume.error && (
-        <p className="form-error" role="alert">
-          {resume.error.message}
-        </p>
-      )}
-      <div className="inline-actions">
-        <Link to="/me?tab=library" className="button button-primary">
-          View purchased
-          <Icon name="arrow" size={16} />
-        </Link>
-        <Link to="/" className="button button-secondary">
-          Back home
-        </Link>
-        {!complete && (
-          <Button variant="ghost" onClick={() => void status.refetch()}>
-            Check again
-          </Button>
-        )}
-      </div>
+      </EmptyState>
     </div>
   );
 }

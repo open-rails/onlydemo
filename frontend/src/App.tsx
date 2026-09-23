@@ -1,7 +1,28 @@
 import { useState, type ReactNode } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "./auth-context";
-import { Button, Icon, type IconName } from "./components/ui";
+import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
+import {
+  Add01Icon,
+  ArrowRight02Icon,
+  Cancel01Icon,
+  DiscoverCircleIcon,
+  Home01Icon,
+  LinkSquare02Icon,
+  Logout03Icon,
+  Moon02Icon,
+  ShoppingBag01Icon,
+  SquareLock02Icon,
+  StarIcon,
+  Sun03Icon,
+  UserGroupIcon,
+  UserIcon,
+} from "@hugeicons/core-free-icons";
+import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
+import { EmptyState, Loading } from "./components/states";
 import { Avatar, SuggestedCreators } from "./components/cards";
 
 export function AppLayout() {
@@ -37,34 +58,36 @@ export function AppLayout() {
     if (path !== location.pathname) return false;
     return !query || query === `tab=${tab}`;
   };
-  const nav: [string, string, IconName][] = [
-    ["/", "Home", "home"],
-    ["/channels", "Explore", "compass"],
-    ["/me?tab=subscriptions", "Subscriptions", "star"],
-    ["/me?tab=library", "Purchased", "bag"],
-    ["/me?tab=channels", "My channels", "users"],
-    ["/me?tab=settings", "Account", "user"],
+  const nav: [string, string, IconSvgElement][] = [
+    ["/", "Home", Home01Icon],
+    ["/channels", "Explore", DiscoverCircleIcon],
+    ["/me?tab=subscriptions", "Subscriptions", StarIcon],
+    ["/me?tab=library", "Purchased", ShoppingBag01Icon],
+    ["/me?tab=channels", "My channels", UserGroupIcon],
+    ["/me?tab=settings", "Account", UserIcon],
   ];
   const themeButton = (
-    <button
-      className="icon-button"
+    <Button
+      variant="ghost"
+      size="icon"
       onClick={toggleTheme}
       aria-label={`Switch to ${dark ? "light" : "dark"} theme`}
     >
-      <Icon name={dark ? "sun" : "moon"} size={20} />
-    </button>
+      <HugeiconsIcon icon={dark ? Sun03Icon : Moon02Icon} />
+    </Button>
   );
   const logoutButton = (
-    <button
-      className="icon-button"
+    <Button
+      variant="ghost"
+      size="icon"
       onClick={() => {
         void logout();
       }}
       aria-label="Sign out"
       title="Sign out"
     >
-      <Icon name="logout" size={20} />
-    </button>
+      <HugeiconsIcon icon={Logout03Icon} />
+    </Button>
   );
   return (
     <>
@@ -81,7 +104,7 @@ export function AppLayout() {
             (auth.user ? (
               logoutButton
             ) : (
-              <Button className="button-sm" onClick={auth.openLogin}>
+              <Button size="sm" onClick={auth.openLogin}>
                 Sign in
               </Button>
             ))}
@@ -109,31 +132,32 @@ export function AppLayout() {
                 className={active(to) ? "active" : undefined}
                 aria-current={active(to) ? "page" : undefined}
               >
-                <Icon name={icon} size={24} />
+                <HugeiconsIcon icon={icon} size={24} />
                 <span>{label}</span>
               </Link>
             ))}
           </nav>
-          <Link to="/channels/new" className="button button-primary sidebar-cta">
-            <Icon name="plus" size={18} />
+          <Button
+            size="lg"
+            className="sidebar-cta"
+            nativeButton={false}
+            render={<Link to="/channels/new" />}
+          >
+            <HugeiconsIcon icon={Add01Icon} />
             <span>New channel</span>
-          </Link>
+          </Button>
           <div className="sidebar-footer">
             {themeButton}
             {auth.loading ? (
-              <span className="spinner muted" aria-label="Loading account" />
+              <Spinner aria-label="Loading account" />
             ) : auth.user ? (
               logoutButton
             ) : (
               <>
-                <Button className="button-sm" onClick={auth.openLogin}>
+                <Button size="sm" onClick={auth.openLogin}>
                   Sign in
                 </Button>
-                <Button
-                  variant="secondary"
-                  className="button-sm"
-                  onClick={auth.openRegister}
-                >
+                <Button variant="outline" size="sm" onClick={auth.openRegister}>
                   Sign up
                 </Button>
               </>
@@ -147,30 +171,31 @@ export function AppLayout() {
           tabIndex={-1}
         >
           {logoutError && (
-            <div
-              className="notice notice-warning"
-              role="status"
-              style={{ marginBottom: 24 }}
-            >
-              {logoutError}
-              <button
-                className="icon-button"
-                aria-label="Dismiss"
-                onClick={() => setLogoutError("")}
-              >
-                <Icon name="close" />
-              </button>
-            </div>
+            <Alert className="mb-6" role="status">
+              <AlertDescription>{logoutError}</AlertDescription>
+              <AlertAction>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Dismiss"
+                  onClick={() => setLogoutError("")}
+                >
+                  <HugeiconsIcon icon={Cancel01Icon} />
+                </Button>
+              </AlertAction>
+            </Alert>
           )}
           <Outlet />
         </main>
         <aside className="rail">
           <SuggestedCreators />
           <div className="rail-footer">
-            <span className="badge badge-warning">Stripe test environment</span>
+            <Badge variant="outline" className="text-warning">
+              Stripe test environment
+            </Badge>
             <a href="/dev/routes">
               Developer routes
-              <Icon name="external" size={11} />
+              <HugeiconsIcon icon={LinkSquare02Icon} size={11} />
             </a>
             <span>© OnlyDemo</span>
           </div>
@@ -186,7 +211,7 @@ export function AppLayout() {
               className={active(to) ? "active" : undefined}
               aria-label={label}
             >
-              <Icon name={icon} size={24} />
+              <HugeiconsIcon icon={icon} size={24} />
             </Link>
           ))}
       </nav>
@@ -197,7 +222,7 @@ function Logo() {
   return (
     <>
       <span className="brand-mark">
-        <Icon name="lock" size={17} />
+        <HugeiconsIcon icon={SquareLock02Icon} size={17} />
       </span>
       <span>
         Only<b>Demo</b>
@@ -207,31 +232,25 @@ function Logo() {
 }
 export function RequireAccount({ children }: { children: ReactNode }) {
   const auth = useAuth();
-  if (auth.loading)
-    return (
-      <div className="loading">
-        <span className="spinner" />
-        Loading your account…
-      </div>
-    );
+  if (auth.loading) return <Loading label="Loading your account…" />;
   if (!auth.user)
     return (
       <div className="centered-page">
-        <div className="empty-icon">
-          <Icon name="lock" size={28} />
-        </div>
-        <span className="eyebrow">OnlyDemo</span>
-        <h1 style={{ marginTop: 16 }}>Sign in to continue.</h1>
-        <p>
+        <EmptyState
+          icon={SquareLock02Icon}
+          title="Sign in to continue."
+          action={
+            <div className="inline-actions">
+              <Button onClick={auth.openLogin}>Sign in</Button>
+              <Button variant="outline" onClick={auth.openRegister}>
+                Create account
+              </Button>
+            </div>
+          }
+        >
           Sign in to see your subscriptions, unlocked posts, and the channels
           you run.
-        </p>
-        <div className="inline-actions">
-          <Button onClick={auth.openLogin}>Sign in</Button>
-          <Button variant="secondary" onClick={auth.openRegister}>
-            Create account
-          </Button>
-        </div>
+        </EmptyState>
       </div>
     );
   return children;
@@ -246,10 +265,10 @@ export function NotFoundPage() {
         available.
       </p>
       <div className="inline-actions">
-        <Link className="button button-primary" to="/">
+        <Button nativeButton={false} render={<Link to="/" />}>
           Back home
-          <Icon name="arrow" size={16} />
-        </Link>
+          <HugeiconsIcon icon={ArrowRight02Icon} data-icon="inline-end" />
+        </Button>
       </div>
     </div>
   );

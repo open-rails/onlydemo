@@ -14,16 +14,52 @@ import type {
   Payment,
   Subscription,
 } from "../models";
+import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  Badge,
-  Button,
+  Add01Icon,
+  Book02Icon,
+  CreditCardIcon,
+  LinkSquare02Icon,
+  Settings02Icon,
+  Tick02Icon,
+  UserGroupIcon,
+  Wallet01Icon,
+} from "@hugeicons/core-free-icons";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+import {
   EmptyState,
   ErrorState,
-  Field,
-  Icon,
+  FormError,
   Loading,
-  Modal,
-} from "../components/ui";
+} from "../components/states";
 import { PostCard, ChannelCard } from "../components/cards";
 import { useAuth } from "../auth-context";
 import { date, duration, money } from "../format";
@@ -56,23 +92,19 @@ export function AccountPage() {
         <h1>{titles[tab] || "Account"}</h1>
         <span className="muted">@{auth.user?.username}</span>
       </div>
-      <div className="tabs" aria-label="Account sections">
-        {[
-          ["library", "Purchased"],
-          ["subscriptions", "Subscriptions"],
-          ["channels", "My channels"],
-          ["billing", "Payments"],
-          ["settings", "Account"],
-        ].map(([key, label]) => (
-          <button
-            key={key}
-            className={`tab ${tab === key ? "active" : ""}`}
-            onClick={() => setSearch({ tab: key })}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        value={tab}
+        onValueChange={(value) => setSearch({ tab: String(value) })}
+        className="my-4"
+      >
+        <TabsList variant="line" aria-label="Account sections" className="w-full overflow-x-auto">
+          {Object.entries(titles).map(([key, label]) => (
+            <TabsTrigger key={key} value={key}>
+              {label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
       {search.get("setup_id") && <SetupReturn id={search.get("setup_id")!} />}
       {summary.error && (
         <ErrorState
@@ -96,10 +128,13 @@ export function AccountPage() {
               {summary.hasNextPage && (
                 <div className="pagination">
                   <Button
-                    variant="secondary"
-                    busy={summary.isFetchingNextPage}
+                    variant="outline"
+                    disabled={summary.isFetchingNextPage}
                     onClick={() => void summary.fetchNextPage()}
                   >
+                    {summary.isFetchingNextPage && (
+                      <Spinner data-icon="inline-start" />
+                    )}
                     Look for older purchases
                   </Button>
                 </div>
@@ -119,10 +154,10 @@ export function AccountPage() {
                     appear here.
                   </p>
                 </div>
-                <Link className="button button-primary" to="/channels/new">
-                  <Icon name="plus" size={16} />
+                <Button nativeButton={false} render={<Link to="/channels/new" />}>
+                  <HugeiconsIcon icon={Add01Icon} data-icon="inline-start" />
                   Create channel
-                </Link>
+                </Button>
               </div>
               {current?.manageable_channels?.length ? (
                 <div className="channel-grid">
@@ -131,7 +166,10 @@ export function AccountPage() {
                   ))}
                 </div>
               ) : (
-                <EmptyState icon="settings" title="No editorial channels yet.">
+                <EmptyState
+                  icon={Settings02Icon}
+                  title="No editorial channels yet."
+                >
                   Create a channel or accept an editor invitation to start
                   publishing.
                 </EmptyState>
@@ -161,15 +199,15 @@ function Library({
     </div>
   ) : (
     <EmptyState
-      icon="book"
+      icon={Book02Icon}
       title={
         searching ? "No purchases on this page." : "Nothing unlocked yet."
       }
       action={
         !searching ? (
-          <Link to="/channels" className="button button-primary">
+          <Button nativeButton={false} render={<Link to="/channels" />}>
             Explore creators
-          </Link>
+          </Button>
         ) : undefined
       }
     >
@@ -230,21 +268,20 @@ function Subscriptions({ initial }: { initial?: Subscription[] }) {
   return (
     <>
       {subscriptions.data?.data.length ? (
-        <div className="panel">
-          <div className="panel-heading">
-            <div>
-              <h2>Channel memberships</h2>
-              <p>
-                Cancellation follows the server’s agreement and access end date.
-                Purchased posts remain yours.
-              </p>
-            </div>
-          </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Channel memberships</CardTitle>
+            <CardDescription>
+              Cancellation follows the server’s agreement and access end date.
+              Purchased posts remain yours.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
           <div className="data-list">
             {subscriptions.data.data.map((subscription) => (
               <div className="data-row" key={subscription.id}>
                 <span className="avatar">
-                  <Icon name="users" size={16} />
+                  <HugeiconsIcon icon={UserGroupIcon} size={16} />
                 </span>
                 <div className="data-row-main">
                   <h3>
@@ -269,12 +306,13 @@ function Subscriptions({ initial }: { initial?: Subscription[] }) {
                   )}
                 </div>
                 <Badge
-                  tone={
+                  variant="secondary"
+                  className={
                     subscription.cancel_scheduled
-                      ? "warning"
+                      ? "bg-warning/10 text-warning"
                       : subscription.status === "active"
-                        ? "success"
-                        : "neutral"
+                        ? "bg-success/10 text-success"
+                        : undefined
                   }
                 >
                   {subscription.cancel_scheduled
@@ -283,22 +321,27 @@ function Subscriptions({ initial }: { initial?: Subscription[] }) {
                 </Badge>
                 <div className="data-row-actions">
                   {subscription.cancel_portal_url ? (
-                    <a
-                      className="button button-secondary"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      href={subscription.cancel_portal_url}
+                    <Button
+                      variant="outline"
+                      nativeButton={false}
+                      render={
+                        <a
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          href={subscription.cancel_portal_url}
+                        />
+                      }
                     >
                       Manage cancellation
-                      <Icon name="external" size={14} />
-                    </a>
+                      <HugeiconsIcon icon={LinkSquare02Icon} data-icon="inline-end" />
+                    </Button>
                   ) : (
                     !subscription.cancel_scheduled &&
                     ["active", "pending", "past_due"].includes(
                       subscription.status,
                     ) && (
                       <Button
-                        variant="secondary"
+                        variant="outline"
                         onClick={() => setCancel(subscription)}
                       >
                         Cancel membership
@@ -307,12 +350,13 @@ function Subscriptions({ initial }: { initial?: Subscription[] }) {
                   )}
                   {subscription.resumable && (
                     <Button
-                      variant="secondary"
-                      busy={change.isPending}
+                      variant="outline"
+                      disabled={change.isPending}
                       onClick={() =>
                         change.mutate({ id: subscription.id, action: "resume" })
                       }
                     >
+                      {change.isPending && <Spinner data-icon="inline-start" />}
                       Resume
                     </Button>
                   )}
@@ -320,62 +364,77 @@ function Subscriptions({ initial }: { initial?: Subscription[] }) {
               </div>
             ))}
           </div>
-          {change.error && !cancel && (
-            <p className="form-error" role="alert">
-              {change.error.message}
-            </p>
-          )}
-        </div>
+          {!cancel && <FormError>{change.error?.message}</FormError>}
+          </CardContent>
+        </Card>
       ) : (
         <EmptyState
-          icon="users"
+          icon={UserGroupIcon}
           title="No subscriptions yet."
           action={
-            <Link to="/channels" className="button button-secondary">
+            <Button
+              variant="outline"
+              nativeButton={false}
+              render={<Link to="/channels" />}
+            >
               Explore creators
-            </Link>
+            </Button>
           }
         >
           Join a channel to read its included posts while subscribed.
         </EmptyState>
       )}
-      <Modal
+      <Dialog
         open={!!cancel}
         onOpenChange={(value) => {
           if (!value) setCancel(null);
         }}
-        title="Cancel this membership?"
-        description="Your purchased posts remain yours. The server will confirm when included membership access ends."
       >
-        <form className="stack" onSubmit={submit}>
-          <Field label="Reason for cancelling">
-            <textarea
-              name="feedback"
-              minLength={4}
-              maxLength={500}
-              required
-              placeholder="Tell the creator why you’re leaving."
-            />
-          </Field>
-          {change.error && (
-            <p className="form-error" role="alert">
-              {change.error.message}
-            </p>
-          )}
-          <div className="form-actions">
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => setCancel(null)}
-            >
-              Keep membership
-            </Button>
-            <Button variant="danger" type="submit" busy={change.isPending}>
-              Confirm cancellation
-            </Button>
-          </div>
-        </form>
-      </Modal>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cancel this membership?</DialogTitle>
+            <DialogDescription>
+              Your purchased posts remain yours. The server will confirm when
+              included membership access ends.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={submit}>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="cancel-feedback">
+                  Reason for cancelling
+                </FieldLabel>
+                <Textarea
+                  id="cancel-feedback"
+                  name="feedback"
+                  minLength={4}
+                  maxLength={500}
+                  required
+                  placeholder="Tell the creator why you’re leaving."
+                />
+              </Field>
+              <FormError>{change.error?.message}</FormError>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setCancel(null)}
+                >
+                  Keep membership
+                </Button>
+                <Button
+                  variant="destructive"
+                  type="submit"
+                  disabled={change.isPending}
+                >
+                  {change.isPending && <Spinner data-icon="inline-start" />}
+                  Confirm cancellation
+                </Button>
+              </DialogFooter>
+            </FieldGroup>
+          </form>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
@@ -395,18 +454,19 @@ function Billing() {
       request<Page<PaymentMethod>>("/billing/v1/me/payment-methods"),
   });
   return (
-    <div className="stack">
-      <div className="panel">
-        <div className="panel-heading">
-          <div>
-            <h2>Payment history</h2>
-            <p>
-              Verified payment records, including refunds and unsuccessful
-              attempts.
-            </p>
-          </div>
-          <Icon name="wallet" />
-        </div>
+    <div className="flex flex-col gap-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Payment history</CardTitle>
+          <CardDescription>
+            Verified payment records, including refunds and unsuccessful
+            attempts.
+          </CardDescription>
+          <CardAction>
+            <HugeiconsIcon icon={Wallet01Icon} />
+          </CardAction>
+        </CardHeader>
+        <CardContent>
         {payments.isPending ? (
           <Loading />
         ) : payments.error ? (
@@ -427,13 +487,14 @@ function Billing() {
                     <p className="truncate">{payment.id}</p>
                   </div>
                   <Badge
-                    tone={
+                    variant="secondary"
+                    className={
                       payment.status === "succeeded" ||
                       payment.status === "completed"
-                        ? "success"
+                        ? "bg-success/10 text-success"
                         : payment.status === "failed"
-                          ? "warning"
-                          : "neutral"
+                          ? "bg-warning/10 text-warning"
+                          : undefined
                     }
                   >
                     {payment.status ||
@@ -454,7 +515,7 @@ function Billing() {
                 Newer
               </Button>
               <Button
-                variant="secondary"
+                variant="outline"
                 disabled={payments.data.data.length < 20}
                 onClick={() => setOffset(offset + 20)}
               >
@@ -463,19 +524,19 @@ function Billing() {
             </div>
           </>
         ) : (
-          <EmptyState icon="wallet" title="No payments on this page." />
+          <EmptyState icon={Wallet01Icon} title="No payments on this page." />
         )}
-      </div>
-      <div className="panel">
-        <div className="panel-heading">
-          <div>
-            <h2>Saved payment methods</h2>
-            <p>
-              Card details are stored by Stripe. This site only receives a
-              verified reference.
-            </p>
-          </div>
-        </div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Saved payment methods</CardTitle>
+          <CardDescription>
+            Card details are stored by Stripe. This site only receives a
+            verified reference.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
         {methods.isPending ? (
           <Loading />
         ) : methods.error ? (
@@ -484,7 +545,7 @@ function Billing() {
           <div className="data-list">
             {methods.data.data.map((card) => (
               <div className="data-row" key={card.id}>
-                <Icon name="wallet" />
+                <HugeiconsIcon icon={CreditCardIcon} />
                 <div className="data-row-main">
                   <h3>
                     {card.card?.brand || "Card"} ending{" "}
@@ -494,7 +555,7 @@ function Billing() {
                     Expires {card.card?.exp_month}/{card.card?.exp_year}
                   </p>
                 </div>
-                <Badge>
+                <Badge variant="secondary">
                   {card.health?.active === false ? "Needs attention" : "Saved"}
                 </Badge>
               </div>
@@ -505,7 +566,8 @@ function Billing() {
             No saved cards. You can securely add a card when joining a channel.
           </p>
         )}
-      </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -528,32 +590,29 @@ function SetupReturn({ id }: { id: string }) {
     setup.data?.payment_method_id || confirm.data?.payment_method_id
   );
   return (
-    <div
-      className={`notice ${done ? "notice-success" : ""}`}
-      style={{ marginBottom: 24 }}
-    >
-      <Icon name={done ? "check" : "wallet"} />
-      <div>
-        <strong>
-          {done ? "Card setup verified." : "Finish card verification"}
-        </strong>
+    <Alert className="mb-6">
+      <HugeiconsIcon
+        icon={done ? Tick02Icon : Wallet01Icon}
+        className={done ? "text-success" : undefined}
+      />
+      <AlertTitle>
+        {done ? "Card setup verified." : "Finish card verification"}
+      </AlertTitle>
+      <AlertDescription>
         <p>
           {done
             ? "Return to the channel to review and start your membership."
             : "Confirm the setup with the server after returning from Stripe. This does not start a membership."}
         </p>
         {!done && (
-          <Button busy={confirm.isPending} onClick={() => confirm.mutate()}>
+          <Button disabled={confirm.isPending} onClick={() => confirm.mutate()}>
+            {confirm.isPending && <Spinner data-icon="inline-start" />}
             Verify saved card
           </Button>
         )}
-        {(setup.error || confirm.error) && (
-          <p className="form-error">
-            {setup.error?.message || confirm.error?.message}
-          </p>
-        )}
-      </div>
-    </div>
+        <FormError>{setup.error?.message || confirm.error?.message}</FormError>
+      </AlertDescription>
+    </Alert>
   );
 }
 function AccountSettings() {
@@ -568,64 +627,80 @@ function AccountSettings() {
     },
   });
   return (
-    <div className="panel stack">
-      <h2>Account</h2>
-      <p className="muted">
-        Signed in as {auth.user?.username}
-        {auth.user?.email && ` · ${auth.user.email}`}
-      </p>
-      <h3>Delete your account</h3>
-      <p className="muted">
-        Your account can be recovered for 30 days by signing in and explicitly
-        confirming restoration. First transfer or delete any active channels for
-        which you are the last owner. Purchases and financial history are
-        retained independently.
-      </p>
-      <Button variant="danger" onClick={() => setOpen(true)}>
-        Delete my account
-      </Button>
-      <Modal
-        open={open}
-        onOpenChange={setOpen}
-        title="Schedule account deletion?"
-        description="Confirm your current password. Recovery is available for 30 days; a deleted channel will not be restored with your account."
-      >
-        <form
-          className="stack"
-          onSubmit={(event) => {
-            event.preventDefault();
-            remove.mutate(
-              String(new FormData(event.currentTarget).get("password")),
-            );
-          }}
-        >
-          <Field label="Current password">
-            <input
-              type="password"
-              name="password"
-              autoComplete="current-password"
-              required
-            />
-          </Field>
-          {remove.error && (
-            <p className="form-error" role="alert">
-              {remove.error.message}
-            </p>
-          )}
-          <div className="form-actions">
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => setOpen(false)}
-            >
-              Keep account
-            </Button>
-            <Button type="submit" variant="danger" busy={remove.isPending}>
-              Delete account
-            </Button>
-          </div>
-        </form>
-      </Modal>
-    </div>
+    <Card>
+      <CardHeader>
+        <CardTitle>Account</CardTitle>
+        <CardDescription>
+          Signed in as {auth.user?.username}
+          {auth.user?.email && ` · ${auth.user.email}`}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2">
+        <h3>Delete your account</h3>
+        <p className="muted">
+          Your account can be recovered for 30 days by signing in and
+          explicitly confirming restoration. First transfer or delete any
+          active channels for which you are the last owner. Purchases and
+          financial history are retained independently.
+        </p>
+      </CardContent>
+      <CardFooter>
+        <Button variant="destructive" onClick={() => setOpen(true)}>
+          Delete my account
+        </Button>
+      </CardFooter>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Schedule account deletion?</DialogTitle>
+            <DialogDescription>
+              Confirm your current password. Recovery is available for 30
+              days; a deleted channel will not be restored with your account.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              remove.mutate(
+                String(new FormData(event.currentTarget).get("password")),
+              );
+            }}
+          >
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="delete-password">
+                  Current password
+                </FieldLabel>
+                <Input
+                  id="delete-password"
+                  type="password"
+                  name="password"
+                  autoComplete="current-password"
+                  required
+                />
+              </Field>
+              <FormError>{remove.error?.message}</FormError>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setOpen(false)}
+                >
+                  Keep account
+                </Button>
+                <Button
+                  type="submit"
+                  variant="destructive"
+                  disabled={remove.isPending}
+                >
+                  {remove.isPending && <Spinner data-icon="inline-start" />}
+                  Delete account
+                </Button>
+              </DialogFooter>
+            </FieldGroup>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </Card>
   );
 }

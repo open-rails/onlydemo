@@ -31,7 +31,32 @@ import {
   type PublicProvider,
 } from "../models";
 import { money, duration } from "../format";
-import { Badge, Button, ErrorState, Field, Icon, Loading, Modal } from "./ui";
+import { HugeiconsIcon } from "@hugeicons/react";
+import {
+  Add01Icon,
+  Alert02Icon,
+  ArrowRight02Icon,
+  Book02Icon,
+  Tick02Icon,
+} from "@hugeicons/core-free-icons";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Field, FieldLabel } from "@/components/ui/field";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@/components/ui/native-select";
+import { Spinner } from "@/components/ui/spinner";
+import { ErrorState, FormError, Loading } from "./states";
 
 const TokenizedCardForm = lazy(() =>
   import("@openrails/billing-ui").then((module) => ({
@@ -56,16 +81,29 @@ export function MembershipDialog({
 }) {
   const auth = useAuth();
   return (
-    <Modal
+    <Dialog
       open={open}
       onOpenChange={(value) => {
         if (!value) onClose();
       }}
-      title={`Join ${channel.name}`}
-      description="Membership includes current and future membership posts. Separately priced posts remain separate purchases."
     >
-      {open && <MembershipFlow key={`${auth.user?.id}:${getSessionGeneration()}:${channel.id}`} channel={channel} onClose={onClose} />}
-    </Modal>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Join {channel.name}</DialogTitle>
+          <DialogDescription>
+            Membership includes current and future membership posts. Separately
+            priced posts remain separate purchases.
+          </DialogDescription>
+        </DialogHeader>
+        {open && (
+          <MembershipFlow
+            key={`${auth.user?.id}:${getSessionGeneration()}:${channel.id}`}
+            channel={channel}
+            onClose={onClose}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 function MembershipFlow({
@@ -163,7 +201,7 @@ function MembershipFlow({
   });
   if (!auth.user)
     return (
-      <div className="stack">
+      <div className="flex flex-col gap-4">
         <p>Sign in before saving a card or joining this channel.</p>
         <Button
           onClick={() => {
@@ -211,22 +249,24 @@ function MembershipFlow({
     );
   if (!selected || !provider)
     return (
-      <div className="notice notice-warning">
-        <Icon name="warning" />
-        <p>
+      <Alert>
+        <HugeiconsIcon icon={Alert02Icon} />
+        <AlertDescription>
           No eligible payment provider is currently available for this
           membership.
-        </p>
-      </div>
+        </AlertDescription>
+      </Alert>
     );
   if (
     selected.rail === "stripe" &&
     !config.data?.stripe_publishable_key?.startsWith("pk_test_")
   )
     return (
-      <div className="notice notice-warning">
-        <p>Stripe test card entry is not configured.</p>
-      </div>
+      <Alert>
+        <AlertDescription>
+          Stripe test card entry is not configured.
+        </AlertDescription>
+      </Alert>
     );
   const current = offers.find((offer) => offer.price_id === price);
   const saved =
@@ -237,24 +277,31 @@ function MembershipFlow({
         card.health?.active !== false,
     ) || [];
   return (
-    <div className="stack">
+    <div className="flex flex-col gap-4">
       {current ? (
         <>
           <OfferSummary offer={current} />
           {offers.length > 1 && (
-            <Field label="Choose an offer">
-              <select value={price} onChange={(e) => setPrice(e.target.value)}>
+            <Field>
+              <FieldLabel htmlFor="membership-offer">Choose an offer</FieldLabel>
+              <NativeSelect
+                id="membership-offer"
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+              >
                 {offers.map((offer) => (
-                  <option value={offer.price_id} key={offer.price_id}>
+                  <NativeSelectOption value={offer.price_id} key={offer.price_id}>
                     {money(offer.unit_amount, offer.currency)} ·{" "}
                     {duration(offer.access_duration_hours)}
-                  </option>
+                  </NativeSelectOption>
                 ))}
-              </select>
+              </NativeSelect>
             </Field>
           )}
-          <Field label="Payment provider">
-            <select
+          <Field>
+            <FieldLabel htmlFor="membership-provider">Payment provider</FieldLabel>
+            <NativeSelect
+              id="membership-provider"
               value={selected.psp_id}
               onChange={(event) => {
                 setProviderID(event.target.value);
@@ -263,29 +310,31 @@ function MembershipFlow({
               }}
             >
               {available.map((option) => (
-                <option key={option.psp_id} value={option.psp_id}>
+                <NativeSelectOption key={option.psp_id} value={option.psp_id}>
                   {options.data?.psps.find(
                     (psp) => psp.psp_id === option.psp_id,
                   )?.display_name || option.selector}{" "}
                   · {option.rail === "nmi" ? "NMI sandbox" : "Stripe test"}
-                </option>
+                </NativeSelectOption>
               ))}
-            </select>
+            </NativeSelect>
           </Field>
           {saved.length > 0 && (
-            <Field label="Saved card">
-              <select
+            <Field>
+              <FieldLabel htmlFor="membership-card">Saved card</FieldLabel>
+              <NativeSelect
+                id="membership-card"
                 value={method}
                 onChange={(e) => setMethod(e.target.value)}
               >
-                <option value="">Choose a card</option>
+                <NativeSelectOption value="">Choose a card</NativeSelectOption>
                 {saved.map((card) => (
-                  <option key={card.id} value={card.id}>
+                  <NativeSelectOption key={card.id} value={card.id}>
                     {card.card?.brand || "Card"} ending{" "}
                     {card.card?.last4 || "••••"}
-                  </option>
+                  </NativeSelectOption>
                 ))}
-              </select>
+              </NativeSelect>
             </Field>
           )}
           {addCard || saved.length === 0 ? (
@@ -310,15 +359,15 @@ function MembershipFlow({
               />
             )
           ) : (
-            <Button variant="secondary" onClick={() => setAddCard(true)}>
-              <Icon name="plus" size={15} />
+            <Button variant="outline" onClick={() => setAddCard(true)}>
+              <HugeiconsIcon icon={Add01Icon} data-icon="inline-start" />
               Add another card
             </Button>
           )}
           {(addCard || saved.length === 0) && (
             <Button
-              variant="secondary"
-              busy={methods.isFetching}
+              variant="outline"
+              disabled={methods.isFetching}
               onClick={async () => {
                 const checked = await methods.refetch();
                 if (
@@ -331,17 +380,18 @@ function MembershipFlow({
                   setAddCard(false);
               }}
             >
+              {methods.isFetching && <Spinner data-icon="inline-start" />}
               Check saved cards
             </Button>
           )}
           {create.error && <ErrorState error={create.error} />}
           <Button
-            disabled={!method || addCard || !selected}
-            busy={create.isPending}
+            disabled={!method || addCard || !selected || create.isPending}
             onClick={() => create.mutate()}
           >
+            {create.isPending && <Spinner data-icon="inline-start" />}
             Review membership
-            <Icon name="arrow" size={16} />
+            <HugeiconsIcon icon={ArrowRight02Icon} data-icon="inline-end" />
           </Button>
           <p className="fine-print">
             Review the exact price and renewal period before agreeing to
@@ -358,16 +408,14 @@ function MembershipFlow({
 }
 function OfferSummary({ offer }: { offer: Offer }) {
   return (
-    <div className="notice">
-      <Icon name="book" />
-      <div>
-        <strong>{offer.product_name}</strong>
-        <p>
-          {money(offer.unit_amount, offer.currency)} ·{" "}
-          {duration(offer.access_duration_hours)}
-        </p>
-      </div>
-    </div>
+    <Alert>
+      <HugeiconsIcon icon={Book02Icon} />
+      <AlertTitle>{offer.product_name}</AlertTitle>
+      <AlertDescription>
+        {money(offer.unit_amount, offer.currency)} ·{" "}
+        {duration(offer.access_duration_hours)}
+      </AlertDescription>
+    </Alert>
   );
 }
 function CardSetup({
@@ -429,31 +477,27 @@ function CardSetup({
       </Elements>
     );
   return (
-    <div className="stack">
-      <label className="checkbox-field">
-        <input
-          type="checkbox"
+    <div className="flex flex-col gap-4">
+      <Field orientation="horizontal">
+        <Checkbox
+          id="stripe-card-consent"
           checked={consent}
-          onChange={(e) => setConsent(e.target.checked)}
+          onCheckedChange={(value) => setConsent(value === true)}
         />
-        <span>
+        <FieldLabel htmlFor="stripe-card-consent" className="font-normal">
           I allow this card to be saved for future payments that I separately
           agree to.
-        </span>
-      </label>
+        </FieldLabel>
+      </Field>
       <Button
-        variant="secondary"
-        disabled={!consent}
-        busy={create.isPending}
+        variant="outline"
+        disabled={!consent || create.isPending}
         onClick={() => create.mutate()}
       >
+        {create.isPending && <Spinner data-icon="inline-start" />}
         Enter card details securely
       </Button>
-      {create.error && (
-        <p className="form-error" role="alert">
-          {create.error.message}
-        </p>
-      )}
+      <FormError>{create.error?.message}</FormError>
     </div>
   );
 }
@@ -505,23 +549,19 @@ function SaveCard({
   };
   return (
     <form
-      className="stack"
+      className="flex flex-col gap-4"
       onSubmit={(event) => {
         void submit(event);
       }}
     >
       <PaymentElement />
-      {error && (
-        <p className="form-error" role="alert">
-          {error}
-        </p>
-      )}
+      <FormError>{error}</FormError>
       <Button
         type="submit"
-        variant="secondary"
-        disabled={!stripe || !elements}
-        busy={busy}
+        variant="outline"
+        disabled={!stripe || !elements || busy}
       >
+        {busy && <Spinner data-icon="inline-start" />}
         Save test card
       </Button>
     </form>
@@ -623,29 +663,29 @@ export function MembershipConfirmation({
   };
   if (current.status === "succeeded")
     return (
-      <div className="stack">
-        <div className="notice notice-success">
-          <Icon name="check" />
-          <p>
+      <div className="flex flex-col gap-4">
+        <Alert>
+          <HugeiconsIcon icon={Tick02Icon} className="text-success" />
+          <AlertDescription>
             Your membership is confirmed. You can now read the channel’s
             included posts.
-          </p>
-        </div>
+          </AlertDescription>
+        </Alert>
         <Button onClick={() => onDone(current.status)}>Start reading</Button>
       </div>
     );
   if (terminalCheckout(current.status))
     return (
-      <div className="stack">
-        <div className="notice notice-warning">
-          <Icon name="warning" />
-          <p>
+      <div className="flex flex-col gap-4">
+        <Alert>
+          <HugeiconsIcon icon={Alert02Icon} />
+          <AlertDescription>
             This membership attempt is {current.status}. No access is inferred
             from a payment redirect.
-          </p>
-        </div>
+          </AlertDescription>
+        </Alert>
         <Button
-          variant="secondary"
+          variant="outline"
           onClick={() => {
             if (current.status !== "expired") finishAttempt(current.id);
             onDone(current.status);
@@ -656,8 +696,8 @@ export function MembershipConfirmation({
       </div>
     );
   return (
-    <div className="stack">
-      <Badge tone="brand">
+    <div className="flex flex-col gap-4">
+      <Badge>
         {current.operation
           ? "Payment being confirmed"
           : "Review your membership"}
@@ -675,63 +715,66 @@ export function MembershipConfirmation({
       </p>
       {!quote && !current.operation && (
         <Button
-          variant="secondary"
-          busy={prepare.isPending}
+          variant="outline"
+          disabled={prepare.isPending}
           onClick={() => prepare.mutate()}
         >
+          {prepare.isPending && <Spinner data-icon="inline-start" />}
           Restore the original membership quote
         </Button>
       )}
-      {prepare.error && (
-        <p className="form-error" role="alert">
-          {prepare.error.message}
-        </p>
-      )}
+      <FormError>{prepare.error?.message}</FormError>
       {current.operation ? (
         <>
-          <div className="notice">
-            <span className="spinner" />
-            <p>
+          <Alert>
+            <Spinner />
+            <AlertDescription>
               Waiting for the verified payment result. You may safely return to
               My library; do not start another payment.
-            </p>
-          </div>
+            </AlertDescription>
+          </Alert>
           {!terminalCheckout(current.status) &&
             current.payment?.rail === "stripe" && (
               <Button
-                busy={authenticating}
+                disabled={authenticating}
                 onClick={() => {
                   void authenticate();
                 }}
               >
+                {authenticating && <Spinner data-icon="inline-start" />}
                 Check card authentication
               </Button>
             )}
-          <Button variant="secondary" onClick={() => void state.refetch()}>
+          <Button variant="outline" onClick={() => void state.refetch()}>
             Check status
           </Button>
-          <Link to="/me?tab=subscriptions" className="text-button">
+          <Button
+            variant="link"
+            nativeButton={false}
+            render={<Link to="/me?tab=subscriptions" />}
+          >
             View my memberships
-          </Link>
+          </Button>
         </>
       ) : (
         <>
-          <label className="checkbox-field">
-            <input
-              type="checkbox"
+          <Field orientation="horizontal">
+            <Checkbox
+              id="membership-accept"
               checked={accepted}
-              onChange={(e) => setAccepted(e.target.checked)}
+              onCheckedChange={(value) => setAccepted(value === true)}
             />
-            <span>
+            <FieldLabel htmlFor="membership-accept" className="font-normal">
               I agree to pay{" "}
               {current.amount && current.currency
                 ? money(current.amount, current.currency)
                 : "the quoted amount"}{" "}
               {duration(quote?.cycle_hours)} until I cancel.
-            </span>
-          </label>
+            </FieldLabel>
+          </Field>
           <Button
             disabled={
+              confirm.isPending ||
               !accepted ||
               !current.amount ||
               !quote ||
@@ -739,18 +782,14 @@ export function MembershipConfirmation({
                 current.payment?.rail || current.rail_data?.rail || "",
               )
             }
-            busy={confirm.isPending}
             onClick={() => confirm.mutate()}
           >
+            {confirm.isPending && <Spinner data-icon="inline-start" />}
             Confirm and pay
           </Button>
         </>
       )}
-      {(confirm.error || state.error || error) && (
-        <p className="form-error" role="alert">
-          {confirm.error?.message || state.error?.message || error}
-        </p>
-      )}
+      <FormError>{confirm.error?.message || state.error?.message || error}</FormError>
     </div>
   );
 }
@@ -772,9 +811,11 @@ function NMICardSetup({
   const url = provider.config?.tokenization_url;
   if (!key || !url || key.startsWith("preview_"))
     return (
-      <p className="notice notice-warning">
-        This provider’s secure card entry is unavailable.
-      </p>
+      <Alert>
+        <AlertDescription>
+          This provider’s secure card entry is unavailable.
+        </AlertDescription>
+      </Alert>
     );
   const save = async (card: TokenizedCardData) => {
     if (getSessionGeneration() !== generation)
@@ -803,18 +844,18 @@ function NMICardSetup({
     }
   };
   return (
-    <div className="stack">
-      <label className="checkbox-field">
-        <input
-          type="checkbox"
+    <div className="flex flex-col gap-4">
+      <Field orientation="horizontal">
+        <Checkbox
+          id="nmi-card-consent"
           checked={consent}
-          onChange={(event) => setConsent(event.target.checked)}
+          onCheckedChange={(value) => setConsent(value === true)}
         />
-        <span>
+        <FieldLabel htmlFor="nmi-card-consent" className="font-normal">
           I allow this card to be saved for future payments that I separately
           agree to.
-        </span>
-      </label>
+        </FieldLabel>
+      </Field>
       <Suspense fallback={<Loading />}>
         <TokenizedCardForm
           key={`${generation}:${provider.psp_id}`}
@@ -830,11 +871,7 @@ function NMICardSetup({
           }}
         />
       </Suspense>
-      {error && (
-        <p className="form-error" role="alert">
-          {error}
-        </p>
-      )}
+      <FormError>{error}</FormError>
     </div>
   );
 }

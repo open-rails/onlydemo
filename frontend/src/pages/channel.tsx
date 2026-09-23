@@ -10,15 +10,49 @@ import { request, postPage } from "../api";
 import { useAuth } from "../auth-context";
 import type { Channel } from "../models";
 import { micros, money, duration } from "../format";
+import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  Button,
+  Add01Icon,
+  ArrowLeft02Icon,
+  ArrowRight02Icon,
+  DollarCircleIcon,
+  StarIcon,
+  Tick02Icon,
+  UserGroupIcon,
+} from "@hugeicons/core-free-icons";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
   EmptyState,
   ErrorState,
-  Field,
-  Icon,
+  FormError,
   Loading,
-  Modal,
-} from "../components/ui";
+} from "../components/states";
 import { Avatar, Cover, PostCard } from "../components/cards";
 import { membershipOffer } from "../channels";
 import { PostEditor } from "../components/post-editor";
@@ -68,7 +102,7 @@ export function ChannelPage() {
       <section className="profile">
         <Cover seed={current.id} className="profile-cover">
           <Link to="/channels" className="cover-back" aria-label="Back">
-            <Icon name="arrow" size={20} />
+            <HugeiconsIcon icon={ArrowLeft02Icon} size={20} />
           </Link>
           <div className="cover-title">
             <strong>{current.name}</strong>
@@ -87,22 +121,26 @@ export function ChannelPage() {
             <div className="inline-actions">
               {current.can_edit && (
                 <Button onClick={() => setEditor(true)}>
-                  <Icon name="plus" size={16} />
+                  <HugeiconsIcon icon={Add01Icon} data-icon="inline-start" />
                   New post
                 </Button>
               )}
-              <button
-                className="icon-button icon-button-outline"
+              <Button
+                variant="outline"
+                size="icon-lg"
+                className="rounded-full"
                 aria-label="Tip creator"
               >
-                <Icon name="dollar" size={20} />
-              </button>
-              <button
-                className="icon-button icon-button-outline"
+                <HugeiconsIcon icon={DollarCircleIcon} />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon-lg"
+                className="rounded-full"
                 aria-label="Favorite creator"
               >
-                <Icon name="star" size={20} />
-              </button>
+                <HugeiconsIcon icon={StarIcon} />
+              </Button>
             </div>
           </div>
           <h1 className="profile-name">
@@ -118,13 +156,19 @@ export function ChannelPage() {
             <div className="subscribe-box">
               <span className="subscribe-label">Subscription</span>
               {current.has_membership ? (
-                <div className="button button-subscribed button-full">
-                  <Icon name="check" size={18} />
+                <Button
+                  variant="secondary"
+                  size="lg"
+                  className="w-full rounded-full text-success"
+                  disabled
+                >
+                  <HugeiconsIcon icon={Tick02Icon} data-icon="inline-start" />
                   Subscribed
-                </div>
+                </Button>
               ) : offer ? (
-                <button
-                  className="button button-primary button-full button-subscribe"
+                <Button
+                  size="lg"
+                  className="h-12 w-full justify-between rounded-full px-6 uppercase"
                   onClick={() => setMembership(true)}
                 >
                   <span>Subscribe</span>
@@ -132,7 +176,7 @@ export function ChannelPage() {
                     {money(offer.unit_amount, offer.currency)}{" "}
                     {duration(offer.access_duration_hours).replace("every ", "/ ")}
                   </span>
-                </button>
+                </Button>
               ) : (
                 <p className="muted">This creator has no subscription yet.</p>
               )}
@@ -140,36 +184,18 @@ export function ChannelPage() {
           )}
         </div>
       </section>
-      <div className="tabs" aria-label="Channel sections">
-        <button
-          className={`tab ${tab === "posts" ? "active" : ""}`}
-          onClick={() => setTab("posts")}
-        >
-          {postCount} {postCount === 1 ? "Post" : "Posts"}
-        </button>
-        <button
-          className={`tab ${tab === "about" ? "active" : ""}`}
-          onClick={() => setTab("about")}
-        >
-          About
-        </button>
-        {current.can_edit && (
-          <button
-            className={`tab ${tab === "team" ? "active" : ""}`}
-            onClick={() => setTab("team")}
-          >
-            Team
-          </button>
-        )}
-        {current.can_manage && (
-          <button
-            className={`tab ${tab === "settings" ? "active" : ""}`}
-            onClick={() => setTab("settings")}
-          >
-            Settings
-          </button>
-        )}
-      </div>
+      <Tabs value={tab} onValueChange={(value) => setTab(String(value))} className="my-4">
+        <TabsList variant="line" aria-label="Channel sections" className="w-full">
+          <TabsTrigger value="posts">
+            {postCount} {postCount === 1 ? "Post" : "Posts"}
+          </TabsTrigger>
+          <TabsTrigger value="about">About</TabsTrigger>
+          {current.can_edit && <TabsTrigger value="team">Team</TabsTrigger>}
+          {current.can_manage && (
+            <TabsTrigger value="settings">Settings</TabsTrigger>
+          )}
+        </TabsList>
+      </Tabs>
       {tab === "posts" &&
         (posts.isPending ? (
           <Loading cards />
@@ -202,17 +228,21 @@ export function ChannelPage() {
       {tab === "posts" && posts.hasNextPage && (
         <div className="pagination">
           <Button
-            variant="secondary"
-            busy={posts.isFetchingNextPage}
+            variant="outline"
+            disabled={posts.isFetchingNextPage}
             onClick={() => void posts.fetchNextPage()}
           >
+            {posts.isFetchingNextPage && <Spinner data-icon="inline-start" />}
             Older posts
           </Button>
         </div>
       )}
       {tab === "about" && (
-        <div className="panel stack">
-          <h2>About {current.name}</h2>
+        <Card>
+          <CardHeader>
+            <CardTitle>About {current.name}</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
           <p>
             {current.description ||
               "A creator on OnlyDemo."}
@@ -226,7 +256,8 @@ export function ChannelPage() {
             Channel owners and editors manage publication. Paying readers do not
             receive editing permissions.
           </p>
-        </div>
+          </CardContent>
+        </Card>
       )}
       {tab === "team" && current.can_edit && <ChannelTeam channel={current} />}
       {tab === "settings" && current.can_manage && (
@@ -287,88 +318,100 @@ function ChannelSettings({
     }
   };
   return (
-    <div className="stack">
-      <div className="panel">
-        <div className="panel-heading">
-          <div>
-            <h2>Channel membership</h2>
-            <p>
-              Set a USD subscription price for a fixed 30-day access period.
-              Included posts grant access to current and future members.
-            </p>
-          </div>
-        </div>
-        <form className="stack" onSubmit={submit}>
-          <Field label="Price every 30 days (USD)">
-            <input
-              name="amount"
-              required
-              inputMode="decimal"
-              defaultValue={
-                offer ? (Number(offer.unit_amount) / 1_000_000).toFixed(2) : ""
-              }
-              placeholder="5.00"
-            />
-          </Field>
-          {(error || save.error) && (
-            <p className="form-error" role="alert">
-              {error || save.error?.message}
-            </p>
-          )}
-          {save.isSuccess && (
-            <p className="notice notice-success" role="status">
-              Membership offer saved.
-            </p>
-          )}
-          <Button type="submit" busy={save.isPending}>
-            Save membership offer
+    <div className="flex flex-col gap-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Channel membership</CardTitle>
+          <CardDescription>
+            Set a USD subscription price for a fixed 30-day access period.
+            Included posts grant access to current and future members.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={submit}>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="membership-amount">
+                  Price every 30 days (USD)
+                </FieldLabel>
+                <Input
+                  id="membership-amount"
+                  name="amount"
+                  required
+                  inputMode="decimal"
+                  defaultValue={
+                    offer
+                      ? (Number(offer.unit_amount) / 1_000_000).toFixed(2)
+                      : ""
+                  }
+                  placeholder="5.00"
+                />
+              </Field>
+              <FormError>{error || save.error?.message}</FormError>
+              {save.isSuccess && (
+                <Alert role="status">
+                  <HugeiconsIcon icon={Tick02Icon} />
+                  <AlertDescription>Membership offer saved.</AlertDescription>
+                </Alert>
+              )}
+              <Button type="submit" className="self-start" disabled={save.isPending}>
+                {save.isPending && <Spinner data-icon="inline-start" />}
+                Save membership offer
+              </Button>
+            </FieldGroup>
+          </form>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Delete channel</CardTitle>
+          <CardDescription>
+            Deletion immediately hides the channel and retires its editorial
+            permissions. Channel content is retained for 30 days before
+            cleanup. Financial history remains separate.
+          </CardDescription>
+        </CardHeader>
+        <CardFooter>
+          <Button variant="destructive" onClick={() => setDeleting(true)}>
+            Delete channel
           </Button>
-        </form>
-      </div>
-      <div className="panel stack">
-        <h2>Delete channel</h2>
-        <p className="muted">
-          Deletion immediately hides the channel and retires its editorial
-          permissions. Channel content is retained for 30 days before cleanup.
-          Financial history remains separate.
-        </p>
-        <Button variant="danger" onClick={() => setDeleting(true)}>
-          Delete channel
-        </Button>
-      </div>
-      <Modal
-        open={deleting}
-        onOpenChange={setDeleting}
-        title="Delete this channel?"
-        description="The channel becomes inaccessible immediately. This does not automatically refund purchases or cancel subscriptions."
-      >
-        <div className="stack">
-          <Field label={`Type ${channel.slug} to confirm`}>
-            <input
+        </CardFooter>
+      </Card>
+      <Dialog open={deleting} onOpenChange={setDeleting}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete this channel?</DialogTitle>
+            <DialogDescription>
+              The channel becomes inaccessible immediately. This does not
+              automatically refund purchases or cancel subscriptions.
+            </DialogDescription>
+          </DialogHeader>
+          <Field>
+            <FieldLabel htmlFor="delete-channel-confirm">
+              Type {channel.slug} to confirm
+            </FieldLabel>
+            <Input
+              id="delete-channel-confirm"
               value={confirmation}
               onChange={(event) => setConfirmation(event.target.value)}
             />
           </Field>
-          {remove.error && (
-            <p className="form-error" role="alert">
-              {remove.error.message}
-            </p>
-          )}
-          <div className="form-actions">
+          <FormError>{remove.error?.message}</FormError>
+          <DialogFooter>
             <Button variant="ghost" onClick={() => setDeleting(false)}>
               Keep channel
             </Button>
             <Button
-              variant="danger"
-              disabled={confirmation !== channel.slug}
-              busy={remove.isPending}
+              variant="destructive"
+              disabled={confirmation !== channel.slug || remove.isPending}
               onClick={() => remove.mutate()}
             >
+              {remove.isPending && <Spinner data-icon="inline-start" />}
               Delete channel
             </Button>
-          </div>
-        </div>
-      </Modal>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -380,7 +423,7 @@ export function NewChannelPage() {
   if (!auth.user)
     return (
       <EmptyState
-        icon="users"
+        icon={UserGroupIcon}
         title="Sign in to start a channel."
         action={<Button onClick={auth.openLogin}>Sign in</Button>}
       />
@@ -418,49 +461,58 @@ export function NewChannelPage() {
           invite editors after it exists.
         </p>
       </div>
-      <div className="panel">
-        <form
-          className="stack"
-          onSubmit={(event) => {
-            void submit(event);
-          }}
-        >
-          <Field label="Channel name">
-            <input
-              name="name"
-              required
-              maxLength={120}
-              autoFocus
-              placeholder="Your creator name"
-            />
-          </Field>
-          <Field
-            label="Slug"
-            hint="Lowercase letters, numbers, and dashes. AuthKit reserves and manages channel names."
+      <Card>
+        <CardContent>
+          <form
+            onSubmit={(event) => {
+              void submit(event);
+            }}
           >
-            <input
-              name="slug"
-              required
-              pattern="[a-z0-9-]+"
-              placeholder="my-channel"
-            />
-          </Field>
-          {error && (
-            <p className="form-error" role="alert">
-              {error}
-            </p>
-          )}
-          <div className="form-actions">
-            <Link className="button button-ghost" to="/channels">
-              Cancel
-            </Link>
-            <Button type="submit" busy={busy}>
-              Create channel
-              <Icon name="arrow" size={16} />
-            </Button>
-          </div>
-        </form>
-      </div>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="channel-name">Channel name</FieldLabel>
+                <Input
+                  id="channel-name"
+                  name="name"
+                  required
+                  maxLength={120}
+                  autoFocus
+                  placeholder="Your creator name"
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="channel-slug">Slug</FieldLabel>
+                <Input
+                  id="channel-slug"
+                  name="slug"
+                  required
+                  pattern="[a-z0-9-]+"
+                  placeholder="my-channel"
+                />
+                <FieldDescription>
+                  Lowercase letters, numbers, and dashes. AuthKit reserves and
+                  manages channel names.
+                </FieldDescription>
+              </Field>
+              <FormError>{error}</FormError>
+              <div className="form-actions">
+                <Button
+                  variant="ghost"
+                  nativeButton={false}
+                  render={<Link to="/channels" />}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={busy}>
+                  {busy && <Spinner data-icon="inline-start" />}
+                  Create channel
+                  <HugeiconsIcon icon={ArrowRight02Icon} data-icon="inline-end" />
+                </Button>
+              </div>
+            </FieldGroup>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }

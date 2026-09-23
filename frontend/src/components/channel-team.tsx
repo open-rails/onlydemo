@@ -2,16 +2,39 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { request } from "../api";
 import type { Channel, Page } from "../models";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Add01Icon, UserGroupIcon, UserIcon } from "@hugeicons/core-free-icons";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
-  Badge,
-  Button,
-  EmptyState,
-  ErrorState,
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Field,
-  Icon,
-  Loading,
-  Modal,
-} from "./ui";
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@/components/ui/native-select";
+import { Spinner } from "@/components/ui/spinner";
+import { EmptyState, ErrorState, FormError, Loading } from "./states";
 import { date } from "../format";
 
 interface Member {
@@ -90,18 +113,19 @@ export function ChannelTeam({ channel }: { channel: Channel }) {
     });
   };
   return (
-    <div className="stack">
-      <div className="panel">
-        <div className="panel-heading">
-          <div>
-            <h2>Editorial team</h2>
-            <p>
-              Owners and editors manage posts. Paying readers are never added
-              here.
-            </p>
-          </div>
-          <Icon name="users" />
-        </div>
+    <div className="flex flex-col gap-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Editorial team</CardTitle>
+          <CardDescription>
+            Owners and editors manage posts. Paying readers are never added
+            here.
+          </CardDescription>
+          <CardAction>
+            <HugeiconsIcon icon={UserGroupIcon} />
+          </CardAction>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-6">
         {members.isPending ? (
           <Loading />
         ) : members.error ? (
@@ -117,7 +141,7 @@ export function ChannelTeam({ channel }: { channel: Channel }) {
                 key={`${member.subject_id}:${member.role}`}
               >
                 <span className="avatar">
-                  <Icon name="user" size={16} />
+                  <HugeiconsIcon icon={UserIcon} size={16} />
                 </span>
                 <div className="data-row-main">
                   <h3 className="truncate">{member.subject_id}</h3>
@@ -127,13 +151,12 @@ export function ChannelTeam({ channel }: { channel: Channel }) {
                       : "Application"}
                   </p>
                 </div>
-                <Badge tone="brand">{member.role}</Badge>
+                <Badge>{member.role}</Badge>
                 {channel.can_manage && member.subject_kind === "user" && (
                   <div className="data-row-actions">
                     <Button
-                      variant="secondary"
-                      disabled={member.role === "owner"}
-                      busy={mutate.isPending}
+                      variant="outline"
+                      disabled={member.role === "owner" || mutate.isPending}
                       onClick={() =>
                         mutate.mutate({
                           path: `${root}/members/${encodeURIComponent(member.subject_id)}/roles/owner`,
@@ -153,64 +176,86 @@ export function ChannelTeam({ channel }: { channel: Channel }) {
           </div>
         )}
         {channel.can_manage && (
-          <form className="stack" style={{ marginTop: 25 }} onSubmit={add}>
-            <div className="input-row">
-              <Field label="Existing username">
-                <input name="username" required placeholder="their-username" />
-              </Field>
-              <Field label="Role">
-                <select name="role" defaultValue="editor">
-                  <option value="editor">Editor — manage posts</option>
-                  <option value="owner">Owner — manage channel and team</option>
-                </select>
-              </Field>
-            </div>
-            <Button variant="secondary" type="submit" busy={mutate.isPending}>
-              Add editorial member
-            </Button>
+          <form onSubmit={add}>
+            <FieldGroup>
+              <div className="input-row">
+                <Field>
+                  <FieldLabel htmlFor="team-username">
+                    Existing username
+                  </FieldLabel>
+                  <Input
+                    id="team-username"
+                    name="username"
+                    required
+                    placeholder="their-username"
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="team-role">Role</FieldLabel>
+                  <NativeSelect id="team-role" name="role" defaultValue="editor">
+                    <NativeSelectOption value="editor">
+                      Editor — manage posts
+                    </NativeSelectOption>
+                    <NativeSelectOption value="owner">
+                      Owner — manage channel and team
+                    </NativeSelectOption>
+                  </NativeSelect>
+                </Field>
+              </div>
+              <Button
+                variant="outline"
+                type="submit"
+                className="self-start"
+                disabled={mutate.isPending}
+              >
+                {mutate.isPending && <Spinner data-icon="inline-start" />}
+                Add editorial member
+              </Button>
+            </FieldGroup>
           </form>
         )}
-        {(mutate.error || error) && (
-          <p className="form-error" role="alert">
-            {mutate.error?.message || error}
-          </p>
-        )}
-      </div>
+        <FormError>{mutate.error?.message || error}</FormError>
+        </CardContent>
+      </Card>
       {channel.can_manage && (
-        <div className="panel">
-          <div className="panel-heading">
-            <div>
-              <h2>Editor invitations</h2>
-              <p>
-                Share a one-use invitation with an editor. Invitations expire
-                after seven days.
-              </p>
-            </div>
-          </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Editor invitations</CardTitle>
+            <CardDescription>
+              Share a one-use invitation with an editor. Invitations expire
+              after seven days.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
           <Button
-            variant="secondary"
-            busy={invite.isPending}
+            variant="outline"
+            className="self-start"
+            disabled={invite.isPending}
             onClick={() => invite.mutate()}
           >
-            <Icon name="plus" size={16} />
+            {invite.isPending ? (
+              <Spinner data-icon="inline-start" />
+            ) : (
+              <HugeiconsIcon icon={Add01Icon} data-icon="inline-start" />
+            )}
             Create editor invite
           </Button>
-          {invite.error && (
-            <p className="form-error" role="alert">
-              {invite.error.message}
-            </p>
-          )}
+          <FormError>{invite.error?.message}</FormError>
           {invitation && (
-            <div className="stack" style={{ marginTop: 20 }}>
-              <Field
-                label="Private invitation link"
-                hint="Only share this with the editor you intend to invite."
-              >
-                <input
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="invite-link">
+                  Private invitation link
+                </FieldLabel>
+                <Input
+                  id="invite-link"
                   value={invitation}
                   readOnly
                   onFocus={(event) => event.target.select()}
                 />
+                <FieldDescription>
+                  Only share this with the editor you intend to invite.
+                </FieldDescription>
               </Field>
               <Button
                 variant="ghost"
@@ -225,18 +270,18 @@ export function ChannelTeam({ channel }: { channel: Channel }) {
               >
                 {copied ? "Copied" : "Copy invitation link"}
               </Button>
-            </div>
+            </FieldGroup>
           )}
           {invites.error && <ErrorState error={invites.error} />}
           {invites.data && (
-            <div className="data-list" style={{ marginTop: 25 }}>
+            <div className="data-list">
               {invites.data.data.map((link) => (
                 <div className="data-row" key={link.id}>
                   <div className="data-row-main">
                     <h3>Editor invitation</h3>
                     <p>Expires {date(link.expires_at)}</p>
                   </div>
-                  <Badge>
+                  <Badge variant="secondary">
                     {link.revoked_at
                       ? "Revoked"
                       : link.redeemed_at
@@ -246,7 +291,7 @@ export function ChannelTeam({ channel }: { channel: Channel }) {
                   {!link.revoked_at && !link.redeemed_at && (
                     <Button
                       variant="ghost"
-                      busy={mutate.isPending}
+                      disabled={mutate.isPending}
                       onClick={() =>
                         mutate.mutate({
                           path: `${root}/invites/links/${link.id}`,
@@ -261,23 +306,31 @@ export function ChannelTeam({ channel }: { channel: Channel }) {
               ))}
             </div>
           )}
-        </div>
+          </CardContent>
+        </Card>
       )}
-      <Modal
+      <Dialog
         open={!!remove}
         onOpenChange={(open) => {
           if (!open) setRemove(null);
         }}
-        title="Remove editorial access?"
-        description="This removes their channel-management role. Their purchased reading access is separate."
       >
-        <div className="form-actions">
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove editorial access?</DialogTitle>
+            <DialogDescription>
+              This removes their channel-management role. Their purchased
+              reading access is separate.
+            </DialogDescription>
+          </DialogHeader>
+          <FormError>{mutate.error?.message}</FormError>
+          <DialogFooter>
           <Button variant="ghost" onClick={() => setRemove(null)}>
             Keep member
           </Button>
           <Button
-            variant="danger"
-            busy={mutate.isPending}
+            variant="destructive"
+            disabled={mutate.isPending}
             onClick={() => {
               if (remove)
                 mutate.mutate({
@@ -286,11 +339,12 @@ export function ChannelTeam({ channel }: { channel: Channel }) {
                 });
             }}
           >
+            {mutate.isPending && <Spinner data-icon="inline-start" />}
             Remove member
           </Button>
-        </div>
-        {mutate.error && <p className="form-error">{mutate.error.message}</p>}
-      </Modal>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -308,7 +362,7 @@ export function InvitePage() {
   return (
     <div className="centered-page">
       <EmptyState
-        icon="users"
+        icon={UserGroupIcon}
         title={
           accepted
             ? "You joined the editorial team."
@@ -316,15 +370,15 @@ export function InvitePage() {
         }
         action={
           accepted ? (
-            <a className="button button-primary" href="/me?tab=channels">
+            <Button nativeButton={false} render={<a href="/me?tab=channels" />}>
               Open my channels
-            </a>
+            </Button>
           ) : (
             <Button
-              busy={redeem.isPending}
-              disabled={!code}
+              disabled={!code || redeem.isPending}
               onClick={() => redeem.mutate()}
             >
+              {redeem.isPending && <Spinner data-icon="inline-start" />}
               Accept editor invitation
             </Button>
           )

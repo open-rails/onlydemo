@@ -1,13 +1,11 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { postPage } from "../api";
-import {
-  Button,
-  EmptyState,
-  ErrorState,
-  Icon,
-  Loading,
-} from "../components/ui";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Add01Icon, Image01Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
+import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
+import { EmptyState, ErrorState, Loading } from "../components/states";
 import {
   ChannelCard,
   PostCard,
@@ -48,8 +46,19 @@ export function HomePage() {
             </p>
           </div>
           <div className="inline-actions">
-            <Button onClick={auth.openRegister}>Sign up</Button>
-            <Button variant="secondary" onClick={auth.openLogin}>
+            <Button
+              size="lg"
+              className="bg-white text-primary hover:bg-white/90"
+              onClick={auth.openRegister}
+            >
+              Sign up
+            </Button>
+            <Button
+              size="lg"
+              variant="outline"
+              className="border-white/70 bg-transparent text-white hover:bg-white/15 hover:text-white dark:bg-transparent"
+              onClick={auth.openLogin}
+            >
               Log in
             </Button>
           </div>
@@ -68,12 +77,12 @@ export function HomePage() {
         </div>
       ) : (
         <EmptyState
-          icon="image"
+          icon={Image01Icon}
           title="Your feed is empty."
           action={
-            <Link to="/channels" className="button button-primary">
+            <Button nativeButton={false} render={<Link to="/channels" />}>
               Find creators
-            </Link>
+            </Button>
           }
         >
           New posts appear here as creators publish them.
@@ -82,10 +91,11 @@ export function HomePage() {
       {posts.hasNextPage && (
         <div className="pagination">
           <Button
-            variant="secondary"
-            busy={posts.isFetchingNextPage}
+            variant="outline"
+            disabled={posts.isFetchingNextPage}
             onClick={() => void posts.fetchNextPage()}
           >
+            {posts.isFetchingNextPage && <Spinner data-icon="inline-start" />}
             Load more
           </Button>
         </div>
@@ -101,10 +111,10 @@ export function ChannelsPage() {
       <div className="page-title">
         <h1>Explore creators</h1>
         {auth.user && (
-          <Link className="button button-primary button-sm" to="/channels/new">
-            <Icon name="plus" size={16} />
+          <Button size="sm" nativeButton={false} render={<Link to="/channels/new" />}>
+            <HugeiconsIcon icon={Add01Icon} data-icon="inline-start" />
             New channel
-          </Link>
+          </Button>
         )}
       </div>
       {channels.isPending ? (
@@ -122,7 +132,7 @@ export function ChannelsPage() {
         </div>
       ) : (
         <EmptyState
-          icon="users"
+          icon={UserGroupIcon}
           title="No channels yet."
           action={
             !auth.user ? (
@@ -136,10 +146,11 @@ export function ChannelsPage() {
       {channels.hasNextPage && (
         <div className="pagination">
           <Button
-            variant="secondary"
-            busy={channels.isFetchingNextPage}
+            variant="outline"
+            disabled={channels.isFetchingNextPage}
             onClick={() => void channels.fetchNextPage()}
           >
+            {channels.isFetchingNextPage && <Spinner data-icon="inline-start" />}
             More creators
           </Button>
         </div>

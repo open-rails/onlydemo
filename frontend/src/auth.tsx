@@ -14,7 +14,30 @@ import {
   setSession,
   subscribeSession,
 } from "./api";
-import { Button, Field, Icon, Modal } from "./components/ui";
+import { HugeiconsIcon } from "@hugeicons/react";
+import {
+  Alert02Icon,
+  ArrowRight02Icon,
+  Tick02Icon,
+} from "@hugeicons/core-free-icons";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
+import { FormError } from "./components/states";
 import { AuthContext } from "./auth-context";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -45,20 +68,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }}
     >
       {children}
-      <Modal
+      <Dialog
         open={!!dialog}
         onOpenChange={(open) => {
           if (!open) setDialog(null);
         }}
-        title={
-          dialog === "register" ? "Join OnlyDemo" : "Welcome back."
-        }
-        description={
-          dialog === "register"
-            ? "Subscribe to creators, unlock posts, and start your own channel."
-            : "Sign in to your subscriptions and channels."
-        }
       >
+        <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            {dialog === "register" ? "Join OnlyDemo" : "Welcome back."}
+          </DialogTitle>
+          <DialogDescription>
+            {dialog === "register"
+              ? "Subscribe to creators, unlock posts, and start your own channel."
+              : "Sign in to your subscriptions and channels."}
+          </DialogDescription>
+        </DialogHeader>
         {dialog && (
           <AuthForm
             key={dialog}
@@ -72,7 +98,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }}
           />
         )}
-      </Modal>
+        </DialogContent>
+      </Dialog>
     </AuthContext.Provider>
   );
 }
@@ -157,26 +184,23 @@ function AuthForm({
   };
   if (recovery)
     return (
-      <div className="stack">
-        <div className="notice">
-          <Icon name="warning" />
-          <p>
+      <div className="flex flex-col gap-4">
+        <Alert>
+          <HugeiconsIcon icon={Alert02Icon} />
+          <AlertDescription>
             This account is scheduled for deletion. You can explicitly restore
             it during its recovery period. Restoring your account does not
             reopen a deleted channel.
-          </p>
-        </div>
-        {error && (
-          <p className="form-error" role="alert">
-            {error}
-          </p>
-        )}
+          </AlertDescription>
+        </Alert>
+        <FormError>{error}</FormError>
         <Button
-          busy={busy}
+          disabled={busy}
           onClick={() => {
             void restore();
           }}
         >
+          {busy && <Spinner data-icon="inline-start" />}
           Restore my account
         </Button>
         <Button variant="ghost" onClick={() => setRecovery(null)}>
@@ -186,97 +210,101 @@ function AuthForm({
     );
   return (
     <form
-      className="stack"
       onSubmit={(event) => {
         void submit(event);
       }}
     >
-      {restored && (
-        <div className="notice notice-success" role="status">
-          <Icon name="check" />
-          <p>Your account is restored. Sign in to continue.</p>
-        </div>
-      )}
-      <Field label="Email or username">
-        <input
-          name="identifier"
-          autoComplete="username"
-          required
-          autoFocus
-          placeholder="you@example.com"
-        />
-      </Field>
-      {mode === "register" && (
-        <Field
-          label="Username"
-          hint={
-            username &&
-            `Your public name: ${username.min_length}–${username.max_length} characters, starting with a letter.`
-          }
-        >
-          <input
-            name="username"
-            pattern={username?.pattern}
-            autoComplete="nickname"
+      <FieldGroup>
+        {restored && (
+          <Alert role="status">
+            <HugeiconsIcon icon={Tick02Icon} className="text-success" />
+            <AlertDescription>
+              Your account is restored. Sign in to continue.
+            </AlertDescription>
+          </Alert>
+        )}
+        <Field>
+          <FieldLabel htmlFor="auth-identifier">Email or username</FieldLabel>
+          <Input
+            id="auth-identifier"
+            name="identifier"
+            autoComplete="username"
             required
-            minLength={username?.min_length}
-            maxLength={username?.max_length}
-            placeholder="yourname"
+            autoFocus
+            placeholder="you@example.com"
           />
         </Field>
-      )}
-      <Field
-        label="Password"
-        hint={
-          mode === "register" && policy ? passwordHint(policy) : undefined
-        }
-      >
-        <input
-          name="password"
-          type="password"
-          autoComplete={
-            mode === "register" ? "new-password" : "current-password"
-          }
-          required
-          minLength={mode === "register" ? policy?.min_length : 1}
-          maxLength={mode === "register" ? policy?.max_length : undefined}
-          onInput={(event) => {
-            const missing =
-              mode === "register" && policy
-                ? missingClasses(policy, event.currentTarget.value)
-                : [];
-            event.currentTarget.setCustomValidity(
-              missing.length ? `Add ${missing.join(", ")}.` : "",
-            );
-          }}
-          placeholder={
-            mode === "register"
-              ? "Choose a strong password"
-              : "Enter your password"
-          }
-        />
-      </Field>
-      {error && (
-        <p className="form-error" role="alert">
-          {error}
+        {mode === "register" && (
+          <Field>
+            <FieldLabel htmlFor="auth-username">Username</FieldLabel>
+            <Input
+              id="auth-username"
+              name="username"
+              pattern={username?.pattern}
+              autoComplete="nickname"
+              required
+              minLength={username?.min_length}
+              maxLength={username?.max_length}
+              placeholder="yourname"
+            />
+            {username && (
+              <FieldDescription>
+                Your public name: {username.min_length}–{username.max_length}{" "}
+                characters, starting with a letter.
+              </FieldDescription>
+            )}
+          </Field>
+        )}
+        <Field>
+          <FieldLabel htmlFor="auth-password">Password</FieldLabel>
+          <Input
+            id="auth-password"
+            name="password"
+            type="password"
+            autoComplete={
+              mode === "register" ? "new-password" : "current-password"
+            }
+            required
+            minLength={mode === "register" ? policy?.min_length : 1}
+            maxLength={mode === "register" ? policy?.max_length : undefined}
+            onInput={(event) => {
+              const missing =
+                mode === "register" && policy
+                  ? missingClasses(policy, event.currentTarget.value)
+                  : [];
+              event.currentTarget.setCustomValidity(
+                missing.length ? `Add ${missing.join(", ")}.` : "",
+              );
+            }}
+            placeholder={
+              mode === "register"
+                ? "Choose a strong password"
+                : "Enter your password"
+            }
+          />
+          {mode === "register" && policy && (
+            <FieldDescription>{passwordHint(policy)}</FieldDescription>
+          )}
+        </Field>
+        <FormError>{error}</FormError>
+        <Button type="submit" size="lg" disabled={busy}>
+          {busy && <Spinner data-icon="inline-start" />}
+          {mode === "register" ? "Create account" : "Sign in"}
+          <HugeiconsIcon icon={ArrowRight02Icon} data-icon="inline-end" />
+        </Button>
+        <p className="text-center text-sm text-muted-foreground">
+          {mode === "register" ? "Already have an account?" : "New here?"}{" "}
+          <Button type="button" variant="link" className="h-auto p-0" onClick={onSwitch}>
+            {mode === "register" ? "Sign in" : "Create an account"}
+          </Button>
         </p>
-      )}
-      <Button type="submit" busy={busy}>
-        {mode === "register" ? "Create account" : "Sign in"}
-        <Icon name="arrow" size={17} />
-      </Button>
-      <p className="auth-switch">
-        {mode === "register" ? "Already have an account?" : "New here?"}{" "}
-        <button type="button" className="text-button" onClick={onSwitch}>
-          {mode === "register" ? "Sign in" : "Create an account"}
-        </button>
-      </p>
-      {mode === "login" && (
-        <p className="fine-print">
-          Recovering a deleted account? Sign in with your existing password and
-          we’ll guide you through restoration.
-        </p>
-      )}
+        {mode === "login" && (
+          <p className="fine-print">
+            Recovering a deleted account? Sign in with your existing password
+            and we’ll guide you through restoration.
+          </p>
+        )}
+      </FieldGroup>
     </form>
   );
 }
