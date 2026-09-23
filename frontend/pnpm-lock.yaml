@@ -18,8 +18,8 @@ importers:
         specifier: ^1.1.10
         version: 1.1.10(react@19.3.0)
       '@open-rails/contentkit-upload':
-        specifier: file:vendor/open-rails-contentkit-upload-0.0.0-0c2211f.tgz
-        version: file:vendor/open-rails-contentkit-upload-0.0.0-0c2211f.tgz(react@19.3.0)
+        specifier: file:vendor/open-rails-contentkit-upload-0.0.0-7be0957.tgz
+        version: file:vendor/open-rails-contentkit-upload-0.0.0-7be0957.tgz(react@19.3.0)
       '@openrails/auth-ui':
         specifier: https://github.com/open-rails/auth-ui/releases/download/v0.2.0/openrails-auth-ui-0.2.0.tgz
         version: https://github.com/open-rails/auth-ui/releases/download/v0.2.0/openrails-auth-ui-0.2.0.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -421,9 +421,9 @@ packages:
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
 
-  '@open-rails/contentkit-upload@file:vendor/open-rails-contentkit-upload-0.0.0-0c2211f.tgz':
-    resolution: {integrity: sha512-OzXKjt65I4vxJ8/uqYOd4urQylash4myEir4lbiNqGwve3bwqX00OR4x5X2UkvzyaHTtB5rYO9V1/Fjj5M4m/Q==, tarball: file:vendor/open-rails-contentkit-upload-0.0.0-0c2211f.tgz}
-    version: 0.0.0-0c2211f
+  '@open-rails/contentkit-upload@file:vendor/open-rails-contentkit-upload-0.0.0-7be0957.tgz':
+    resolution: {integrity: sha512-pOME7xgAcOT87aQw4tG4XaicZUY+//sO4r0Vo7jl91wZndnYTKVDAg0PABNF6x53rF0gaVkkdnReCUO7rQ7mjg==, tarball: file:vendor/open-rails-contentkit-upload-0.0.0-7be0957.tgz}
+    version: 0.0.0-7be0957
     engines: {node: '>=22'}
     peerDependencies:
       react: '>=18'
@@ -2757,7 +2757,7 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.3
 
-  '@open-rails/contentkit-upload@file:vendor/open-rails-contentkit-upload-0.0.0-0c2211f.tgz(react@19.3.0)':
+  '@open-rails/contentkit-upload@file:vendor/open-rails-contentkit-upload-0.0.0-7be0957.tgz(react@19.3.0)':
     dependencies:
       '@noble/hashes': 2.4.0
     optionalDependencies:
