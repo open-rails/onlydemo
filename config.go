@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/joho/godotenv"
 	"github.com/knadh/koanf/providers/env/v2"
 	"github.com/knadh/koanf/v2"
 )
@@ -32,6 +33,12 @@ type Config struct {
 }
 
 func loadConfig() (Config, error) {
+	// Make direct `go run .` behave like Taskfile, while preserving any
+	// explicitly exported environment variables. Taskfile also loads .env, and
+	// godotenv.Load only fills variables that are not already present.
+	if err := godotenv.Load(".env"); err != nil {
+		return Config{}, fmt.Errorf("load .env: %w", err)
+	}
 	k := koanf.New(".")
 	if err := k.Load(env.Provider(".", env.Opt{
 		TransformFunc: func(key, value string) (string, any) {
