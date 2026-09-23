@@ -27,6 +27,8 @@ const (
 type billingService struct {
 	runtime *openrailsembed.Runtime
 	client  *openrails.Client
+	// psps are the enabled PSPs every offer price declares.
+	psps []string
 }
 
 func initializeBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool) error {
@@ -145,7 +147,7 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 	}
 	// This assignment precedes shared-fleet startup and HTTP publication.
 	auth.billing = client
-	return &billingService{runtime: runtime, client: client}, nil
+	return &billingService{runtime: runtime, client: client, psps: cfg.BillingPSPs}, nil
 }
 
 func (b *billingService) RiverJobs() riverkit.Contribution { return b.runtime.RiverJobs() }

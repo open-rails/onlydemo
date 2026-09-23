@@ -91,7 +91,7 @@ func (b *billingService) setOffer(ctx context.Context, channelID, resource, titl
 		if recurring {
 			duration = openrails.CatalogValue(720)
 		}
-		product.Prices = []openrails.CatalogApplyPrice{{Key: resource + ":purchase", Currency: openrails.CatalogValue(currency), UnitAmount: openrails.CatalogValue(price.UnitAmount), AccessDurationHours: duration, AutoRenew: openrails.CatalogValue(recurring), Archived: openrails.CatalogValue(false)}}
+		product.Prices = []openrails.CatalogApplyPrice{{Key: resource + ":purchase", Currency: openrails.CatalogValue(currency), UnitAmount: openrails.CatalogValue(price.UnitAmount), AccessDurationHours: duration, AutoRenew: openrails.CatalogValue(recurring), Archived: openrails.CatalogValue(false), PSPs: openrails.CatalogValue(b.psps)}}
 	}
 	for attempts := 0; attempts < 3; attempts++ {
 		rev, err := b.client.Catalog.Revision(ctx)
