@@ -9,6 +9,7 @@ import { ChannelPage, NewChannelPage } from "./pages/channel";
 import { PostPage, CheckoutReturnPage } from "./pages/post";
 import { AccountPage } from "./pages/account";
 import { InvitePage } from "./components/channel-team";
+import "openrails-checkout/styles.css";
 import "./styles.css";
 
 const queryClient = new QueryClient({

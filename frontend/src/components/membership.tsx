@@ -1,14 +1,15 @@
-import { useState, useMemo, type FormEvent } from "react";
+import { lazy, Suspense, useState, useMemo, type FormEvent } from "react";
 import {
   Elements,
   PaymentElement,
   useElements,
   useStripe,
 } from "@stripe/react-stripe-js";
+import type { TokenizedCardData } from "openrails-checkout";
 import { loadStripe } from "@stripe/stripe-js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { request } from "../api";
+import { getSessionGeneration, request } from "../api";
 import { useAuth } from "../auth-context";
 import {
   clearAttempt,
@@ -26,9 +27,17 @@ import {
   type Offer,
   type Page,
   type PaymentMethod,
+  type PaymentOptionsDocument,
+  type PublicProvider,
 } from "../models";
 import { money, duration } from "../format";
 import { Badge, Button, ErrorState, Field, Icon, Loading, Modal } from "./ui";
+
+const TokenizedCardForm = lazy(() =>
+  import("openrails-checkout").then((module) => ({
+    default: module.TokenizedCardForm,
+  })),
+);
 
 interface Setup {
   id: string;
@@ -45,6 +54,7 @@ export function MembershipDialog({
   open: boolean;
   onClose: () => void;
 }) {
+  const auth = useAuth();
   return (
     <Modal
       open={open}
@@ -54,7 +64,7 @@ export function MembershipDialog({
       title={`Join ${channel.name}`}
       description="Membership includes current and future membership posts. Separately priced posts remain separate purchases."
     >
-      {open && <MembershipFlow channel={channel} onClose={onClose} />}
+      {open && <MembershipFlow key={`${auth.user?.id}:${getSessionGeneration()}:${channel.id}`} channel={channel} onClose={onClose} />}
     </Modal>
   );
 }
@@ -70,6 +80,7 @@ function MembershipFlow({
   const offers = channel.offers.filter((offer) => offer.auto_renew);
   const [price, setPrice] = useState(offers[0]?.price_id || "");
   const [method, setMethod] = useState("");
+  const [providerID, setProviderID] = useState("");
   const [addCard, setAddCard] = useState(false);
   const [quote, setQuote] = useState<Checkout | null>(null);
   const currentScope = `membership-current:${auth.user?.id}:${channel.id}`;
@@ -83,6 +94,28 @@ function MembershipFlow({
     queryKey: ["config"],
     queryFn: () => request<AppConfig>("/api/v1/config", {}, false),
   });
+  const options = useQuery({
+    queryKey: ["membership-options", price, auth.user?.id],
+    queryFn: () =>
+      request<PaymentOptionsDocument>(
+        `/api/v1/checkout/options?price_id=${encodeURIComponent(price)}`,
+      ),
+    enabled: !!price,
+  });
+  const available = (options.data?.options || []).filter(
+    (option) =>
+      ["stripe", "nmi"].includes(option.rail) &&
+      options.data?.psps.some(
+        (psp) => psp.psp_id === option.psp_id && psp.custodian === "psp",
+      ),
+  );
+  const selected =
+    available.find((option) => option.psp_id === providerID) ||
+    available.find((option) => option.rail === "stripe") ||
+    available[0];
+  const provider = options.data?.psps.find(
+    (psp) => psp.psp_id === selected?.psp_id,
+  );
   const methods = useQuery({
     queryKey: ["payment-methods", auth.user?.id],
     queryFn: () =>
@@ -99,7 +132,14 @@ function MembershipFlow({
         );
       const original = attempt.request || {
         path: `/api/v1/channels/${channel.id}/subscribe`,
-        body: { price_id: price, payment_method_id: method },
+        body: {
+          price_id: price,
+          payment: {
+            rail: selected?.selector,
+            psp_id: selected?.psp_id,
+            payment_method_id: method,
+          },
+        },
       };
       saveAttempt(scope, { ...attempt, request: original });
       const result = await request<Checkout>(original.path, {
@@ -135,14 +175,16 @@ function MembershipFlow({
         </Button>
       </div>
     );
-  if (config.isPending || methods.isPending) return <Loading />;
-  if (config.error || methods.error)
+  if (config.isPending || methods.isPending || (options.isPending && !!price))
+    return <Loading />;
+  if (config.error || methods.error || options.error)
     return (
       <ErrorState
-        error={config.error || methods.error}
+        error={config.error || methods.error || options.error}
         retry={() => {
           void config.refetch();
           void methods.refetch();
+          void options.refetch();
         }}
       />
     );
@@ -167,25 +209,31 @@ function MembershipFlow({
         }}
       />
     );
-  if (
-    !config.data?.stripe_publishable_key?.startsWith("pk_test_") ||
-    !config.data.stripe_psp_id
-  )
+  if (!selected || !provider)
     return (
       <div className="notice notice-warning">
         <Icon name="warning" />
         <p>
-          Card payments are not configured for this test environment yet. Please
-          try again after the site’s payment configuration is available.
+          No eligible payment provider is currently available for this
+          membership.
         </p>
+      </div>
+    );
+  if (
+    selected.rail === "stripe" &&
+    !config.data?.stripe_publishable_key?.startsWith("pk_test_")
+  )
+    return (
+      <div className="notice notice-warning">
+        <p>Stripe test card entry is not configured.</p>
       </div>
     );
   const current = offers.find((offer) => offer.price_id === price);
   const saved =
     methods.data?.data.filter(
       (card) =>
-        card.rail === "stripe" &&
-        card.psp_id === config.data?.stripe_psp_id &&
+        card.rail === selected.rail &&
+        card.psp_id === selected.psp_id &&
         card.health?.active !== false,
     ) || [];
   return (
@@ -205,6 +253,25 @@ function MembershipFlow({
               </select>
             </Field>
           )}
+          <Field label="Payment provider">
+            <select
+              value={selected.psp_id}
+              onChange={(event) => {
+                setProviderID(event.target.value);
+                setMethod("");
+                setAddCard(false);
+              }}
+            >
+              {available.map((option) => (
+                <option key={option.psp_id} value={option.psp_id}>
+                  {options.data?.psps.find(
+                    (psp) => psp.psp_id === option.psp_id,
+                  )?.display_name || option.selector}{" "}
+                  · {option.rail === "nmi" ? "NMI sandbox" : "Stripe test"}
+                </option>
+              ))}
+            </select>
+          </Field>
           {saved.length > 0 && (
             <Field label="Saved card">
               <select
@@ -222,23 +289,54 @@ function MembershipFlow({
             </Field>
           )}
           {addCard || saved.length === 0 ? (
-            <CardSetup
-              config={config.data}
-              onSaved={(id) => {
-                setMethod(id);
-                setAddCard(false);
-                void methods.refetch();
-              }}
-            />
+            selected.rail === "nmi" ? (
+              <NMICardSetup
+                key={`${getSessionGeneration()}:${provider.psp_id}`}
+                provider={provider}
+                onSaved={(id) => {
+                  setMethod(id);
+                  setAddCard(false);
+                  void methods.refetch();
+                }}
+              />
+            ) : (
+              <CardSetup
+                config={{ ...config.data!, stripe_psp_id: selected.psp_id }}
+                onSaved={(id) => {
+                  setMethod(id);
+                  setAddCard(false);
+                  void methods.refetch();
+                }}
+              />
+            )
           ) : (
             <Button variant="secondary" onClick={() => setAddCard(true)}>
               <Icon name="plus" size={15} />
               Add another card
             </Button>
           )}
+          {(addCard || saved.length === 0) && (
+            <Button
+              variant="secondary"
+              busy={methods.isFetching}
+              onClick={async () => {
+                const checked = await methods.refetch();
+                if (
+                  checked.data?.data.some(
+                    (card) =>
+                      card.psp_id === selected.psp_id &&
+                      card.health?.active !== false,
+                  )
+                )
+                  setAddCard(false);
+              }}
+            >
+              Check saved cards
+            </Button>
+          )}
           {create.error && <ErrorState error={create.error} />}
           <Button
-            disabled={!method || addCard}
+            disabled={!method || addCard || !selected}
             busy={create.isPending}
             onClick={() => create.mutate()}
           >
@@ -455,7 +553,11 @@ export function MembershipConfirmation({
     mutationFn: () =>
       request<Checkout>(`/billing/v1/me/checkout/${checkout.id}/confirm`, {
         method: "POST",
-        body: JSON.stringify({ payment: { rail: "stripe" } }),
+        body: JSON.stringify({
+          payment: {
+            rail: state.data.payment?.rail || state.data.rail_data?.rail,
+          },
+        }),
       }),
     onSuccess: (value) => {
       client.setQueryData(["membership-checkout", checkout.id], value);
@@ -484,7 +586,12 @@ export function MembershipConfirmation({
   const current = state.data;
   const quote = current.membership_quote || checkout.membership_quote;
   const authenticate = async () => {
-    if (!current.operation || !publishableKey?.startsWith("pk_test_")) return;
+    if (
+      !current.operation ||
+      current.payment?.rail !== "stripe" ||
+      !publishableKey?.startsWith("pk_test_")
+    )
+      return;
     setAuthenticating(true);
     setError("");
     try {
@@ -589,16 +696,17 @@ export function MembershipConfirmation({
               My library; do not start another payment.
             </p>
           </div>
-          {!terminalCheckout(current.status) && (
-            <Button
-              busy={authenticating}
-              onClick={() => {
-                void authenticate();
-              }}
-            >
-              Check card authentication
-            </Button>
-          )}
+          {!terminalCheckout(current.status) &&
+            current.payment?.rail === "stripe" && (
+              <Button
+                busy={authenticating}
+                onClick={() => {
+                  void authenticate();
+                }}
+              >
+                Check card authentication
+              </Button>
+            )}
           <Button variant="secondary" onClick={() => void state.refetch()}>
             Check status
           </Button>
@@ -623,7 +731,14 @@ export function MembershipConfirmation({
             </span>
           </label>
           <Button
-            disabled={!accepted || !current.amount || !quote}
+            disabled={
+              !accepted ||
+              !current.amount ||
+              !quote ||
+              !["stripe", "nmi"].includes(
+                current.payment?.rail || current.rail_data?.rail || "",
+              )
+            }
             busy={confirm.isPending}
             onClick={() => confirm.mutate()}
           >
@@ -641,4 +756,85 @@ export function MembershipConfirmation({
 }
 function finishAttempt(id: string) {
   finishCheckout(id);
+}
+
+function NMICardSetup({
+  provider,
+  onSaved,
+}: {
+  provider: PublicProvider;
+  onSaved: (id: string) => void;
+}) {
+  const [consent, setConsent] = useState(false);
+  const [error, setError] = useState("");
+  const generation = getSessionGeneration();
+  const key = provider.config?.tokenization_key;
+  const url = provider.config?.tokenization_url;
+  if (!key || !url || key.startsWith("preview_"))
+    return (
+      <p className="notice notice-warning">
+        This provider’s secure card entry is unavailable.
+      </p>
+    );
+  const save = async (card: TokenizedCardData) => {
+    if (getSessionGeneration() !== generation)
+      throw new Error("Your account changed. Reopen card setup.");
+    setError("");
+    try {
+      const method = await request<PaymentMethod>(
+        "/billing/v1/me/payment-methods",
+        {
+          method: "POST",
+          body: JSON.stringify({ ...card, provider: provider.key }),
+        },
+      );
+      if (!method.id)
+        throw new Error(
+          "The server did not confirm a saved card. Check your saved payment methods.",
+        );
+      onSaved(method.id);
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Card setup could not be confirmed.",
+      );
+      throw cause;
+    }
+  };
+  return (
+    <div className="stack">
+      <label className="checkbox-field">
+        <input
+          type="checkbox"
+          checked={consent}
+          onChange={(event) => setConsent(event.target.checked)}
+        />
+        <span>
+          I allow this card to be saved for future payments that I separately
+          agree to.
+        </span>
+      </label>
+      <Suspense fallback={<Loading />}>
+        <TokenizedCardForm
+          key={`${generation}:${provider.psp_id}`}
+          tokenizationKey={key}
+          tokenizationURL={url}
+          disabled={!consent}
+          onTokenized={save}
+          submitLabel="Save sandbox card"
+          appearance={{
+            theme: document.documentElement.classList.contains("dark")
+              ? "dark"
+              : "light",
+          }}
+        />
+      </Suspense>
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
+    </div>
+  );
 }

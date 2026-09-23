@@ -5,16 +5,10 @@ import {
   useParams,
   useSearchParams,
 } from "react-router-dom";
-import { useState } from "react";
-import { request } from "../api";
+import { lazy, Suspense, useState } from "react";
+import { getSessionGeneration, request } from "../api";
 import { useAuth } from "../auth-context";
-import {
-  getAttempt,
-  checkoutAttempt,
-  saveAttempt,
-  rememberCheckout,
-  finishCheckout,
-} from "../attempts";
+import { checkoutAttempt, finishCheckout } from "../attempts";
 import {
   policyLabels,
   terminalCheckout,
@@ -34,16 +28,12 @@ import {
 } from "../components/ui";
 import { PostEditor } from "../components/post-editor";
 import { MembershipDialog } from "../components/membership";
+const PurchaseCheckout = lazy(() =>
+  import("../components/purchase-checkout").then((module) => ({
+    default: module.PurchaseCheckout,
+  })),
+);
 
-function setLatestCheckout(user: string, id: string) {
-  try {
-    sessionStorage.setItem(`openrails-latest-checkout:${user}`, id);
-  } catch {
-    throw new Error(
-      "This browser cannot retain the checkout reference. Enable tab storage before continuing to payment.",
-    );
-  }
-}
 function latestCheckout(user?: string) {
   try {
     return sessionStorage.getItem(`openrails-latest-checkout:${user}`) || "";
@@ -74,49 +64,6 @@ export function PostPage() {
   const offers = post.data?.offers?.filter((offer) => !offer.auto_renew) || [];
   const offer =
     offers.find((value) => value.price_id === selectedPrice) || offers[0];
-  const checkout = useMutation({
-    mutationFn: async () => {
-      if (!offer || !auth.user)
-        throw new Error("Select an available offer and sign in.");
-      const scope = `post:${auth.user.id}:${id}:${offer.price_id}`;
-      const attempt = getAttempt(scope);
-      const original = attempt.request || {
-        path: `/api/v1/posts/${id}/checkout`,
-        body: { price_id: offer.price_id },
-      };
-      saveAttempt(scope, { ...attempt, request: original });
-      let result = attempt.checkoutID
-        ? await request<Checkout>(`/api/v1/checkouts/${attempt.checkoutID}`)
-        : null;
-      if (!result || (result.status === "created" && !result.url))
-        result = await request<Checkout>(original.path, {
-          method: "POST",
-          headers: { "Idempotency-Key": attempt.key },
-          body: JSON.stringify(original.body),
-        });
-      saveAttempt(scope, {
-        ...attempt,
-        request: original,
-        checkoutID: result.id,
-      });
-      rememberCheckout(result.id, scope);
-      setLatestCheckout(auth.user.id, result.id);
-      return result;
-    },
-    onSuccess: (result) => {
-      if (result.url && !terminalCheckout(result.status)) {
-        const url = new URL(result.url);
-        if (url.protocol !== "https:" || url.hostname !== "checkout.stripe.com")
-          throw new Error(
-            "The checkout returned an unexpected destination. Please contact the site owner.",
-          );
-        location.assign(url.href);
-      } else
-        navigate(
-          `/checkout/return?checkout_id=${encodeURIComponent(result.id)}`,
-        );
-    },
-  });
   const remove = useMutation({
     mutationFn: () => request(`/api/v1/posts/${id}`, { method: "DELETE" }),
     onSuccess: () => {
@@ -290,28 +237,19 @@ export function PostPage() {
               {money(offer.unit_amount, offer.currency)}
             </div>
           )}
-          {checkout.error && (
-            <p className="form-error" role="alert">
-              {checkout.error.message}
-            </p>
+          {offer && (
+            <Suspense fallback={<Loading />}>
+              <PurchaseCheckout
+                key={`${getSessionGeneration()}:${offer.price_id}`}
+                post={item}
+                offer={offer}
+                onComplete={() => {
+                  setPurchaseOpen(false);
+                  void post.refetch();
+                }}
+              />
+            </Suspense>
           )}
-          <p className="fine-print">
-            You’ll review and pay on Stripe’s hosted test checkout. If the
-            connection fails, retrying uses this same purchase attempt.
-          </p>
-          <div className="form-actions">
-            <Button variant="ghost" onClick={() => setPurchaseOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              disabled={!offer}
-              busy={checkout.isPending}
-              onClick={() => checkout.mutate()}
-            >
-              Continue to Stripe
-              <Icon name="external" size={15} />
-            </Button>
-          </div>
         </div>
       </Modal>
       <PostEditor

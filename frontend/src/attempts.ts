@@ -1,6 +1,9 @@
+import type { CheckoutPlan } from "openrails-checkout";
 interface Attempt {
   key: string;
   checkoutID?: string;
+  submitted?: boolean;
+  offer?: { priceID: string; plan: CheckoutPlan };
   request?: { path: string; body: object };
 }
 const prefix = "openrails-attempt:";

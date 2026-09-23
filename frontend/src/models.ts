@@ -93,6 +93,9 @@ export interface Checkout {
   operation?: { id: string; status: string };
   subscription_id?: string;
   payment_method_id?: string;
+  payment_id?: string;
+  payment?: { rail: string };
+  rail_data?: { rail?: string };
 }
 export interface PaymentMethod {
   id: string;
@@ -106,7 +109,30 @@ export interface PaymentMethod {
   };
   health?: { active: boolean };
 }
+export interface ProviderOption {
+  selector: string;
+  psp_id: string;
+  rail: string;
+  mode: string;
+}
+export interface PublicProvider {
+  psp_id: string;
+  key: string;
+  rail: string;
+  custodian: string;
+  display_name: string;
+  flow: string;
+  config?: Record<string, string>;
+}
+export interface PaymentOptionsDocument {
+  plan: import("openrails-checkout").CheckoutPlan;
+  options: ProviderOption[];
+  psps: PublicProvider[];
+  price_id: string;
+  product_id: string;
+}
 export interface AppConfig {
+  psps: PublicProvider[];
   stripe_publishable_key: string | null;
   stripe_psp_id: string | null;
   billing_available: boolean;
