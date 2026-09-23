@@ -10,7 +10,6 @@ import (
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/authhttp"
 	"github.com/open-rails/authkit/embedded"
-	"github.com/open-rails/authkit/password"
 	"github.com/open-rails/openrails"
 )
 
@@ -59,7 +58,6 @@ func newAuth(ctx context.Context, config Config, pool *pgxpool.Pool) (*appAuth, 
 			NativeUserMode: embedded.RegistrationModeOpen,
 			Verification:   embedded.RegistrationVerificationNone,
 		},
-		Password: password.Policy{MinLength: 10, MaxLength: 128},
 		Keys: embedded.KeysConfig{
 			AllowEphemeralDevKeys: true,
 		},
