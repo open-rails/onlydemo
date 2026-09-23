@@ -121,8 +121,10 @@ membership quote and an explicit payer confirmation. The browser uses the native
 is omitted from this profile, so it cannot bypass the app's admission rules.
 A redirect is never proof of payment; the UI reads the verified session state.
 
-`/me` shows managed channels, a paginated purchased-post library, subscriptions and
-billing history. Subscription cancellation uses the existing customer handlers.
+`/me` shows managed channels and a paginated purchased-post library. Its Billing
+tab is `@openrails/billing-ui`'s `AccountBilling` on the embedded `/billing/v1/me`
+API: subscriptions (cancel with feedback, resume, change card), saved cards
+(add via NMI Collect.js when NMI is enabled, remove, default) and payment history.
 No provider-owned legacy schedule is migrated by this example.
 
 ## Deletion and identity

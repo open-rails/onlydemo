@@ -10,7 +10,6 @@ import { PostPage, CheckoutReturnPage } from "./pages/post";
 import { AccountPage } from "./pages/account";
 import { InvitePage } from "./components/channel-team";
 import { AuthCallbackPage, ResetPasswordPage } from "./pages/auth-links";
-import "@openrails/billing-ui/styles.css";
 import "./styles.css";
 
 const queryClient = new QueryClient({

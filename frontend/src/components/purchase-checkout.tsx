@@ -361,19 +361,7 @@ export function PurchaseCheckout({
       <BillingCheckout
         source={composed.source}
         layout="compact"
-        appearance={{
-          theme: document.documentElement.classList.contains("dark")
-            ? "dark"
-            : "light",
-          variables: {
-            primary: getComputedStyle(document.documentElement)
-              .getPropertyValue("--primary")
-              .trim(),
-            primaryForeground: getComputedStyle(document.documentElement)
-              .getPropertyValue("--primary-foreground")
-              .trim(),
-          },
-        }}
+        appearance={{ theme: "inherit" }}
         onComplete={async (value) => {
           if (value.status === "succeeded") {
             const id = getAttempt(composed.scope).checkoutID;

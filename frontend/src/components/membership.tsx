@@ -751,7 +751,7 @@ export function MembershipConfirmation({
           <Button
             variant="link"
             nativeButton={false}
-            render={<Link to="/me?tab=subscriptions" />}
+            render={<Link to="/me?tab=billing" />}
           >
             View my memberships
           </Button>
@@ -864,11 +864,7 @@ function NMICardSetup({
           disabled={!consent}
           onTokenized={save}
           submitLabel="Save sandbox card"
-          appearance={{
-            theme: document.documentElement.classList.contains("dark")
-              ? "dark"
-              : "light",
-          }}
+          appearance={{ theme: "inherit" }}
         />
       </Suspense>
       <FormError>{error}</FormError>

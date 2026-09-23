@@ -20,6 +20,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { auth } from "./api";
+import { BillingHost } from "./billing";
 import { Loading } from "./components/states";
 import { SignInContext, type SignInMode } from "./session";
 
@@ -46,7 +47,9 @@ export function AuthHost({ children }: { children: ReactNode }) {
     >
       <AuthUiProvider appearance={{ theme: "inherit" }} messages={messages}>
         <StepUpProvider>
-          <SignInHost>{children}</SignInHost>
+          <SignInHost>
+            <BillingHost>{children}</BillingHost>
+          </SignInHost>
         </StepUpProvider>
       </AuthUiProvider>
     </AuthProvider>

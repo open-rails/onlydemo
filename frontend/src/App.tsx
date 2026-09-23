@@ -13,7 +13,7 @@ import {
   Moon02Icon,
   ShoppingBag01Icon,
   SquareLock02Icon,
-  StarIcon,
+  Wallet01Icon,
   Sun03Icon,
   UserGroupIcon,
   UserIcon,
@@ -61,7 +61,7 @@ export function AppLayout() {
   const nav: [string, string, IconSvgElement][] = [
     ["/", "Home", Home01Icon],
     ["/channels", "Explore", DiscoverCircleIcon],
-    ["/me?tab=subscriptions", "Subscriptions", StarIcon],
+    ["/me?tab=billing", "Billing", Wallet01Icon],
     ["/me?tab=library", "Purchased", ShoppingBag01Icon],
     ["/me?tab=channels", "My channels", UserGroupIcon],
     ["/me?tab=settings", "Account", UserIcon],

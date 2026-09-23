@@ -21,8 +21,8 @@ importers:
         specifier: https://github.com/open-rails/auth-ui/releases/download/v0.1.0/openrails-auth-ui-0.1.0.tgz
         version: https://github.com/open-rails/auth-ui/releases/download/v0.1.0/openrails-auth-ui-0.1.0.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@openrails/billing-ui':
-        specifier: https://github.com/open-rails/billing-ui/releases/download/v0.4.1/openrails-billing-ui-0.4.1.tgz
-        version: https://github.com/open-rails/billing-ui/releases/download/v0.4.1/openrails-billing-ui-0.4.1.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+        specifier: https://github.com/open-rails/billing-ui/releases/download/v0.6.0/openrails-billing-ui-0.6.0.tgz
+        version: https://github.com/open-rails/billing-ui/releases/download/v0.6.0/openrails-billing-ui-0.6.0.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@stripe/react-stripe-js':
         specifier: ^6.11.0
         version: 6.11.0(@stripe/stripe-js@9.17.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -426,9 +426,9 @@ packages:
       '@solana/wallet-adapter-react':
         optional: true
 
-  '@openrails/billing-ui@https://github.com/open-rails/billing-ui/releases/download/v0.4.1/openrails-billing-ui-0.4.1.tgz':
-    resolution: {integrity: sha512-DbRnQJwtQXpDNHQsivOXZj6CxAsS1mC63iUKI3FPgSq9aAo36OkPDMEbu6Sm9s9lQtMIxf+JlryEmWMMRmq4HA==, tarball: https://github.com/open-rails/billing-ui/releases/download/v0.4.1/openrails-billing-ui-0.4.1.tgz}
-    version: 0.4.1
+  '@openrails/billing-ui@https://github.com/open-rails/billing-ui/releases/download/v0.6.0/openrails-billing-ui-0.6.0.tgz':
+    resolution: {integrity: sha512-QTu33bbxjiXaZR7QpPSrVEIT4mgEa2R6GDFoZlpiUlaxkyb3tiQxRWWKq2kZtroIZ1waJBnv34UjijYTK6iGgw==, tarball: https://github.com/open-rails/billing-ui/releases/download/v0.6.0/openrails-billing-ui-0.6.0.tgz}
+    version: 0.6.0
     engines: {node: '>=22.12.0'}
     peerDependencies:
       react: '>=19 <20'
@@ -2151,9 +2151,6 @@ packages:
     os: [darwin, linux, win32, freebsd, openbsd, netbsd, sunos, android]
     hasBin: true
 
-  tailwind-merge@3.7.0:
-    resolution: {integrity: sha512-XPPUyAc+cvspz3lHTcR/QgPfW2A0lv/xQNIjX3HGhLR+Nq2lHaLq5MtTesHn8GUr3W3DguT2KT5x3NVgRtYwmA==}
-
   tailwindcss@4.3.3:
     resolution: {integrity: sha512-gOhV3P7ufE62QDGg1zVaTgCR+EtPv92k2nIhVcVKcLmxT1sUBsQGhnZj175j+MqRt4zLF7ic+sCYjfhxMxj7YQ==}
 
@@ -2757,16 +2754,15 @@ snapshots:
       - '@types/react'
       - date-fns
 
-  '@openrails/billing-ui@https://github.com/open-rails/billing-ui/releases/download/v0.4.1/openrails-billing-ui-0.4.1.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
+  '@openrails/billing-ui@https://github.com/open-rails/billing-ui/releases/download/v0.6.0/openrails-billing-ui-0.6.0.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:
       '@base-ui/react': 1.8.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@hugeicons/core-free-icons': 4.3.5
       '@hugeicons/react': 1.1.10(react@19.3.0)
       class-variance-authority: 0.7.1
-      clsx: 2.1.1
+      cn: 0.4.0
       react: 19.3.0
       react-dom: 19.3.0(react@19.3.0)
-      tailwind-merge: 3.7.0
       zod: 4.6.5
     transitivePeerDependencies:
       - '@date-fns/tz'
@@ -4343,8 +4339,6 @@ snapshots:
   strip-final-newline@4.0.0: {}
 
   systeminformation@5.33.13: {}
-
-  tailwind-merge@3.7.0: {}
 
   tailwindcss@4.3.3: {}
 

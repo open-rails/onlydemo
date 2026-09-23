@@ -49,40 +49,10 @@ export interface Page<T> {
   next_cursor?: string | null;
   total?: number;
 }
-export interface Payment {
-  id: string;
-  status: string;
-  amount: string;
-  currency: string;
-  amount_refunded?: string;
-  created_at: string;
-  rail: string;
-  refunded?: boolean;
-  subscription_id?: string;
-  price?: { id: string; key?: string; type?: "one_time" | "recurring" };
-}
-export interface Subscription {
-  id: string;
-  status: string;
-  channel_name?: string;
-  current_period_ends_at?: string | null;
-  cancel_scheduled?: boolean;
-  cancel_mode?: string;
-  cancel_portal_url?: string;
-  resumable?: boolean;
-  price?: {
-    unit_amount: string;
-    currency: string;
-    access_duration_hours: number | null;
-  };
-  product?: { display_name: string };
-}
 export interface AccountData {
   user: { id: string; username: string; email?: string };
   manageable_channels: Channel[];
   purchased_posts: Post[];
-  subscriptions: Subscription[];
-  payments: Payment[];
 }
 export interface Checkout {
   id: string;
