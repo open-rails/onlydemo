@@ -12,7 +12,7 @@ import {
   SuggestedCreators,
 } from "../components/cards";
 import { useChannels } from "../channels";
-import { useAuth } from "../auth-context";
+import { useAuth } from "../session";
 
 function usePosts() {
   const { user } = useAuth();

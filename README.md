@@ -66,6 +66,7 @@ Do not put executable paths or obsolete billing encryption keys in `.env`.
 | `DATABASE_URL` | One owning PostgreSQL connection/pool for initialization, content, AuthKit, OpenRails and River |
 | `PORT`, `PUBLIC_URL` | API listener and browser return origin |
 | `AUTH_ISSUER`, `AUTH_AUDIENCE` | Token issuer/audience; origin issuer matches root discovery |
+| `AUTH_KEYS_PATH` | Dev signing and TOTP key directory (default `.runtime/auth`), so sessions and authenticator apps survive restarts |
 | `AUTH_SCHEMA`, `APP_SCHEMA`, `BILLING_SCHEMA`, `RIVER_SCHEMA` | Optional independent schema names; shared `public` is supported |
 | `BILLING_PSPS` | Enabled providers: `stripe`, `nmi` or both (default `stripe`) |
 | `STRIPE_SECRET_KEY`, `STRIPE_ACCOUNT_ID`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PUBLISHABLE_KEY` | Stripe sandbox credentials (when enabled) |
@@ -140,6 +141,14 @@ through the OpenRails Client, preserving the already paid access period and
 permanent purchases. Restoring an account does not silently restart billing.
 Already-issued ordinary access tokens keep their normal fifteen-minute lifetime;
 permission checks still read current role authority.
+
+## Sign-in and security
+
+The frontend uses `@openrails/auth-ui`: the access token stays in memory and the
+refresh token is an HttpOnly cookie on `/auth/v1/token`. Email verification is
+optional and two-factor (authenticator app or email) is opt-in from Account.
+The demo has no mail provider: verification codes, 2FA email codes and reset
+links are written to the server log as `[outbox]` lines.
 
 Operator commands use the same application connection:
 

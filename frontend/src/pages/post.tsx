@@ -6,9 +6,9 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { lazy, Suspense, useState, type CSSProperties } from "react";
-import { APIError, getSessionGeneration, request } from "../api";
+import { APIError, sessionKey, request } from "../api";
 import { NotFoundPage } from "../App";
-import { useAuth } from "../auth-context";
+import { useAuth } from "../session";
 import { checkoutAttempt, finishCheckout } from "../attempts";
 import {
   policyLabels,
@@ -304,7 +304,7 @@ export function PostPage() {
           {offer && (
             <Suspense fallback={<Loading />}>
               <PurchaseCheckout
-                key={`${getSessionGeneration()}:${offer.price_id}`}
+                key={`${sessionKey()}:${offer.price_id}`}
                 post={item}
                 offer={offer}
                 onComplete={() => {

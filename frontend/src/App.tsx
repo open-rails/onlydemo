@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
-import { useAuth } from "./auth-context";
+import { useAuth } from "./session";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import {
   Add01Icon,

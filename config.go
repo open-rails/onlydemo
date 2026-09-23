@@ -17,6 +17,7 @@ type Config struct {
 	DatabaseURL           string
 	AuthIssuer            string
 	AuthAudience          string
+	AuthKeysPath          string
 	PublicURL             string
 	AuthSchema            string
 	AppSchema             string
@@ -49,7 +50,7 @@ func loadConfig() (Config, error) {
 				return strings.ToLower(key), value
 			case "DATABASE_URL":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
-			case "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_SCHEMA", "APP_SCHEMA", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA", "BILLING_PSPS", "STRIPE_PUBLISHABLE_KEY", "STRIPE_SECRET_KEY", "STRIPE_ACCOUNT_ID", "STRIPE_WEBHOOK_SECRET", "NMI_ACCOUNT_ID", "NMI_SANDBOX_SECURITY_KEY", "NMI_TOKENIZATION_KEY", "NMI_TOKENIZATION_URL", "NMI_WEBHOOK_SIGNING_SECRET":
+			case "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_KEYS_PATH", "AUTH_SCHEMA", "APP_SCHEMA", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA", "BILLING_PSPS", "STRIPE_PUBLISHABLE_KEY", "STRIPE_SECRET_KEY", "STRIPE_ACCOUNT_ID", "STRIPE_WEBHOOK_SECRET", "NMI_ACCOUNT_ID", "NMI_SANDBOX_SECURITY_KEY", "NMI_TOKENIZATION_KEY", "NMI_TOKENIZATION_URL", "NMI_WEBHOOK_SIGNING_SECRET":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
 			default:
 				return "", nil
@@ -78,6 +79,10 @@ func loadConfig() (Config, error) {
 	if authAudience == "" {
 		authAudience = "onlydemo"
 	}
+	authKeysPath := k.String("auth.keys.path")
+	if authKeysPath == "" {
+		authKeysPath = ".runtime/auth"
+	}
 	publicURL := strings.TrimRight(k.String("public.url"), "/")
 	if publicURL == "" {
 		publicURL = fmt.Sprintf("http://localhost:%d", port)
@@ -97,6 +102,7 @@ func loadConfig() (Config, error) {
 		DatabaseURL:           databaseURL,
 		AuthIssuer:            authIssuer,
 		AuthAudience:          authAudience,
+		AuthKeysPath:          authKeysPath,
 		PublicURL:             publicURL,
 		AuthSchema:            strings.TrimSpace(k.String("auth.schema")),
 		AppSchema:             strings.TrimSpace(k.String("app.schema")),

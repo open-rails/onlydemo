@@ -2,7 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -36,10 +42,14 @@ func (a *appAuth) Close() {
 
 func newAuth(ctx context.Context, config Config, pool *pgxpool.Pool) (*appAuth, error) {
 	a := &appAuth{}
+	keys, totpKey, err := authKeys(config.AuthKeysPath)
+	if err != nil {
+		return nil, err
+	}
 	ownership := embedded.RiverFromHost()
 	runtime, err := embedded.New(embedded.Config{
 		Schema: strings.TrimSpace(config.AuthSchema),
-		HTTP:   authhttp.Config{DirectPeerIP: true, Mount: authhttp.MountOptions{APIPrefix: "/auth/v1"}},
+		HTTP:   authhttp.Config{DirectPeerIP: true, Mount: authhttp.MountOptions{APIPrefix: "/auth/v1", RefreshCookie: true}},
 		RBAC: []embedded.PersonaDef{embedded.IntrinsicRootPersona(embedded.RoleDef{
 			Name:        "admin",
 			Permissions: []string{postReadPermission, postEditPermission, postDeletePermission},
@@ -56,23 +66,80 @@ func newAuth(ctx context.Context, config Config, pool *pgxpool.Pool) (*appAuth, 
 		},
 		Registration: embedded.RegistrationConfig{
 			NativeUserMode: embedded.RegistrationModeOpen,
-			Verification:   embedded.RegistrationVerificationNone,
+			Verification:   embedded.RegistrationVerificationOptional,
 		},
-		Keys: embedded.KeysConfig{
-			AllowEphemeralDevKeys: true,
-		},
+		Keys: keys,
 		Ephemeral: embedded.EphemeralConfig{
 			AllowMemory: true,
 		},
 		TwoFactor: embedded.TwoFactorConfig{
-			Mode: embedded.TwoFactorDisabled,
+			Mode:          embedded.TwoFactorOptional,
+			Methods:       []embedded.TwoFactorMethod{embedded.TwoFactorTOTP, embedded.TwoFactorEmail},
+			TOTPSecretKey: totpKey,
 		},
-	}, embedded.Deps{Postgres: pool, River: ownership, OnSoftDelete: a.cancelDeletedAccountBilling, OnHardDelete: a.cancelDeletedAccountBilling})
+	}, embedded.Deps{Postgres: pool, River: ownership, Email: logEmail{}, OnSoftDelete: a.cancelDeletedAccountBilling, OnHardDelete: a.cancelDeletedAccountBilling})
 	if err != nil {
 		return nil, err
 	}
 	a.runtime, a.client = runtime, runtime.Client()
 	return a, nil
+}
+
+// authKeys keeps dev signing and TOTP keys under path so sessions and
+// authenticator apps survive restarts; an empty path keeps both in memory.
+func authKeys(path string) (embedded.KeysConfig, []byte, error) {
+	keys := embedded.KeysConfig{AllowEphemeralDevKeys: true}
+	if path == "" {
+		key := make([]byte, 32)
+		_, err := rand.Read(key)
+		return keys, key, err
+	}
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return keys, nil, err
+	}
+	keys.Path = path
+	file := filepath.Join(path, "totp.key")
+	if _, err := os.Stat(file); errors.Is(err, os.ErrNotExist) {
+		key := make([]byte, 32)
+		if _, err := rand.Read(key); err != nil {
+			return keys, nil, err
+		}
+		if err := os.WriteFile(file, []byte(hex.EncodeToString(key)), 0o600); err != nil {
+			return keys, nil, err
+		}
+	} else if err != nil {
+		return keys, nil, err
+	}
+	return keys, nil, nil
+}
+
+// logEmail is the demo's outbox: sandbox mail goes to the server log.
+type logEmail struct{}
+
+func (logEmail) send(to, what string) error {
+	log.Printf("[outbox] to=%s %s", to, what)
+	return nil
+}
+func (m logEmail) SendVerification(_ context.Context, email, _ string, msg embedded.VerificationMessage) error {
+	return m.send(email, fmt.Sprintf("purpose=%s code=%s link=%s", msg.Purpose, msg.Code, msg.LinkURL))
+}
+func (m logEmail) SendPasswordResetLink(_ context.Context, email, _, resetURL string) error {
+	return m.send(email, "password reset "+resetURL)
+}
+func (m logEmail) SendAccountRegistrationInvite(_ context.Context, email, inviteURL string) error {
+	return m.send(email, "registration invite "+inviteURL)
+}
+func (m logEmail) SendLoginCode(_ context.Context, email, _, code string) error {
+	return m.send(email, "login code="+code)
+}
+func (m logEmail) SendWelcome(_ context.Context, email, _ string) error {
+	return m.send(email, "welcome")
+}
+func (m logEmail) SendContactChanged(_ context.Context, email, _ string, _ embedded.ContactChange) error {
+	return m.send(email, "contact changed")
+}
+func (m logEmail) SendDeviceKeyEnrolled(_ context.Context, email, _ string, _ embedded.DeviceKeyNotice) error {
+	return m.send(email, "device key enrolled")
 }
 
 // AuthKit delivers deletion callbacks durably through the shared River fleet.

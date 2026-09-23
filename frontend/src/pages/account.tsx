@@ -6,7 +6,13 @@ import {
 } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { useState, type FormEvent } from "react";
-import { authAPI, request, setSession } from "../api";
+import { request } from "../api";
+import {
+  useContactVerification,
+  useDeleteAccount,
+  useTwoFactorSettings,
+} from "@openrails/auth-ui/react";
+import { BackupCodes } from "../auth";
 import type {
   AccountData,
   Page,
@@ -49,7 +55,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -61,7 +72,7 @@ import {
   Loading,
 } from "../components/states";
 import { PostCard, ChannelCard } from "../components/cards";
-import { useAuth } from "../auth-context";
+import { useAuth } from "../session";
 import { date, duration, money } from "../format";
 
 const titles: Record<string, string> = {
@@ -646,34 +657,187 @@ function SetupReturn({ id }: { id: string }) {
   );
 }
 function AccountSettings() {
-  const auth = useAuth();
-  const [open, setOpen] = useState(false);
-  const client = useQueryClient();
-  const remove = useMutation({
-    mutationFn: (password: string) => authAPI.deleteAccount(password),
-    onSuccess: () => {
-      setSession(null);
-      client.clear();
-    },
-  });
+  return (
+    <div className="flex flex-col gap-4">
+      <EmailVerification />
+      <TwoFactor />
+      <DeleteAccount />
+    </div>
+  );
+}
+function EmailVerification() {
+  const { user } = useAuth();
+  const verify = useContactVerification();
+  const email = user?.email;
   return (
     <Card>
       <CardHeader>
         <CardTitle>Account</CardTitle>
         <CardDescription>
-          Signed in as {auth.user?.username}
-          {auth.user?.email && ` · ${auth.user.email}`}
+          Signed in as {user?.username}
+          {email && ` · ${email}`}
         </CardDescription>
+        {email && (
+          <CardAction>
+            <Badge
+              variant="secondary"
+              className={user?.email_verified ? "bg-success/10 text-success" : "bg-warning/10 text-warning"}
+            >
+              {user?.email_verified ? "Email verified" : "Email unverified"}
+            </Badge>
+          </CardAction>
+        )}
       </CardHeader>
-      <CardContent className="flex flex-col gap-2">
-        <h3>Delete your account</h3>
-        <p className="muted">
+      {email && !user?.email_verified && (
+        <CardContent>
+          {verify.state.step === "code_sent" ? (
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void verify.confirm(String(new FormData(event.currentTarget).get("code")));
+              }}
+            >
+              <FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor="email-code">Verification code</FieldLabel>
+                  <Input id="email-code" name="code" inputMode="numeric" required />
+                </Field>
+                <FormError>{verify.error?.message}</FormError>
+                <Button type="submit" className="self-start" disabled={verify.busy}>
+                  {verify.busy && <Spinner data-icon="inline-start" />}
+                  Verify email
+                </Button>
+              </FieldGroup>
+            </form>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <FormError>{verify.error?.message}</FormError>
+              <Button
+                variant="outline"
+                className="self-start"
+                disabled={verify.busy}
+                onClick={() => void verify.request(email)}
+              >
+                {verify.busy && <Spinner data-icon="inline-start" />}
+                Send verification code
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+function TwoFactor() {
+  const twoFactor = useTwoFactorSettings();
+  const { status, enrollment, busy, error } = twoFactor;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Two-factor authentication</CardTitle>
+        <CardDescription>
+          Require an authenticator-app code when you sign in.
+        </CardDescription>
+        {status && (
+          <CardAction>
+            <Badge
+              variant="secondary"
+              className={status.enabled ? "bg-success/10 text-success" : undefined}
+            >
+              {status.enabled ? "On" : "Off"}
+            </Badge>
+          </CardAction>
+        )}
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        {twoFactor.loading && !status ? (
+          <Loading />
+        ) : enrollment.step === "backup_codes" ? (
+          <BackupCodes codes={enrollment.codes} onDone={twoFactor.dismiss} />
+        ) : enrollment.step === "totp" ? (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void twoFactor.confirm(String(new FormData(event.currentTarget).get("code")));
+            }}
+          >
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="totp-secret">Authenticator secret</FieldLabel>
+                <Input id="totp-secret" readOnly value={enrollment.secret} className="font-mono" />
+                <FieldDescription>
+                  Add this key to your authenticator app, then enter its
+                  current code.
+                </FieldDescription>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="totp-code">Code</FieldLabel>
+                <Input id="totp-code" name="code" inputMode="numeric" autoComplete="one-time-code" required />
+              </Field>
+              <FormError>{error?.message}</FormError>
+              <div className="inline-actions">
+                <Button type="submit" disabled={busy}>
+                  {busy && <Spinner data-icon="inline-start" />}
+                  Turn on
+                </Button>
+                <Button type="button" variant="ghost" onClick={twoFactor.dismiss}>
+                  Cancel
+                </Button>
+              </div>
+            </FieldGroup>
+          </form>
+        ) : (
+          <>
+            <FormError>{error?.message}</FormError>
+            <div className="inline-actions">
+              {status?.enabled ? (
+                <>
+                  <Button
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => void twoFactor.regenerateBackupCodes()}
+                  >
+                    New backup codes
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    disabled={busy}
+                    onClick={() => void twoFactor.disable()}
+                  >
+                    Turn off
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => void twoFactor.start({ method: "totp", makeDefault: true })}
+                >
+                  {busy && <Spinner data-icon="inline-start" />}
+                  Set up authenticator app
+                </Button>
+              )}
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+function DeleteAccount() {
+  const [open, setOpen] = useState(false);
+  const remove = useDeleteAccount();
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Delete your account</CardTitle>
+        <CardDescription>
           Your account can be recovered for 30 days by signing in and
           explicitly confirming restoration. First transfer or delete any
           active channels for which you are the last owner. Purchases and
           financial history are retained independently.
-        </p>
-      </CardContent>
+        </CardDescription>
+      </CardHeader>
       <CardFooter>
         <Button variant="destructive" onClick={() => setOpen(true)}>
           Delete my account
@@ -691,9 +855,9 @@ function AccountSettings() {
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              remove.mutate(
-                String(new FormData(event.currentTarget).get("password")),
-              );
+              void remove.deleteAccount({
+                password: String(new FormData(event.currentTarget).get("password")),
+              });
             }}
           >
             <FieldGroup>
@@ -721,9 +885,9 @@ function AccountSettings() {
                 <Button
                   type="submit"
                   variant="destructive"
-                  disabled={remove.isPending}
+                  disabled={remove.busy}
                 >
-                  {remove.isPending && <Spinner data-icon="inline-start" />}
+                  {remove.busy && <Spinner data-icon="inline-start" />}
                   Delete account
                 </Button>
               </DialogFooter>

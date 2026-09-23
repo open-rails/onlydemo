@@ -1,6 +1,6 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { request } from "./api";
-import { useAuth } from "./auth-context";
+import { useAuth } from "./session";
 import type { Channel, Page } from "./models";
 
 export function useChannels() {

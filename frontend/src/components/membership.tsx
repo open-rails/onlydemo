@@ -9,8 +9,8 @@ import type { TokenizedCardData } from "@openrails/billing-ui";
 import { loadStripe } from "@stripe/stripe-js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { getSessionGeneration, request } from "../api";
-import { useAuth } from "../auth-context";
+import { sessionKey, request } from "../api";
+import { useAuth } from "../session";
 import {
   clearAttempt,
   checkoutAttempt,
@@ -97,7 +97,7 @@ export function MembershipDialog({
         </DialogHeader>
         {open && (
           <MembershipFlow
-            key={`${auth.user?.id}:${getSessionGeneration()}:${channel.id}`}
+            key={`${auth.user?.id}:${sessionKey()}:${channel.id}`}
             channel={channel}
             onClose={onClose}
           />
@@ -340,7 +340,7 @@ function MembershipFlow({
           {addCard || saved.length === 0 ? (
             selected.rail === "nmi" ? (
               <NMICardSetup
-                key={`${getSessionGeneration()}:${provider.psp_id}`}
+                key={`${sessionKey()}:${provider.psp_id}`}
                 provider={provider}
                 onSaved={(id) => {
                   setMethod(id);
@@ -806,7 +806,7 @@ function NMICardSetup({
 }) {
   const [consent, setConsent] = useState(false);
   const [error, setError] = useState("");
-  const generation = getSessionGeneration();
+  const generation = sessionKey();
   const key = provider.config?.tokenization_key;
   const url = provider.config?.tokenization_url;
   if (!key || !url || key.startsWith("preview_"))
@@ -818,7 +818,7 @@ function NMICardSetup({
       </Alert>
     );
   const save = async (card: TokenizedCardData) => {
-    if (getSessionGeneration() !== generation)
+    if (sessionKey() !== generation)
       throw new Error("Your account changed. Reopen card setup.");
     setError("");
     try {

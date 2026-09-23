@@ -1,3 +1,11 @@
+import { createAuthClient } from "@openrails/auth-ui/client";
+import { sessionIdentity } from "@openrails/auth-ui/react";
+
+export const auth = createAuthClient({ baseUrl: "/auth/v1" });
+// Changes on sign-in, sign-out, expiry and user switch, not on refresh.
+export const sessionKey = () => sessionIdentity(auth.getSnapshot());
+export const subscribeSession = auth.subscribe;
+
 export class APIError extends Error {
   constructor(
     message: string,
@@ -8,54 +16,6 @@ export class APIError extends Error {
     super(message);
     this.name = "APIError";
   }
-}
-export interface Tokens {
-  access_token: string;
-  refresh_token?: string;
-}
-export interface User {
-  id: string;
-  username: string;
-  email: string | null;
-  has_password: boolean;
-}
-const storageKey = "onlydemo-session";
-let tokens: Tokens | null = (() => {
-  try {
-    return JSON.parse(
-      sessionStorage.getItem(storageKey) || "null",
-    ) as Tokens | null;
-  } catch {
-    return null;
-  }
-})();
-let sessionGeneration = 0;
-export function getSessionGeneration() {
-  return sessionGeneration;
-}
-const listeners = new Set<() => void>();
-export function getSession() {
-  return tokens;
-}
-export function subscribeSession(listener: () => void) {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
-}
-export function setSession(next: Tokens | null) {
-  sessionGeneration++;
-  applySession(next);
-}
-function applySession(next: Tokens | null) {
-  tokens = next;
-  try {
-    if (next) sessionStorage.setItem(storageKey, JSON.stringify(next));
-    else sessionStorage.removeItem(storageKey);
-  } catch {
-    /* The current tab can still use its in-memory session. */
-  }
-  listeners.forEach((listener) => listener());
 }
 async function readResponse<T>(response: Response): Promise<T> {
   const body =
@@ -87,143 +47,29 @@ async function readResponse<T>(response: Response): Promise<T> {
   }
   return body as T;
 }
-let refreshing: { generation: number; promise: Promise<boolean> } | undefined;
-function assertSession(expected: number) {
-  if (sessionGeneration !== expected)
-    throw new APIError(
-      "Your account changed while this request was running. Review its status before trying again.",
-      409,
-      "session_changed",
-    );
-}
-async function refreshSession(expected: number): Promise<boolean> {
-  assertSession(expected);
-  if (!tokens?.refresh_token) {
-    setSession(null);
-    return false;
-  }
-  const oldRefresh = tokens.refresh_token;
-  const response = await fetch("/auth/v1/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      grant_type: "refresh_token",
-      refresh_token: oldRefresh,
-    }),
-  });
-  assertSession(expected);
-  if (response.status === 400 || response.status === 401) {
-    setSession(null);
-    return false;
-  }
-  const next = await readResponse<Tokens>(response);
-  assertSession(expected);
-  if (!next.access_token)
-    throw new APIError(
-      "Your session could not be refreshed. Please sign in again.",
-      401,
-    );
-  applySession({ ...next, refresh_token: next.refresh_token || oldRefresh });
-  return true;
-}
 export async function request<T>(
   path: string,
   init: RequestInit = {},
   authenticated = true,
   inspectHeaders?: (headers: Headers) => void,
 ): Promise<T> {
-  const expected = sessionGeneration;
-  const originalAccess = tokens?.access_token;
-  const send = (accessToken?: string) => {
-    if (authenticated) assertSession(expected);
-    return fetch(path, {
-      ...init,
-      headers: {
-        ...(init.body ? { "Content-Type": "application/json" } : {}),
-        ...(authenticated && accessToken
-          ? { Authorization: `Bearer ${accessToken}` }
-          : {}),
-        ...init.headers,
-      },
-    });
-  };
-  let response = await send(originalAccess);
-  if (authenticated) assertSession(expected);
-  if (response.status === 401 && authenticated && originalAccess) {
-    if (!refreshing || refreshing.generation !== expected) {
-      const entry = { generation: expected, promise: Promise.resolve(false) };
-      entry.promise = refreshSession(expected).finally(() => {
-        if (refreshing === entry) refreshing = undefined;
-      });
-      refreshing = entry;
-    }
-    const refreshed = await refreshing.promise;
-    assertSession(expected);
-    if (refreshed) response = await send(tokens?.access_token);
-  }
-  if (authenticated) assertSession(expected);
+  const expected = sessionKey();
+  const headers = new Headers(init.headers);
+  if (init.body && !headers.has("Content-Type"))
+    headers.set("Content-Type", "application/json");
+  const response = authenticated
+    ? await auth.authFetch(path, { ...init, headers })
+    : await fetch(path, { ...init, headers });
   const body = await readResponse<T>(response);
-  if (authenticated) assertSession(expected);
+  if (authenticated && sessionKey() !== expected)
+    throw new APIError(
+      "Your account changed while this request was running. Review its status before trying again.",
+      409,
+      "session_changed",
+    );
   inspectHeaders?.(response.headers);
   return body;
 }
-
-export type PasswordPolicy = {
-  login: boolean;
-  min_length: number;
-  max_length: number;
-  require_uppercase: boolean;
-  require_lowercase: boolean;
-  require_digit: boolean;
-  require_symbol: boolean;
-  reject_common: boolean;
-};
-export type AuthCapabilities = {
-  username: { min_length: number; max_length: number; pattern: string };
-  password: PasswordPolicy;
-};
-export const authAPI = {
-  me: () => request<User>("/auth/v1/me"),
-  capabilities: () =>
-    request<AuthCapabilities>("/auth/v1/capabilities", {}, false),
-  login: (identifier: string, password: string) =>
-    request<Tokens>(
-      "/auth/v1/password/login",
-      { method: "POST", body: JSON.stringify({ identifier, password }) },
-      false,
-    ),
-  register: (identifier: string, username: string, password: string) =>
-    request<{ token_set: Tokens }>(
-      "/auth/v1/register",
-      {
-        method: "POST",
-        body: JSON.stringify({ identifier, username, password }),
-      },
-      false,
-    ),
-  logout: () =>
-    request<void>(
-      "/auth/v1/logout",
-      {
-        method: "DELETE",
-        headers: tokens
-          ? { Authorization: `Bearer ${tokens.access_token}` }
-          : {},
-      },
-      false,
-    ),
-  recover: (token: string) =>
-    request<void>(
-      "/auth/v1/account/recovery/confirm",
-      { method: "POST", body: JSON.stringify({ token }) },
-      false,
-    ),
-  deleteAccount: (password: string) =>
-    request<void>("/auth/v1/user", {
-      method: "DELETE",
-      body: JSON.stringify({ password }),
-    }),
-};
 
 export async function postPage(path: string) {
   let next: string | null = null;

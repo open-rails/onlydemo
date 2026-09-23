@@ -10,11 +10,11 @@ import {
 } from "@openrails/billing-ui";
 import {
   APIError,
-  getSessionGeneration,
+  sessionKey,
   request,
   subscribeSession,
 } from "../api";
-import { useAuth } from "../auth-context";
+import { useAuth } from "../session";
 import {
   getAttempt,
   rememberCheckout,
@@ -36,10 +36,10 @@ import { Spinner } from "@/components/ui/spinner";
 import { ErrorState, FormError, Loading } from "./states";
 
 // One-use gateway tokens stay in memory, never in browser storage or URLs.
-const pendingRequests = new Map<string, { generation: number; body: object }>();
-let rememberedGeneration = getSessionGeneration();
+const pendingRequests = new Map<string, { generation: string; body: object }>();
+let rememberedGeneration = sessionKey();
 subscribeSession(() => {
-  const next = getSessionGeneration();
+  const next = sessionKey();
   if (next !== rememberedGeneration) {
     pendingRequests.clear();
     rememberedGeneration = next;
@@ -63,7 +63,7 @@ function makeSource(
   post: Post,
   offer: Offer,
   buyer: string,
-  generation: number,
+  generation: string,
   document: PaymentOptionsDocument,
   methods: PaymentMethod[],
   changed: (value: Checkout) => void,
@@ -92,7 +92,7 @@ function makeSource(
   }
   const frozenPlan = () => getAttempt(scope).offer?.plan || document.plan;
   const assertBuyer = () => {
-    if (getSessionGeneration() !== generation)
+    if (sessionKey() !== generation)
       throw new APIError(
         "Your account changed. Reopen checkout with the intended account.",
         409,
@@ -297,7 +297,7 @@ export function PurchaseCheckout({
 }) {
   const { user } = useAuth();
   const client = useQueryClient();
-  const generation = getSessionGeneration();
+  const generation = sessionKey();
   const [current, setCurrent] = useState<Checkout>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);

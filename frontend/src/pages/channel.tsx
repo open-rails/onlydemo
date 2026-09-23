@@ -8,7 +8,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useState, type FormEvent } from "react";
 import { APIError, request, postPage } from "../api";
 import { NotFoundPage } from "../App";
-import { useAuth } from "../auth-context";
+import { useAuth } from "../session";
 import type { Channel } from "../models";
 import { micros, money, duration } from "../format";
 import { HugeiconsIcon } from "@hugeicons/react";
