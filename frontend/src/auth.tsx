@@ -7,6 +7,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   APIError,
+  type PasswordPolicy,
   authAPI,
   getSession,
   getSessionGeneration,
@@ -86,11 +87,13 @@ function AuthForm({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const policy = useQuery({
+  const capabilities = useQuery({
     queryKey: ["auth", "capabilities"],
     queryFn: authAPI.capabilities,
     staleTime: Infinity,
-  }).data?.password;
+  }).data;
+  const policy = capabilities?.password,
+    username = capabilities?.username;
   const [recovery, setRecovery] = useState<string | null>(null);
   const [restored, setRestored] = useState(false);
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -206,15 +209,18 @@ function AuthForm({
       {mode === "register" && (
         <Field
           label="Username"
-          hint="Your public name. Use letters and numbers."
+          hint={
+            username &&
+            `Your public name: ${username.min_length}–${username.max_length} characters, starting with a letter.`
+          }
         >
           <input
             name="username"
-            pattern="[A-Za-z0-9]+"
+            pattern={username?.pattern}
             autoComplete="nickname"
             required
-            minLength={3}
-            maxLength={64}
+            minLength={username?.min_length}
+            maxLength={username?.max_length}
             placeholder="yourname"
           />
         </Field>
@@ -222,9 +228,7 @@ function AuthForm({
       <Field
         label="Password"
         hint={
-          mode === "register" && policy
-            ? `At least ${policy.min_length} characters.`
-            : undefined
+          mode === "register" && policy ? passwordHint(policy) : undefined
         }
       >
         <input
@@ -236,6 +240,15 @@ function AuthForm({
           required
           minLength={mode === "register" ? policy?.min_length : 1}
           maxLength={mode === "register" ? policy?.max_length : undefined}
+          onInput={(event) => {
+            const missing =
+              mode === "register" && policy
+                ? missingClasses(policy, event.currentTarget.value)
+                : [];
+            event.currentTarget.setCustomValidity(
+              missing.length ? `Add ${missing.join(", ")}.` : "",
+            );
+          }}
           placeholder={
             mode === "register"
               ? "Choose a strong password"
@@ -266,4 +279,26 @@ function AuthForm({
       )}
     </form>
   );
+}
+
+const passwordClasses = [
+  ["require_uppercase", "an uppercase letter", /\p{Lu}/u],
+  ["require_lowercase", "a lowercase letter", /\p{Ll}/u],
+  ["require_digit", "a digit", /\p{Nd}/u],
+  ["require_symbol", "a symbol", /[^\p{L}\p{Nd}]/u],
+] as const;
+function missingClasses(policy: PasswordPolicy, value: string) {
+  return passwordClasses
+    .filter(([key, , test]) => policy[key] && !test.test(value))
+    .map(([, label]) => label);
+}
+function passwordHint(policy: PasswordPolicy) {
+  const required = passwordClasses
+    .filter(([key]) => policy[key])
+    .map(([, label]) => label);
+  return [
+    `At least ${policy.min_length} characters`,
+    ...(required.length ? [`including ${required.join(", ")}`] : []),
+    ...(policy.reject_common ? ["not a common password"] : []),
+  ].join("; ") + ".";
 }
