@@ -202,10 +202,11 @@ function AuthForm({
       {mode === "register" && (
         <Field
           label="Username"
-          hint="Your public name. Letters, numbers, and dashes work well."
+          hint="Your public name. Use letters and numbers."
         >
           <input
             name="username"
+            pattern="[A-Za-z0-9]+"
             autoComplete="nickname"
             required
             minLength={3}

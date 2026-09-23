@@ -10,6 +10,7 @@ import { request } from "../api";
 import { useAuth } from "../auth-context";
 import {
   getAttempt,
+  checkoutAttempt,
   saveAttempt,
   rememberCheckout,
   finishCheckout,
@@ -79,14 +80,25 @@ export function PostPage() {
         throw new Error("Select an available offer and sign in.");
       const scope = `post:${auth.user.id}:${id}:${offer.price_id}`;
       const attempt = getAttempt(scope);
-      const result = attempt.checkoutID
+      const original = attempt.request || {
+        path: `/api/v1/posts/${id}/checkout`,
+        body: { price_id: offer.price_id },
+      };
+      saveAttempt(scope, { ...attempt, request: original });
+      let result = attempt.checkoutID
         ? await request<Checkout>(`/api/v1/checkouts/${attempt.checkoutID}`)
-        : await request<Checkout>(`/api/v1/posts/${id}/checkout`, {
-            method: "POST",
-            headers: { "Idempotency-Key": attempt.key },
-            body: JSON.stringify({ price_id: offer.price_id }),
-          });
-      saveAttempt(scope, { ...attempt, checkoutID: result.id });
+        : null;
+      if (!result || (result.status === "created" && !result.url))
+        result = await request<Checkout>(original.path, {
+          method: "POST",
+          headers: { "Idempotency-Key": attempt.key },
+          body: JSON.stringify(original.body),
+        });
+      saveAttempt(scope, {
+        ...attempt,
+        request: original,
+        checkoutID: result.id,
+      });
       rememberCheckout(result.id, scope);
       setLatestCheckout(auth.user.id, result.id);
       return result;
@@ -360,6 +372,28 @@ export function CheckoutReturnPage() {
     refetchInterval: (query) =>
       terminalCheckout(query.state.data?.status) ? false : 1800,
   });
+  const resume = useMutation({
+    mutationFn: async () => {
+      const previous = checkoutAttempt(id);
+      if (!previous?.request)
+        throw new Error(
+          "The original purchase request is unavailable. Return to the post in the browser that started checkout.",
+        );
+      return request<Checkout>(previous.request.path, {
+        method: "POST",
+        headers: { "Idempotency-Key": previous.key },
+        body: JSON.stringify(previous.request.body),
+      });
+    },
+    onSuccess: (result) => {
+      if (result.url && !terminalCheckout(result.status)) {
+        const url = new URL(result.url);
+        if (url.protocol !== "https:" || url.hostname !== "checkout.stripe.com")
+          throw new Error("Unexpected checkout destination.");
+        location.assign(url.href);
+      } else void status.refetch();
+    },
+  });
   if (!id)
     return (
       <EmptyState
@@ -421,6 +455,18 @@ export function CheckoutReturnPage() {
           Checking securely…
         </div>
       )}
+      {value.status === "created" && (
+        <div className="inline-actions">
+          <Button busy={resume.isPending} onClick={() => resume.mutate()}>
+            Continue the same checkout
+          </Button>
+        </div>
+      )}
+      {resume.error && (
+        <p className="form-error" role="alert">
+          {resume.error.message}
+        </p>
+      )}
       <div className="inline-actions">
         <Link to="/me?tab=library" className="button button-primary">
           Open my library
@@ -429,7 +475,7 @@ export function CheckoutReturnPage() {
         <Link to="/" className="button button-secondary">
           Explore stories
         </Link>
-        {!ended && (
+        {!complete && (
           <Button variant="ghost" onClick={() => void status.refetch()}>
             Check again
           </Button>

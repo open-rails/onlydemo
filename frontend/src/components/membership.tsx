@@ -12,6 +12,7 @@ import { request } from "../api";
 import { useAuth } from "../auth-context";
 import {
   clearAttempt,
+  checkoutAttempt,
   finishCheckout,
   getAttempt,
   rememberCheckout,
@@ -71,6 +72,13 @@ function MembershipFlow({
   const [method, setMethod] = useState("");
   const [addCard, setAddCard] = useState(false);
   const [quote, setQuote] = useState<Checkout | null>(null);
+  const currentScope = `membership-current:${auth.user?.id}:${channel.id}`;
+  const [resumeID] = useState(() => getAttempt(currentScope).checkoutID);
+  const resume = useQuery({
+    queryKey: ["resume-membership", resumeID, auth.user?.id],
+    queryFn: () => request<Checkout>(`/billing/v1/me/checkout/${resumeID}`),
+    enabled: !!resumeID && !!auth.user,
+  });
   const config = useQuery({
     queryKey: ["config"],
     queryFn: () => request<AppConfig>("/api/v1/config", {}, false),
@@ -89,16 +97,26 @@ function MembershipFlow({
         return request<Checkout>(
           `/billing/v1/me/checkout/${attempt.checkoutID}`,
         );
-      const result = await request<Checkout>(
-        `/api/v1/channels/${channel.id}/subscribe`,
-        {
-          method: "POST",
-          headers: { "Idempotency-Key": attempt.key },
-          body: JSON.stringify({ price_id: price, payment_method_id: method }),
-        },
-      );
-      saveAttempt(scope, { ...attempt, checkoutID: result.id });
+      const original = attempt.request || {
+        path: `/api/v1/channels/${channel.id}/subscribe`,
+        body: { price_id: price, payment_method_id: method },
+      };
+      saveAttempt(scope, { ...attempt, request: original });
+      const result = await request<Checkout>(original.path, {
+        method: "POST",
+        headers: { "Idempotency-Key": attempt.key },
+        body: JSON.stringify(original.body),
+      });
+      saveAttempt(scope, {
+        ...attempt,
+        request: original,
+        checkoutID: result.id,
+      });
       rememberCheckout(result.id, scope);
+      saveAttempt(currentScope, {
+        ...getAttempt(currentScope),
+        checkoutID: result.id,
+      });
       return request<Checkout>(`/billing/v1/me/checkout/${result.id}`);
     },
     onSuccess: setQuote,
@@ -128,12 +146,22 @@ function MembershipFlow({
         }}
       />
     );
-  if (quote)
+  if (resumeID && resume.isPending) return <Loading />;
+  if (resume.error)
+    return (
+      <ErrorState error={resume.error} retry={() => void resume.refetch()} />
+    );
+  const existing = quote || resume.data;
+  if (existing)
     return (
       <MembershipConfirmation
-        checkout={quote}
+        checkout={existing}
         publishableKey={config.data?.stripe_publishable_key || null}
-        onDone={async () => {
+        onDone={async (status) => {
+          if (status !== "expired") {
+            clearAttempt(currentScope);
+            finishCheckout(existing.id);
+          }
           await client.invalidateQueries();
           onClose();
         }}
@@ -408,8 +436,9 @@ export function MembershipConfirmation({
 }: {
   checkout: Checkout;
   publishableKey: string | null;
-  onDone: () => void;
+  onDone: (status: string) => void;
 }) {
+  const client = useQueryClient();
   const [accepted, setAccepted] = useState(false);
   const [error, setError] = useState("");
   const [authenticating, setAuthenticating] = useState(false);
@@ -429,9 +458,27 @@ export function MembershipConfirmation({
         body: JSON.stringify({ payment: { rail: "stripe" } }),
       }),
     onSuccess: (value) => {
-      state.refetch();
+      client.setQueryData(["membership-checkout", checkout.id], value);
+      void state.refetch();
       if (["succeeded", "failed", "canceled"].includes(value.status))
         finishAttempt(value.id);
+    },
+  });
+  const prepare = useMutation({
+    mutationFn: async () => {
+      const previous = checkoutAttempt(checkout.id);
+      if (!previous?.request)
+        throw new Error(
+          "The original quote request is unavailable in this browser.",
+        );
+      return request<Checkout>(previous.request.path, {
+        method: "POST",
+        headers: { "Idempotency-Key": previous.key },
+        body: JSON.stringify(previous.request.body),
+      });
+    },
+    onSuccess: async () => {
+      await state.refetch();
     },
   });
   const current = state.data;
@@ -477,7 +524,7 @@ export function MembershipConfirmation({
             included posts.
           </p>
         </div>
-        <Button onClick={onDone}>Start reading</Button>
+        <Button onClick={() => onDone(current.status)}>Start reading</Button>
       </div>
     );
   if (terminalCheckout(current.status))
@@ -494,7 +541,7 @@ export function MembershipConfirmation({
           variant="secondary"
           onClick={() => {
             if (current.status !== "expired") finishAttempt(current.id);
-            onDone();
+            onDone(current.status);
           }}
         >
           Back to channel
@@ -519,6 +566,20 @@ export function MembershipConfirmation({
         Includes membership posts while your subscription is active. Separately
         priced posts are extra. Purchased posts remain yours after cancellation.
       </p>
+      {!quote && !current.operation && (
+        <Button
+          variant="secondary"
+          busy={prepare.isPending}
+          onClick={() => prepare.mutate()}
+        >
+          Restore the original membership quote
+        </Button>
+      )}
+      {prepare.error && (
+        <p className="form-error" role="alert">
+          {prepare.error.message}
+        </p>
+      )}
       {current.operation ? (
         <>
           <div className="notice">

@@ -1,6 +1,7 @@
 interface Attempt {
   key: string;
   checkoutID?: string;
+  request?: { path: string; body: object };
 }
 const prefix = "openrails-attempt:";
 const fallback = new Map<string, Attempt>();
@@ -48,5 +49,20 @@ export function finishCheckout(checkoutID: string) {
     sessionStorage.removeItem("openrails-checkout:" + checkoutID);
   } catch {
     /* Read-only confirmation remains usable. */
+  }
+}
+
+export function checkoutAttempt(checkoutID: string) {
+  try {
+    const scope = sessionStorage.getItem("openrails-checkout:" + checkoutID);
+    if (!scope) return null;
+    const attempt =
+      fallback.get(scope) ||
+      (JSON.parse(
+        sessionStorage.getItem(prefix + scope) || "null",
+      ) as Attempt | null);
+    return attempt?.checkoutID === checkoutID ? attempt : null;
+  } catch {
+    return null;
   }
 }

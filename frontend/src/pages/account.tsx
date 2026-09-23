@@ -79,7 +79,7 @@ export function AccountPage() {
       )}
       {summary.isPending ? (
         <Loading />
-      ) : (
+      ) : summary.error ? null : (
         <>
           {tab === "library" && (
             <>
