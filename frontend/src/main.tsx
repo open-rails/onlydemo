@@ -9,6 +9,7 @@ import { ChannelPage, NewChannelPage } from "./pages/channel";
 import { PostPage, CheckoutReturnPage } from "./pages/post";
 import { AccountPage } from "./pages/account";
 import { InvitePage } from "./components/channel-team";
+import { AuthCallbackPage, ResetPasswordPage } from "./pages/auth-links";
 import "@openrails/billing-ui/styles.css";
 import "./styles.css";
 
@@ -32,6 +33,8 @@ const router = createBrowserRouter([
       { path: "/channels/new", element: <NewChannelPage /> },
       { path: "/channels/:slug", element: <ChannelPage /> },
       { path: "/posts/:id", element: <PostPage /> },
+      { path: "/reset", element: <ResetPasswordPage /> },
+      { path: "/login/callback", element: <AuthCallbackPage /> },
       {
         path: "/checkout/return",
         element: (

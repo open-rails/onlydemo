@@ -18,8 +18,8 @@ importers:
         specifier: ^1.1.10
         version: 1.1.10(react@19.3.0)
       '@openrails/auth-ui':
-        specifier: https://github.com/open-rails/auth-ui/releases/download/v0.1.0-alpha.1/openrails-auth-ui-0.1.0-alpha.1.tgz
-        version: https://github.com/open-rails/auth-ui/releases/download/v0.1.0-alpha.1/openrails-auth-ui-0.1.0-alpha.1.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+        specifier: https://github.com/open-rails/auth-ui/releases/download/v0.1.0/openrails-auth-ui-0.1.0.tgz
+        version: https://github.com/open-rails/auth-ui/releases/download/v0.1.0/openrails-auth-ui-0.1.0.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@openrails/billing-ui':
         specifier: https://github.com/open-rails/billing-ui/releases/download/v0.4.1/openrails-billing-ui-0.4.1.tgz
         version: https://github.com/open-rails/billing-ui/releases/download/v0.4.1/openrails-billing-ui-0.4.1.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -414,9 +414,9 @@ packages:
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
 
-  '@openrails/auth-ui@https://github.com/open-rails/auth-ui/releases/download/v0.1.0-alpha.1/openrails-auth-ui-0.1.0-alpha.1.tgz':
-    resolution: {integrity: sha512-eI5Mdj8KKGgUXrn1fRQr3kGay7PMqMX5uMcBOSn8+ya6H0HdTArkoDTmz/bPodLwg1uKSKJ6kTmfUNNDKPSVyA==, tarball: https://github.com/open-rails/auth-ui/releases/download/v0.1.0-alpha.1/openrails-auth-ui-0.1.0-alpha.1.tgz}
-    version: 0.1.0-alpha.1
+  '@openrails/auth-ui@https://github.com/open-rails/auth-ui/releases/download/v0.1.0/openrails-auth-ui-0.1.0.tgz':
+    resolution: {integrity: sha512-JlhIN2v2k0YZNsWzaQ82xg2RCKgLuS0r465X+Om+Awrj7Jvi+YLXFEJ7JfKBXhkzEGcwW7Xv4mN4NQdKcA3zNg==, tarball: https://github.com/open-rails/auth-ui/releases/download/v0.1.0/openrails-auth-ui-0.1.0.tgz}
+    version: 0.1.0
     engines: {node: '>=22.12.0'}
     peerDependencies:
       '@solana/wallet-adapter-react': '>=0.15 <1'
@@ -1934,6 +1934,9 @@ packages:
     resolution: {integrity: sha512-+Owyggi9IxT1ePKGafcI87ubSmxol6smwJ+RAHDQlx9+9cPwFWDiKFFCPuWhr9ignlGpZ9vDQLw67N4dcTVFEA==}
     engines: {node: '>=20'}
 
+  qrcode-generator@2.0.4:
+    resolution: {integrity: sha512-mZSiP6RnbHl4xL2Ap5HfkjLnmxfKcPWpWe/c+5XxCuetEenqmNFf1FH/ftXPCtFG5/TDobjsjz6sSNL0Sr8Z9g==}
+
   qs@6.16.0:
     resolution: {integrity: sha512-h6fhOIaRrID2CbEY2fqs+7t+UXZo+MLAnU5gRIq85uFtdiUPCdsApMlHhXogKVM4HM2DVbIjGNTTYH2OcmP1vA==}
     engines: {node: '>=0.6'}
@@ -1956,6 +1959,11 @@ packages:
 
   react-is@16.13.1:
     resolution: {integrity: sha512-24e6ynE2H+OKt4kqsOvNd8kBpV65zoxbA4BVsEOB3ARVWQki/DHzaUoC5KuON/BiccDaCCTZBuOcfZs70kR8bQ==}
+
+  react-qr-code@2.2.0:
+    resolution: {integrity: sha512-e5nS0UUN22K3Nf8KBRUzemfdJ6OmnN5w+kbnj1lvJaol9RyVRFeGl05bCkxSN2ZegbLxjjYjX1+mmAoX9+fAhw==}
+    peerDependencies:
+      react: '*'
 
   react-router-dom@7.18.4:
     resolution: {integrity: sha512-yrfmJHIpDG7taCpqKjT1G5B6q3O2K+RN8/fgNf0lTjCwiPbQ0ei6vXX9ZjQR+7ld8Tr7Z5xmyMnZ8YJrphWQUw==}
@@ -2733,7 +2741,7 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.3
 
-  '@openrails/auth-ui@https://github.com/open-rails/auth-ui/releases/download/v0.1.0-alpha.1/openrails-auth-ui-0.1.0-alpha.1.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
+  '@openrails/auth-ui@https://github.com/open-rails/auth-ui/releases/download/v0.1.0/openrails-auth-ui-0.1.0.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:
       '@base-ui/react': 1.8.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@hugeicons/core-free-icons': 4.3.5
@@ -2743,6 +2751,7 @@ snapshots:
       input-otp: 1.5.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       react: 19.3.0
       react-dom: 19.3.0(react@19.3.0)
+      react-qr-code: 2.2.0(react@19.3.0)
     transitivePeerDependencies:
       - '@date-fns/tz'
       - '@types/react'
@@ -4069,6 +4078,8 @@ snapshots:
     dependencies:
       hookified: 2.2.0
 
+  qrcode-generator@2.0.4: {}
+
   qs@6.16.0:
     dependencies:
       es-define-property: 1.0.1
@@ -4091,6 +4102,12 @@ snapshots:
       scheduler: 0.28.0
 
   react-is@16.13.1: {}
+
+  react-qr-code@2.2.0(react@19.3.0):
+    dependencies:
+      prop-types: 15.8.1
+      qrcode-generator: 2.0.4
+      react: 19.3.0
 
   react-router-dom@7.18.4(react-dom@19.3.0(react@19.3.0))(react@19.3.0):
     dependencies:
