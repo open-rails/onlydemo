@@ -85,7 +85,11 @@ func smoke() error {
 	if err != nil {
 		return err
 	}
-	cfg := Config{Media: media, DatabaseURL: databaseURL, PublicURL: base, AuthIssuer: base, AuthAudience: "demo-smoke", BillingPSPs: []string{"stripe"}, StripePublishableKey: "pk_test_manual_fake_only", StripeSecretKey: "sk_test_manual_fake_only", StripeAccountID: "acct_demo_test", StripeWebhookSecret: smokeWebhookSecret}
+	postDeletion, err := parsePostDeletionPolicy("", "")
+	if err != nil {
+		return err
+	}
+	cfg := Config{PostDeletion: postDeletion, Media: media, DatabaseURL: databaseURL, PublicURL: base, AuthIssuer: base, AuthAudience: "demo-smoke", BillingPSPs: []string{"stripe"}, StripePublishableKey: "pk_test_manual_fake_only", StripeSecretKey: "sk_test_manual_fake_only", StripeAccountID: "acct_demo_test", StripeWebhookSecret: smokeWebhookSecret}
 	if err = initializeDatabase(ctx, cfg, pool); err != nil {
 		return err
 	}
