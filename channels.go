@@ -132,15 +132,15 @@ func (api *channelAPI) active(ctx context.Context, id string) (bool, error) {
 	return active, err
 }
 
-func (api *channelAPI) allowed(ctx context.Context, userID, id string, permission authkit.Perm) (bool, error) {
+func (api *channelAPI) allowed(ctx context.Context, userID, channelID string, permission authkit.Perm) (bool, error) {
 	if userID == "" {
 		return false, nil
 	}
-	active, err := api.active(ctx, id)
+	active, err := api.active(ctx, channelID)
 	if err != nil || !active {
 		return false, err
 	}
-	return api.auth.client.CanOnGroup(ctx, authkit.UserSubject(userID), id, permission)
+	return api.auth.client.CanOnGroup(ctx, authkit.UserSubject(userID), channelID, permission)
 }
 
 // A separate session keeps the one-connection application pool available while
