@@ -30,6 +30,8 @@ type Config struct {
 	ContentSchema string
 	Media         mediaConfig
 	PostDeletion  postDeletionPolicy
+	// MembershipHours is each new channel membership price's renewal period.
+	MembershipHours int
 }
 
 // postDeletionPolicy is what deleting a paid post does to its recent purchases.
@@ -56,7 +58,7 @@ func loadConfig() (Config, error) {
 			case "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_KEYS_PATH", "AUTH_SCHEMA", "APP_SCHEMA", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA", "BILLING_PSPS":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
 			default:
-				if key == "CONTENT_SCHEMA" || key == "POST_DELETION_REFUND" || key == "POST_DELETION_REFUND_WINDOW" || strings.HasPrefix(key, "MEDIA_") {
+				if key == "CONTENT_SCHEMA" || key == "POST_DELETION_REFUND" || key == "POST_DELETION_REFUND_WINDOW" || key == "MEMBERSHIP_PERIOD" || strings.HasPrefix(key, "MEDIA_") {
 					return strings.ToLower(key), value
 				}
 				return "", nil
@@ -120,6 +122,9 @@ func loadConfig() (Config, error) {
 	if cfg.PostDeletion, err = parsePostDeletionPolicy(k.String("post_deletion_refund"), k.String("post_deletion_refund_window")); err != nil {
 		return Config{}, err
 	}
+	if cfg.MembershipHours, err = parseMembershipPeriod(k.String("membership_period")); err != nil {
+		return Config{}, err
+	}
 	if cfg.Media, err = loadMediaConfig(k.String); err != nil {
 		return Config{}, err
 	}
@@ -170,6 +175,18 @@ func parsePostDeletionPolicy(action, window string) (postDeletionPolicy, error) 
 		policy.Window = d
 	}
 	return policy, nil
+}
+
+// parseMembershipPeriod defaults to 720h; OpenRails periods are whole hours.
+func parseMembershipPeriod(raw string) (int, error) {
+	if raw = strings.TrimSpace(raw); raw == "" {
+		return 720, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < time.Hour || d%time.Hour != 0 {
+		return 0, fmt.Errorf("MEMBERSHIP_PERIOD must be whole hours of at least 1h, such as 720h")
+	}
+	return int(d / time.Hour), nil
 }
 
 // Libraries own distinct relation names and can share a schema. Validate

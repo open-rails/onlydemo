@@ -30,6 +30,8 @@ type billingService struct {
 	// psps are the enabled PSPs every offer price declares.
 	psps         []string
 	postDeletion postDeletionPolicy
+	// membershipHours is the renewal period of new membership prices.
+	membershipHours int
 }
 
 func initializeBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool) error {
@@ -95,7 +97,7 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 	}
 	// This assignment precedes shared-fleet startup and HTTP publication.
 	auth.billing = client
-	return &billingService{runtime: runtime, client: client, psps: slices.Sorted(maps.Keys(cfg.PSPs)), postDeletion: cfg.PostDeletion}, nil
+	return &billingService{runtime: runtime, client: client, psps: slices.Sorted(maps.Keys(cfg.PSPs)), postDeletion: cfg.PostDeletion, membershipHours: cfg.MembershipHours}, nil
 }
 
 func (b *billingService) RiverJobs() riverkit.Contribution { return b.runtime.RiverJobs() }

@@ -89,7 +89,7 @@ func (b *billingService) setOffer(ctx context.Context, channelID, resource, titl
 		product.EntitlementsSpec = openrails.CatalogValue(map[string]*int{resource: nil})
 		duration := openrails.CatalogNull[int]()
 		if recurring {
-			duration = openrails.CatalogValue(720)
+			duration = openrails.CatalogValue(b.membershipHours)
 		}
 		product.Prices = []openrails.CatalogApplyPrice{{Key: resource + ":purchase", Currency: openrails.CatalogValue(currency), UnitAmount: openrails.CatalogValue(price.UnitAmount), AccessDurationHours: duration, AutoRenew: openrails.CatalogValue(recurring), Archived: openrails.CatalogValue(false), PSPs: openrails.CatalogValue(b.psps)}}
 	}

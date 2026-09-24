@@ -70,6 +70,7 @@ results are synchronous and OpenRails reconciles from the gateway.
 | `AUTH_KEYS_PATH` | Dev signing and TOTP key directory (default `.runtime/auth`), so sessions and authenticator apps survive restarts |
 | `AUTH_SCHEMA`, `APP_SCHEMA`, `BILLING_SCHEMA`, `RIVER_SCHEMA` | Optional independent schema names; shared `public` is supported |
 | `BILLING_PSPS` | Enabled PSP keys, e.g. `stripe,nmi`; each needs its variables (above) |
+| `MEMBERSHIP_PERIOD` | Renewal period of membership prices set afterwards, in whole hours (default `720h`; e.g. `1h` to test rebilling) |
 | `POST_DELETION_REFUND`, `POST_DELETION_REFUND_WINDOW` | Deleting a paid post: `refund` (default), `review` or `none` for one-time purchases made within the window before deletion (default `720h`). A post that becomes free refunds nothing |
 | `CONTENT_SCHEMA` | ContentKit baseline schema (default `content`); holds the upload limiter's counters |
 | `MEDIA_S3_*` | Media bucket: `ENDPOINT`, `PUBLIC_ENDPOINT` (browser presign host), `BUCKET`, `REGION`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY` |
@@ -105,8 +106,8 @@ price or sales ledger. OpenRails products grant opaque resource keys such as
 `post:<stable-id>` and `channel:<channel-id>:membership`. Catalog offers own native
 currency amounts, availability and immutable price versions. USD offers appear
 first; another displayed currency is charged only when explicitly selected.
-Channel membership currently uses a 720-hour period: **every 30 days**, not a calendar
-month. Repricing moves a stable price key and preserves already accepted terms.
+Channel membership renews every `MEMBERSHIP_PERIOD` (default `720h`: **every 30 days**,
+not a calendar month); a change applies to prices set afterwards. Repricing moves a stable price key and preserves already accepted terms.
 
 ## Media
 
