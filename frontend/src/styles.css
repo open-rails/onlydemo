@@ -1000,6 +1000,7 @@
     .sidebar .brand > span:last-child,
   .side-nav a span,
   .sidebar-cta span,
+  .sidebar-footer button span,
   .sidebar-user > span:last-child {
       display: none;
     }

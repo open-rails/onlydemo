@@ -76,17 +76,18 @@ export function AppLayout() {
       <HugeiconsIcon icon={dark ? Sun03Icon : Moon02Icon} />
     </Button>
   );
-  const logoutButton = (
+  const logoutButton = (labelled: boolean) => (
     <Button
       variant="ghost"
-      size="icon"
+      size={labelled ? "sm" : "icon"}
       onClick={() => {
         void logout();
       }}
-      aria-label="Sign out"
+      aria-label={labelled ? undefined : "Sign out"}
       title="Sign out"
     >
       <HugeiconsIcon icon={Logout03Icon} />
+      {labelled && <span>Sign out</span>}
     </Button>
   );
   return (
@@ -102,7 +103,7 @@ export function AppLayout() {
           {themeButton}
           {!auth.loading &&
             (auth.user ? (
-              logoutButton
+              logoutButton(false)
             ) : (
               <Button size="sm" onClick={auth.openLogin}>
                 Sign in
@@ -151,7 +152,7 @@ export function AppLayout() {
             {auth.loading ? (
               <Spinner aria-label="Loading account" />
             ) : auth.user ? (
-              logoutButton
+              logoutButton(true)
             ) : (
               <>
                 <Button size="sm" onClick={auth.openLogin}>
