@@ -1,8 +1,46 @@
-import { createAuthClient } from "@openrails/auth-ui/client";
+import { createAuthClient, readAuthKitError } from "@openrails/auth-ui/client";
 import { createBillingClient } from "@openrails/billing-ui/client";
 import { sessionIdentity } from "@openrails/auth-ui/react";
 
-export const auth = createAuthClient({ baseUrl: "/auth/v1" });
+export type UnprovenContact = { identifier: string; channel: string };
+type ProveContact = (contact: UnprovenContact) => Promise<boolean>;
+let proveContact: ProveContact | null = null;
+export function onUnprovenContact(handler: ProveContact) {
+  proveContact = handler;
+  return () => {
+    if (proveContact === handler) proveContact = null;
+  };
+}
+
+// AuthKit refuses new sign-in methods (2FA, passkeys, providers, wallets)
+// while no address is proven. Ask the user to prove it, then retry once.
+async function authkitFetch(input: RequestInfo | URL, init?: RequestInit) {
+  const response = await fetch(input, init);
+  if (response.status !== 403 || !proveContact || input instanceof Request)
+    return response;
+  const error = await readAuthKitError(response.clone()).catch(() => null);
+  const contact = error?.metadata;
+  if (
+    error?.code !== "verification_required" ||
+    contact?.reason !== "contact_unproven" ||
+    typeof contact.identifier !== "string"
+  )
+    return response;
+  const proven = await proveContact({
+    identifier: contact.identifier,
+    channel: String(contact.channel ?? "email"),
+  });
+  if (!proven) return response;
+  const headers = new Headers(init?.headers);
+  const token = auth.getAccessToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  return fetch(input, { ...init, headers });
+}
+
+export const auth = createAuthClient({
+  baseUrl: "/auth/v1",
+  fetch: authkitFetch,
+});
 export const billing = createBillingClient({
   baseUrl: "/billing/v1",
   fetch: auth.authFetch,

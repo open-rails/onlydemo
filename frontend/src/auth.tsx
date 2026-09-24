@@ -19,10 +19,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import type { AuthSession } from "@openrails/auth-ui/client";
 import { auth } from "./api";
 import { BillingHost } from "./billing";
 import { Loading } from "./components/states";
 import { SignInContext, type SignInMode } from "./session";
+import { ContactVerificationHost } from "./verify";
 
 // AuthKit here soft-deletes: accounts are restorable for 30 days.
 const messages = {
@@ -38,12 +40,18 @@ const messages = {
   },
 };
 
+const userOf = (session: AuthSession) =>
+  session.status === "authenticated" ? session.userId : null;
+
 export function AuthHost({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   return (
     <AuthProvider
       client={auth}
-      onSessionChange={() => void queryClient.resetQueries()}
+      onSessionChange={(next, previous) => {
+        // A same-user session rotation (e.g. proving an address) keeps data.
+        if (userOf(next) !== userOf(previous)) void queryClient.resetQueries();
+      }}
     >
       <AuthUiProvider appearance={{ theme: "inherit" }} messages={messages}>
         <StepUpProvider>
@@ -79,6 +87,7 @@ function SignInHost({ children }: { children: ReactNode }) {
         onSignedIn={() => setMode(null)}
       />
       <SessionContinuation />
+      <ContactVerificationHost />
     </SignInContext.Provider>
   );
 }

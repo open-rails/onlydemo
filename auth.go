@@ -70,9 +70,6 @@ func newAuth(ctx context.Context, config Config, pool *pgxpool.Pool) (*appAuth, 
 			Verification:   embedded.RegistrationVerificationOptional,
 		},
 		Keys: keys,
-		Ephemeral: embedded.EphemeralConfig{
-			AllowMemory: true,
-		},
 		TwoFactor: embedded.TwoFactorConfig{
 			Mode:          embedded.TwoFactorOptional,
 			Methods:       []embedded.TwoFactorMethod{embedded.TwoFactorTOTP, embedded.TwoFactorEmail},

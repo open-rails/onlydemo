@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, useContext, useState } from "react";
 import {
   useAuthClient,
   useSession,
@@ -14,7 +14,15 @@ export const SignInContext = createContext<((mode: SignInMode) => void) | null>(
 export function useAuth() {
   const client = useAuthClient();
   const session = useSession();
-  const { user, loading } = useUser();
+  const { user: loaded, loading } = useUser();
+  // Keep the profile while the same user's session rotates and /me reloads.
+  const [kept, setKept] = useState(loaded);
+  if (loaded && loaded !== kept) setKept(loaded);
+  const user =
+    loaded ??
+    (session.status === "authenticated" && kept?.id === session.userId
+      ? kept
+      : null);
   const open = useContext(SignInContext);
   if (!open) throw new Error("Sign-in host is missing");
   return {

@@ -301,8 +301,11 @@ permission checks still read current role authority.
 ## Sign-in and security
 
 The frontend uses `@openrails/auth-ui`: the access token stays in memory and the
-refresh token is an HttpOnly cookie on `/auth/v1/token`. Email verification is
-optional and two-factor (authenticator app or email) is opt-in from Account.
+refresh token is an HttpOnly cookie (`__Host-authkit_rt` on HTTPS, `authkit_rt`
+on local HTTP). Email verification is optional, but AuthKit refuses new sign-in
+methods (2FA, passkeys, providers, wallets) until the address is proven; the UI
+then asks for the code and retries. Two-factor (authenticator app or email) is
+opt-in from Account. `task seed` marks its `example.test` creators verified.
 Sign-in, registration, 2FA, recovery and the Account security panels are
 auth-ui's styled components; AuthKit's emailed links land on `/verify`
 (`VerifyLink`) and `/reset` (`ResetPasswordForm`), OIDC on `/login/callback`.

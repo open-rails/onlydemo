@@ -97,8 +97,31 @@ func seed(ctx context.Context, base string, out io.Writer) error {
 		}
 		fmt.Fprintf(out, "seeded @%s (%d posts)\n", creator.channel, len(creator.posts))
 	}
+	if err := markSeedCreatorsVerified(ctx); err != nil {
+		return err
+	}
 	fmt.Fprintf(out, "creator logins: <username>@example.test / %s\n", seedPassword)
 	return nil
+}
+
+// Registration leaves addresses unproven, and AuthKit refuses new sign-in
+// methods until one is proven. The example.test addresses cannot receive mail,
+// so seed vouches for its own display accounts.
+func markSeedCreatorsVerified(ctx context.Context) error {
+	return withAuth(ctx, func(a *appAuth) error {
+		for _, creator := range seedCreators {
+			user, err := a.client.GetUserByEmail(ctx, creator.username+"@example.test")
+			if err != nil || user == nil {
+				return fmt.Errorf("%s: account not found: %v", creator.username, err)
+			}
+			if !user.EmailVerified {
+				if err := a.client.MarkEmailVerified(ctx, user.ID); err != nil {
+					return fmt.Errorf("%s verify: %w", creator.username, err)
+				}
+			}
+		}
+		return nil
+	})
 }
 
 type seedClient struct {

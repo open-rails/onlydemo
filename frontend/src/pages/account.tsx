@@ -29,6 +29,7 @@ import { UserAvatar, PostCard, ChannelCard } from "../components/cards";
 import { userRef, useSlot, useSlotSaved } from "../media";
 import { useAuth } from "../session";
 import { channelsPath, newChannelPath } from "../paths";
+import { VerifyEmailBanner } from "../verify";
 
 const titles: Record<string, string> = {
   library: "Purchased",
@@ -248,6 +249,7 @@ function AccountSettings({ user }: { user: AccountData["user"] }) {
   const saved = useSlotSaved();
   return (
     <>
+      <VerifyEmailBanner />
       <Card className="mb-6">
         <CardContent>
           <AvatarUpload
