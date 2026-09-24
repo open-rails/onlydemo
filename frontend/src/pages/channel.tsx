@@ -17,7 +17,6 @@ import {
   Add01Icon,
   ArrowLeft02Icon,
   ArrowRight02Icon,
-  DollarCircleIcon,
   StarIcon,
   Tick02Icon,
   UserGroupIcon,
@@ -161,14 +160,6 @@ export function ChannelPage() {
                   New post
                 </Button>
               )}
-              <Button
-                variant="outline"
-                size="icon-lg"
-                className="rounded-full"
-                aria-label="Tip creator"
-              >
-                <HugeiconsIcon icon={DollarCircleIcon} />
-              </Button>
               <Button
                 variant="outline"
                 size="icon-lg"

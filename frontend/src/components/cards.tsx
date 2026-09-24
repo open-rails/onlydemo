@@ -4,7 +4,6 @@ import { cn } from "cn";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Bookmark02Icon,
-  DollarCircleIcon,
   FavouriteIcon,
   Image01Icon,
   Message01Icon,
@@ -153,10 +152,6 @@ export function PostCard({ post, handle }: { post: Post; handle?: string }) {
         >
           <HugeiconsIcon icon={Message01Icon} size={21} />
         </Button>
-        <Link to={`/channels/${post.channel_slug}`} className="tip-link">
-          <HugeiconsIcon icon={DollarCircleIcon} size={21} />
-          Send tip
-        </Link>
         <span className="feed-actions-end">
           {post.purchased ? (
             <Badge className="bg-success/10 text-success">

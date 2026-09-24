@@ -506,21 +506,6 @@
   .feed-actions .liked svg {
     fill: currentColor;
   }
-  .tip-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    padding: 8px 10px;
-    border-radius: 999px;
-    color: var(--muted-foreground);
-    font-size: 0.8rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-  }
-  .tip-link:hover {
-    color: var(--primary);
-  }
   .feed-actions-end {
     margin-left: auto;
     display: flex;
@@ -1104,9 +1089,6 @@
     .section-heading {
       align-items: flex-start;
       flex-direction: column;
-    }
-    .tip-link {
-      padding-inline: 6px;
     }
   }
   @media (prefers-reduced-motion: reduce) {
