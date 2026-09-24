@@ -483,6 +483,67 @@ func TestMediaEndToEnd(t *testing.T) {
 		h.waitSlot(t, "avatar from post image", avatar, before["version"].(string), 128, 256)
 	})
 
+	t.Run("video poster and hover preview", func(t *testing.T) {
+		if !h.video {
+			t.Skip("ffmpeg not installed")
+		}
+		body := map[string]any{"channel_id": channelID, "slug": "p-poster", "title": "poster", "body": "text", "access_policy": "public"}
+		id := int64(owner.call("POST", "/api/v1/posts", body, "", 201)["id"].(float64))
+		ref := postRefBody(id)
+		clip := owner.upload(ref, "", testVideo(t, 640, 360), "video/mp4", 200)
+		owner.call("POST", "/api/v1/media/upload/commit", map[string]any{"ref": ref, "ops": []media.Op{{Op: media.OpInsert, Name: "clip.mp4", Original: clip}}}, "", 200)
+		h.waitDerived(owner, id)
+
+		listed := func() post {
+			var p post
+			res, raw := anon.do("GET", fmt.Sprintf("/api/v1/posts/%d", id), nil, "")
+			if res.StatusCode != 200 || json.Unmarshal(raw, &p) != nil {
+				t.Fatalf("post %d: %s", res.StatusCode, raw)
+			}
+			return p
+		}
+		// The worker grabs an automatic frame; the app's image job encodes it and records the stamp.
+		eventually(t, "automatic poster listed", func() bool { p := listed(); return p.Poster != nil && len(p.Poster.Outputs) > 0 })
+		first := listed()
+		if first.HoverPreview == nil || !strings.Contains(first.HoverPreview.MP4, "hover_preview_320.mp4") {
+			t.Fatalf("hover preview %+v", first.HoverPreview)
+		}
+		h.waitPublic(t, first.Poster.Outputs[0].URL)
+		eventually(t, "hover preview served", func() bool {
+			res, err := http.Get(first.HoverPreview.MP4)
+			if err != nil {
+				return false
+			}
+			res.Body.Close()
+			return res.StatusCode == 200 && res.Header.Get("Content-Type") == "video/mp4"
+		})
+
+		frame := fmt.Sprintf("/api/v1/media/upload/frame?kind=post&id=%d&t=1&w=320", id)
+		if res, _ := stranger.do("GET", frame, nil, ""); res.StatusCode != 403 && res.StatusCode != 404 {
+			t.Fatalf("stranger frame %d", res.StatusCode)
+		}
+		if res, raw := owner.do("GET", frame, nil, ""); res.StatusCode != 200 || res.Header.Get("Content-Type") != "image/jpeg" || len(raw) < 100 {
+			t.Fatalf("frame %d %s", res.StatusCode, res.Header.Get("Content-Type"))
+		}
+
+		owner.call("POST", "/api/v1/media/upload/video-poster", map[string]any{"ref": ref, "source": "frame", "time": 1.5}, "", 200)
+		eventually(t, "picked poster listed", func() bool { p := listed(); return p.Poster != nil && p.Poster.Version != first.Poster.Version })
+		imgs := owner.call("POST", "/api/v1/media/upload/video-preview", map[string]any{"ref": ref, "start": 0.5, "duration": 1}, "", 200)
+		if sel := imgs["hover_preview"].(map[string]any)["selection"].(map[string]any); sel["start"] != 0.5 || sel["duration"] != 1.0 {
+			t.Fatalf("preview selection %v", sel)
+		}
+		eventually(t, "preview rendered", func() bool {
+			v := owner.call("POST", "/api/v1/media/upload/video-images", map[string]any{"ref": ref}, "", 200)
+			return v["hover_preview"].(map[string]any)["pending"] == false
+		})
+
+		owner.call("DELETE", fmt.Sprintf("/api/v1/posts/%d", id), nil, "", 204)
+		var stamps int
+		if err := h.srv.posts.pool.QueryRow(ctx, `SELECT count(*) FROM `+h.srv.media.slotTable+` WHERE kind='post' AND item_id=$1`, strconv.FormatInt(id, 10)).Scan(&stamps); err != nil || stamps != 0 {
+			t.Fatalf("poster stamp after delete: %d %v", stamps, err)
+		}
+	})
+
 	t.Run("composer drafts: publish with media, discard leaves nothing", func(t *testing.T) {
 		listed := func(id int64) bool {
 			res, raw := anon.do("GET", "/api/v1/posts?channel_id="+channelID+"&limit=50", nil, "")
@@ -734,7 +795,7 @@ func startMediaWorker(t *testing.T, dbURL, endpoint, bucket, access, secret stri
 	cmd := exec.Command(bin)
 	cmd.Env = append(os.Environ(), "DATABASE_URL="+dbURL, "MEDIA_S3_ENDPOINT="+endpoint, "MEDIA_S3_BUCKET="+bucket,
 		"MEDIA_S3_ACCESS_KEY_ID="+access, "MEDIA_S3_SECRET_ACCESS_KEY="+secret, "MEDIA_WORKER_THREADS=2",
-		"MEDIA_WORKER_TMP="+t.TempDir(), "MEDIA_WORKER_SHUTDOWN_GRACE=1s")
+		"MEDIA_WORKER_TMP="+t.TempDir(), "MEDIA_WORKER_SHUTDOWN_GRACE=1s", "MEDIA_HOST_RIVER_SCHEMA=public")
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)

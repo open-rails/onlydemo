@@ -192,6 +192,17 @@ and commits (`/api/v1/media/upload/*`).
   in the order added; Publish sends `draft_id` and turns the draft into the
   post. Cancel deletes the draft with its folder (`DELETE /api/v1/posts/{id}`);
   drafts abandoned for 24 h are swept hourly.
+- **Posters.** Each post with a video has a 16:9 poster (480/960/1920) and a
+  silent hover-preview loop (MP4 + WebP, 320/640), cut from its HLS. The
+  worker picks an automatic frame and section; in the composer and the post's
+  media editor, "Choose poster" (`VideoPosterPicker`: an exact frame via
+  `GET /api/v1/media/upload/frame`, cropped, or an uploaded image) and "Hover
+  preview" (`HoverPreviewPicker`) change them. Frame posters reach the app's
+  image job through the worker's `MEDIA_HOST_RIVER_SCHEMA`; the app needs
+  ffmpeg for `/frame`. `SlotEncoded` stores the poster stamp like other slots,
+  so listings carry `poster` (srcset) and `hover_preview` URLs without reads,
+  and feed cards (`VideoPoster`) play the preview on hover or focus unless
+  the viewer prefers reduced motion.
 - **Uploads.** Post images need `channel:posts:create`, channel slots
   `channel:settings:manage`, a user their own avatar. The UploadLimiter
   rate-limits each uploader (429) and holds each channel's quota: presign

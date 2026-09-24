@@ -58,6 +58,8 @@ type post struct {
 	Purchased          bool                     `json:"purchased"`
 	SubscriptionActive bool                     `json:"has_membership"`
 	ChannelAvatar      *media.SlotManifest      `json:"channel_avatar,omitempty"`
+	Poster             *media.SlotManifest      `json:"poster,omitempty"`
+	HoverPreview       *hoverPreview            `json:"hover_preview,omitempty"`
 	CreatedAt          time.Time                `json:"created_at"`
 	UpdatedAt          time.Time                `json:"updated_at"`
 	BillingKey         string                   `json:"-"`
@@ -140,6 +142,9 @@ func (api *postAPI) decorate(c fiber.Ctx, posts []post, withOffers bool) error {
 	}
 	avatars, err := api.media.slots(c.Context(), kindChannel, channelIDs, slotAvatar)
 	if err != nil {
+		return err
+	}
+	if err = api.media.videoImages(c.Context(), posts); err != nil {
 		return err
 	}
 	publishing := map[string]bool{}

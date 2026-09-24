@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { useState, type CSSProperties, type ReactNode } from "react";
 import type { SlotManifest } from "@openrails/contentkit-upload";
-import { SlotImage } from "@openrails/contentkit-upload/ui";
+import { SlotImage, VideoPoster } from "@openrails/contentkit-upload/ui";
 import { cn } from "cn";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -132,7 +132,24 @@ export function PostCard({
         </h3>
         {post.can_read && post.body && <p>{post.body}</p>}
       </div>
-      {!post.can_read && (
+      {post.poster && (
+        <VideoPoster
+          className="feed-video"
+          poster={post.poster}
+          preview={post.hover_preview}
+          sizes="(min-width: 700px) 600px, 100vw"
+          alt=""
+        >
+          <Link to={postPath(post)} className="feed-video-link" aria-label={post.can_read ? `Watch ${post.title}` : `Unlock ${post.title}`}>
+            {!post.can_read && (
+              <span className="lock-badge">
+                <HugeiconsIcon icon={SquareLock02Icon} size={30} />
+              </span>
+            )}
+          </Link>
+        </VideoPoster>
+      )}
+      {!post.can_read && !post.poster && (
         <Link
           to={postPath(post)}
           className="feed-media"

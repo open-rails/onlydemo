@@ -1,5 +1,5 @@
 import { useEffect, useImperativeHandle, useRef, useState, type DragEvent, type Ref } from "react";
-import { ImageCropDialog, useMessages } from "@openrails/contentkit-upload/ui";
+import { HoverPreviewPicker, ImageCropDialog, VideoPosterPicker, useMessages } from "@openrails/contentkit-upload/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useUploadQueue, type UseUploadQueue } from "@openrails/contentkit-upload/react";
 import type { Op } from "@openrails/contentkit-upload";
@@ -283,6 +283,7 @@ function MediaEditor({
   const [refused, setRefused] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
   const [cropping, setCropping] = useState<{ name: string; slot?: ChannelSlot }>();
+  const [picking, setPicking] = useState<{ file: string; what: "poster" | "preview" }>();
   const [slotSaving, setSlotSaving] = useState(false);
   const [slotError, setSlotError] = useState("");
   const saved = useSlotSaved();
@@ -296,6 +297,16 @@ function MediaEditor({
       q.state.data?.files.some((f) => (isVideo(f.type) ? !f.hls && !f.failed : !f.url || !f.dims)) ? 3000 : false,
   });
   const editable = new Map((editor.data?.files ?? []).map((f) => [f.name, f]));
+  // The post's poster and hover preview, cut from one of its videos.
+  const hasVideo = (files.data?.files ?? []).some((f) => isVideo(f.type));
+  const videoImages = useQuery({
+    queryKey: ["post-media-video", postID],
+    queryFn: ({ signal }) => uploads.getVideoImages(postRef(postID), undefined, signal),
+    enabled: hasVideo,
+    refetchInterval: (q) => (q.state.data?.poster.pending || q.state.data?.hover_preview.pending ? 3000 : false),
+  });
+  const imagesOf = videoImages.data;
+  const posterFile = imagesOf?.poster.selection?.file;
   const refresh = () =>
     client.invalidateQueries({
       predicate: (q) =>
@@ -381,11 +392,17 @@ function MediaEditor({
           const video = isVideo(f.type);
           return (
             <li key={f.name}>
-              <MediaThumb video={video} url={e?.url} />
+              <MediaThumb video={video} url={video && posterFile === f.name ? imagesOf?.poster.outputs[0]?.url : e?.url} />
               <span className="media-name" title={f.name}>
                 {displayName(f.name)}
               </span>
               {f.edit && <Badge variant="outline">Edited</Badge>}
+              {video && e?.hls && posterFile === f.name && (
+                <Badge variant="secondary">
+                  <HugeiconsIcon icon={Image01Icon} data-icon="inline-start" />
+                  Poster
+                </Badge>
+              )}
               {video && e && !e.hls && !e.failed && (
                 <Badge variant="outline">
                   <Spinner data-icon="inline-start" />
@@ -422,6 +439,16 @@ function MediaEditor({
                 >
                   <HugeiconsIcon icon={ArrowDown01Icon} />
                 </Button>
+                {video && e?.hls && (
+                  <>
+                    <Button size="sm" variant="ghost" onClick={() => setPicking({ file: f.name, what: "poster" })}>
+                      Choose poster
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setPicking({ file: f.name, what: "preview" })}>
+                      Hover preview
+                    </Button>
+                  </>
+                )}
                 {!video && (
                   <Button
                     size="icon-sm"
@@ -529,6 +556,27 @@ function MediaEditor({
           </li>
         ))}
       </ol>
+      {picking && (
+        <>
+          <VideoPosterPicker
+            open={picking.what === "poster"}
+            onOpenChange={(open) => !open && setPicking(undefined)}
+            item={postRef(postID)}
+            file={picking.file}
+            onChange={(v) => {
+              client.setQueryData(["post-media-video", postID], v);
+              void client.invalidateQueries({ queryKey: ["posts"] });
+            }}
+          />
+          <HoverPreviewPicker
+            open={picking.what === "preview"}
+            onOpenChange={(open) => !open && setPicking(undefined)}
+            item={postRef(postID)}
+            file={picking.file}
+            onChange={(v) => client.setQueryData(["post-media-video", postID], v)}
+          />
+        </>
+      )}
       {cropping && !cropping.slot && (
         <CropDialog
           title="Crop and rotate"
@@ -599,8 +647,8 @@ function MediaEditor({
 
 function MediaThumb({ video, url }: { video: boolean; url?: string }) {
   return (
-    <span className="media-thumb">
-      {url && !video ? (
+    <span className="media-thumb" data-video={video || undefined}>
+      {url ? (
         <img src={url} alt="" loading="lazy" />
       ) : (
         <HugeiconsIcon icon={video ? Video01Icon : Image01Icon} size={18} />

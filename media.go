@@ -235,8 +235,15 @@ func newMedia(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth
 	if err = m.jobs.AddProcessor(videos.Processor()); err != nil {
 		return nil, err
 	}
-	if m.uploads, err = media.NewUploads(media.UploadOptions{Store: store, Kinds: kinds, Manifests: m.manifests,
-		Authorizer: m, Tickets: &ring, Limiter: m.limiter, Queue: m.jobs}); err != nil {
+	uploadOptions := media.UploadOptions{Store: store, Kinds: kinds, Manifests: m.manifests,
+		Authorizer: m, Tickets: &ring, Limiter: m.limiter, Queue: m.jobs}
+	// The poster picker's exact frames need ffmpeg in the app; without it /frame answers not_found.
+	if frames, err := video.NewFrames(store, ""); err == nil {
+		uploadOptions.Frames = frames
+	} else {
+		slog.Warn("video poster frame grabs are unavailable", "err", err)
+	}
+	if m.uploads, err = media.NewUploads(uploadOptions); err != nil {
 		return nil, err
 	}
 	if m.reader, err = media.NewReader(media.ReaderOptions{Manifests: m.manifests, Kinds: kinds, Resolver: m, Hooks: hooks,
@@ -374,7 +381,9 @@ func (m *mediaService) mount(app fiber.Router, optional fiber.Handler) {
 			return a, !a.Anonymous
 		}})
 	read := m.reader.Handler(media.HandlerOptions{Tenant: m.cfg.Tenant, Identity: m})
-	app.Post("/api/v1/media/upload/*", optional, adaptor.HTTPHandlerWithContext(withMediaActor(http.StripPrefix("/api/v1/media/upload", m.imageTeasers(upload)))))
+	uploadAPI := adaptor.HTTPHandlerWithContext(withMediaActor(http.StripPrefix("/api/v1/media/upload", m.imageTeasers(upload))))
+	app.Post("/api/v1/media/upload/*", optional, uploadAPI)
+	app.Get("/api/v1/media/upload/frame", optional, uploadAPI)
 	app.Get("/api/v1/posts/:id/media", optional, m.files)
 	app.Get("/api/v1/media/*", optional, adaptor.HTTPHandlerWithContext(withMediaActor(http.StripPrefix("/api/v1/media", read))))
 }
@@ -435,6 +444,9 @@ func (m *mediaService) deletePostsTx(ctx context.Context, tx pgx.Tx, channel str
 	items := make([]media.Deletion, len(ids))
 	for i, id := range ids {
 		items[i] = media.Deletion{Ref: m.postRef(id), Owner: channelOwner(channel)}
+		if err := m.deleteSlotsTx(ctx, tx, kindPost, strconv.FormatInt(id, 10)); err != nil {
+			return err
+		}
 	}
 	return m.jobs.DeleteItemsTx(ctx, tx, items...)
 }

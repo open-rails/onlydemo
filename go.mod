@@ -19,12 +19,14 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.42.1
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.96.0
 	github.com/joho/godotenv v1.5.1
-	github.com/open-rails/contentkit v0.25.0
+	github.com/open-rails/contentkit v0.28.0
 	github.com/open-rails/helpers v0.3.0
 	github.com/spf13/cobra v1.10.2
 )
 
 require (
+	github.com/ClickHouse/ch-go v0.71.0 // indirect
+	github.com/ClickHouse/clickhouse-go/v2 v2.40.3 // indirect
 	github.com/andybalholm/brotli v1.2.2 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.4 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.7 // indirect
@@ -49,6 +51,8 @@ require (
 	github.com/gagliardetto/binary v0.8.0 // indirect
 	github.com/gagliardetto/solana-go v1.20.0 // indirect
 	github.com/gagliardetto/treeout v0.1.4 // indirect
+	github.com/go-faster/city v1.0.1 // indirect
+	github.com/go-faster/errors v0.7.1 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
@@ -97,14 +101,18 @@ require (
 	github.com/mr-tron/base58 v1.3.0 // indirect
 	github.com/muhlemmer/gu v0.3.1 // indirect
 	github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729 // indirect
+	github.com/paulmach/orb v0.12.0 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
+	github.com/pierrec/lz4/v4 v4.1.25 // indirect
 	github.com/redis/go-redis/v9 v9.22.0 // indirect
 	github.com/riverqueue/river/riverdriver v0.47.0 // indirect
 	github.com/riverqueue/river/rivershared v0.47.0 // indirect
 	github.com/riverqueue/river/rivertype v0.47.0 // indirect
 	github.com/ryanuber/go-glob v1.0.0 // indirect
+	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/sendgrid/rest v2.6.9+incompatible // indirect
 	github.com/sendgrid/sendgrid-go v3.16.1+incompatible // indirect
+	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/streamingfast/logging v0.0.0-20250729153644-6ddeb9abb112 // indirect

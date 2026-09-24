@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"strconv"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/contentkit/contentref"
@@ -75,4 +76,37 @@ func (m *mediaService) slots(ctx context.Context, kind string, ids []string, nam
 func (m *mediaService) deleteSlotsTx(ctx context.Context, tx pgx.Tx, kind, id string) error {
 	_, err := tx.Exec(ctx, `DELETE FROM `+m.slotTable+` WHERE kind=$1 AND item_id=$2`, kind, id)
 	return err
+}
+
+// hoverPreview is a post's silent loop: the smallest MP4 (preferred) and WebP.
+type hoverPreview struct {
+	MP4  string `json:"mp4"`
+	WebP string `json:"webp"`
+}
+
+// videoImages sets each post's poster from its stored stamp and, with a
+// poster, its hover preview. Preview URLs are unversioned: public/ is served
+// no-cache and the render is not reported back to the host.
+func (m *mediaService) videoImages(ctx context.Context, posts []post) error {
+	ids := make([]string, len(posts))
+	for i, p := range posts {
+		ids[i] = strconv.FormatInt(p.ID, 10)
+	}
+	posters, err := m.slots(ctx, kindPost, ids, media.PosterSlot)
+	if err != nil {
+		return err
+	}
+	for i := range posts {
+		poster := posters[slotKey{ids[i], media.PosterSlot}]
+		if poster == nil {
+			continue
+		}
+		posts[i].Poster = poster
+		mp4, webp, err := m.reader.HoverPreviewURLs(m.postRef(posts[i].ID), "")
+		if err != nil {
+			return err
+		}
+		posts[i].HoverPreview = &hoverPreview{MP4: mp4, WebP: webp}
+	}
+	return nil
 }

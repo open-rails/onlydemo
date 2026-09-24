@@ -452,6 +452,23 @@
       radial-gradient(circle at 75% 70%, hsl(calc(var(--h) + 60) 60% 55% / 0.9), transparent 60%),
       hsl(calc(var(--h) + 30) 35% 45%);
   }
+  .feed-video.feed-video {
+    border-radius: 0;
+  }
+  .feed-video-link {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    z-index: 1;
+  }
+  .feed-video-link:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: -2px;
+  }
+  .media-thumb[data-video] img {
+    object-fit: cover;
+  }
   .feed-media:before {
     content: "";
     position: absolute;

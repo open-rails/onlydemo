@@ -51,6 +51,9 @@ export interface Post {
   purchased?: boolean;
   has_membership?: boolean;
   channel_avatar?: SlotManifest;
+  // Posts with a video: the poster (16:9 srcset) and its silent hover loop.
+  poster?: SlotManifest;
+  hover_preview?: { mp4: string; webp: string };
   access_policy: AccessPolicy;
   offer_status: "none" | "pending" | "active" | "failed";
   offers: Offer[];
