@@ -106,6 +106,19 @@ price or sales ledger. OpenRails products grant opaque resource keys such as
 `post:<stable-id>` and `channel:<channel-id>:membership`. Catalog offers own native
 currency amounts, availability and immutable price versions. USD offers appear
 first; another displayed currency is charged only when explicitly selected.
+A channel has no membership until its owner creates one (`PUT
+/api/v1/channels/:id/membership` with `{"enabled": bool, "price": {...} | null}`;
+`null` is free, paid is at least $1.00). Membership and members-only posts
+require one. States:
+
+- **Open, paid:** new members subscribe; repricing affects new members only.
+- **Open, free:** `POST /join` grants the membership resource directly (no card);
+  `POST /leave` revokes it. Making a paid membership free stops paid renewals at
+  period end and grants those members the free membership.
+- **Closed** (`enabled: false`): no new joins. Existing members keep access,
+  including new membership posts, and keep renewing at their accepted price.
+  Free members stay members when a price is set again.
+
 Channel membership renews every `MEMBERSHIP_PERIOD` (default `720h`: **every 30 days**,
 not a calendar month); a change applies to prices set afterwards. Repricing moves a stable price key and preserves already accepted terms.
 

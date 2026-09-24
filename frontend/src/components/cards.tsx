@@ -13,7 +13,12 @@ import {
 import { money, date, duration } from "../format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { policyLabels, type Channel, type Post } from "../models";
+import {
+  policyLabels,
+  type Channel,
+  type ChannelMembership,
+  type Post,
+} from "../models";
 import { hue, membershipOffer, useChannels } from "../channels";
 
 const tint = (seed: string | number) =>
@@ -62,7 +67,16 @@ export function Cover({
     </div>
   );
 }
-export function PostCard({ post, handle }: { post: Post; handle?: string }) {
+// membership, when known, tailors the members-only call to action.
+export function PostCard({
+  post,
+  handle,
+  membership,
+}: {
+  post: Post;
+  handle?: string;
+  membership?: ChannelMembership;
+}) {
   const [liked, setLiked] = useState(false);
   const policy = post.access_policy;
   const price = post.offers?.find((offer) => !offer.auto_renew);
@@ -105,7 +119,7 @@ export function PostCard({ post, handle }: { post: Post; handle?: string }) {
           </span>
         </Link>
       )}
-      {!post.can_read && (
+      {!post.can_read && !(needsMembership && membership?.status === "closed") && (
         <div className="feed-unlock">
           <Button
             size="lg"
@@ -123,7 +137,9 @@ export function PostCard({ post, handle }: { post: Post; handle?: string }) {
           >
             <HugeiconsIcon icon={SquareLock02Icon} data-icon="inline-start" />
             {needsMembership
-              ? "Subscribe to unlock"
+              ? membership?.free
+                ? "Join free to unlock"
+                : "Subscribe to unlock"
               : post.offer_status === "pending"
                 ? "Price pending"
                 : price

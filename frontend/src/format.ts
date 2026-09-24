@@ -14,11 +14,12 @@ export function date(value?: string | null) {
     : "—";
 }
 export function duration(hours?: number | null) {
-  return hours
-    ? hours % 24 === 0
-      ? `every ${hours / 24} days`
-      : `every ${hours} hours`
-    : "one time";
+  if (!hours) return "one time";
+  if (hours === 1) return "every hour";
+  if (hours === 24) return "every day";
+  return hours % 24 === 0
+    ? `every ${hours / 24} days`
+    : `every ${hours} hours`;
 }
 export function micros(input: string) {
   if (!/^\d+(\.\d{1,2})?$/.test(input))

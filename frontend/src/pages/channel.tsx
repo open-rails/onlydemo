@@ -188,9 +188,7 @@ export function ChannelPage() {
             <MembershipBox
               channel={current}
               onSubscribe={() => setMembership(true)}
-              onChanged={() =>
-                void client.invalidateQueries({ queryKey: ["channel", slug] })
-              }
+              onChanged={() => void client.invalidateQueries()}
             />
           )}
         </div>
@@ -218,6 +216,7 @@ export function ChannelPage() {
               <PostCard
                 post={{ ...post, channel_name: current.name }}
                 handle={current.slug}
+                membership={current.membership}
                 key={post.id}
               />
             ))}
