@@ -285,7 +285,13 @@ func (m *mediaService) grants(ctx context.Context, user, channel string) (grants
 		return nil, nil
 	}
 	perms, err := m.auth.client.EffectivePermissionsForGroups(ctx, authkit.UserSubject(user), []string{channel})
-	return perms[channel], err
+	if err != nil || len(perms[channel]) == 0 {
+		return nil, err
+	}
+	if live, err := m.channels.accountLive(ctx, user); err != nil || !live {
+		return nil, err
+	}
+	return perms[channel], nil
 }
 
 type grants []authkit.Perm
@@ -370,7 +376,10 @@ func (m *mediaService) CanUpload(ctx context.Context, actor access.Actor, ref co
 		return media.UploadGrant{Owner: channelOwner(ref.ContentID), Exempt: admin, Allowed: admin || g.can("channel:settings:manage")}, err
 	case media.UserKind:
 		root, err := m.auth.client.ListEffectivePermissions(ctx, authkit.UserSubject(user), authkit.RootGroup())
-		admin := grants(root).can(postEditPermission)
+		admin := err == nil && grants(root).can(postEditPermission)
+		if admin {
+			admin, err = m.channels.accountLive(ctx, user)
+		}
 		return media.UploadGrant{Exempt: admin, Allowed: user == ref.ContentID}, err
 	}
 	return media.UploadGrant{}, nil

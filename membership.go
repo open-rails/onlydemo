@@ -221,7 +221,19 @@ func (b *billingService) paidToFree(ctx context.Context, channelID string) error
 					}
 				}
 			}
-			if len(subs) == 0 {
+			// Only renewing subscriptions move to a free grant; one whose
+			// member already scheduled its cancellation is left to end.
+			renewing := []openrails.SubscriptionID{}
+			for _, id := range subs {
+				sub, err := b.client.GetSubscription(ctx, id)
+				if err != nil {
+					return err
+				}
+				if !sub.CancelScheduled && (sub.Status == "active" || sub.Status == "past_due") {
+					renewing = append(renewing, id)
+				}
+			}
+			if len(renewing) == 0 {
 				continue
 			}
 			if len(freeGrants(held[customer], channelID)) == 0 {
@@ -229,7 +241,7 @@ func (b *billingService) paidToFree(ctx context.Context, channelID string) error
 					return err
 				}
 			}
-			for _, id := range subs {
+			for _, id := range renewing {
 				if err = b.client.CancelSubscription(ctx, id, openrails.CancelSubscriptionRequest{Reason: "membership became free"}); err != nil {
 					return err
 				}

@@ -135,6 +135,13 @@ func (api *channelAPI) allowed(ctx context.Context, userID, channelID string, pe
 	return api.auth.client.CanOnGroup(ctx, authkit.UserSubject(userID), channelID, permission)
 }
 
+// accountLive is CanOnGroup's account gate for callers that read grants in
+// bulk: deleted, banned and reserved accounts hold no authority.
+func (api *channelAPI) accountLive(ctx context.Context, user string) (bool, error) {
+	live, err := api.auth.client.UserLivenessByIDs(ctx, []string{user})
+	return live[user].Allowed, err
+}
+
 // A separate session keeps the one-connection application pool available while
 // coordinating catalog writes with durable channel cleanup across replicas.
 func (api *channelAPI) lock(ctx context.Context, id string) (func(), error) {

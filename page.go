@@ -83,6 +83,12 @@ func (api *channelAPI) loadPage(ctx context.Context, user string, ids []string, 
 			pg.perms[id] = p
 		}
 	}
+	if len(pg.perms) > 0 {
+		if live, err := api.accountLive(ctx, user); err != nil || !live {
+			pg.perms = map[string][]authkit.Perm{}
+			return pg, err
+		}
+	}
 	return pg, nil
 }
 

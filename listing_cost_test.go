@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/open-rails/authkit"
+	"github.com/open-rails/contentkit/media"
 	"github.com/open-rails/openrails"
 )
 
@@ -57,6 +58,11 @@ func (a countingAuth) EffectivePermissionsForGroups(ctx context.Context, s authk
 func (a countingAuth) ListEffectivePermissions(ctx context.Context, s authkit.Subject, g authkit.GroupRef) ([]authkit.Perm, error) {
 	inRequest(ctx, a.n)
 	return a.Client.ListEffectivePermissions(ctx, s, g)
+}
+
+func (a countingAuth) UserLivenessByIDs(ctx context.Context, ids []string) (map[string]authkit.UserLiveness, error) {
+	inRequest(ctx, a.n)
+	return a.Client.UserLivenessByIDs(ctx, ids)
 }
 
 type countingReads struct {
@@ -112,15 +118,16 @@ func (h *mediaHarness) testListingCost(t *testing.T, purchasedPost int64, buyer 
 		})
 		return id
 	}
-	paidPost := func(ch, slug string) {
+	paidPost := func(ch, slug string) int64 {
 		id := lister.call("POST", "/api/v1/posts", map[string]any{"channel_id": ch, "slug": slug, "title": slug, "body": "b", "access_policy": "ppv",
 			"price": map[string]any{"unit_amount": "990000", "currency": "USD"}}, "", 201)["id"].(float64)
 		eventually(t, slug+" offer", func() bool {
 			return len(lister.call("GET", fmt.Sprintf("/api/v1/posts/%.0f", id), nil, "", 200)["offers"].([]any)) > 0
 		})
+		return int64(id)
 	}
 	first := channel("cost-a")
-	paidPost(first, "cost-a-paid")
+	firstPaid := paidPost(first, "cost-a-paid")
 
 	pages := []struct {
 		p    peer
@@ -165,11 +172,30 @@ func (h *mediaHarness) testListingCost(t *testing.T, purchasedPost int64, buyer 
 		t.Fatalf("library %+v lacks purchased post %d", library.Purchased, purchasedPost)
 	}
 
-	// A media read resolves the post and the viewer's grants once.
+	// A media read resolves the post and the viewer's grants (plus, when
+	// they hold any, the account's liveness) once.
 	for _, p := range []peer{buyer, fan, lister} {
 		c, _ := h.cost(p, fmt.Sprintf("/api/v1/media/post/%d?variant=large,blurred", purchasedPost))
-		if c.auth != 1 || c.billing > 1 {
+		if c.auth > 2 || c.billing > 1 {
 			t.Errorf("%s media read: %+v", p.name, c)
 		}
+	}
+
+	// A deleted account's still-valid token carries no channel authority.
+	helper := h.register("helper", "127.0.0.14")
+	lister.call("POST", "/api/v1/channels/"+first+"/members", map[string]any{"username": "helper", "role": "editor"}, "", 201)
+	rights := func() (bool, bool, bool) {
+		ch := helper.call("GET", "/api/v1/channels/"+first, nil, "", 200)
+		post := helper.call("GET", fmt.Sprintf("/api/v1/posts/%d", firstPaid), nil, "", 200)
+		return ch["can_edit"] == true, post["can_read"] == true, h.read(helper, firstPaid).res.Access == media.AccessFull
+	}
+	if edit, read, media := rights(); !edit || !read || !media {
+		t.Fatalf("editor rights before deletion: edit %t read %t media %t", edit, read, media)
+	}
+	if _, err := h.srv.auth.client.SoftDeleteUsers(h.ctx, []string{helper.id}); err != nil {
+		t.Fatal(err)
+	}
+	if edit, read, media := rights(); edit || read || media {
+		t.Fatalf("deleted editor kept rights: edit %t read %t media %t", edit, read, media)
 	}
 }
