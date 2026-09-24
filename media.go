@@ -320,11 +320,25 @@ func (m *mediaService) postAccess(ctx context.Context, actor access.Actor, conte
 	return p, up, g, true, nil
 }
 
-// Resolve is the one read decision for media: the same rule as the post API.
+// Resolve answers ContentKit's batch port. Media resolves one ref per
+// request (access.ResolveOne), so each ref takes the single-ref decision.
+func (m *mediaService) Resolve(ctx context.Context, refs []contentref.ContentRef, actor access.Actor) (map[contentref.ContentKey]access.Resolution, error) {
+	out := make(map[contentref.ContentKey]access.Resolution, len(refs))
+	for _, ref := range refs {
+		r, err := m.resolve(ctx, ref, actor)
+		if err != nil {
+			return nil, err
+		}
+		out[ref.Key()] = r
+	}
+	return out, nil
+}
+
+// resolve is the one read decision for media: the same rule as the post API.
 // Channel editors and site admins read everything. Editors are whoever may
 // upload to the item: they alone get the uncropped editor variant and the
 // files' edits and source dims.
-func (m *mediaService) Resolve(ctx context.Context, ref contentref.ContentRef, actor access.Actor) (access.Resolution, error) {
+func (m *mediaService) resolve(ctx context.Context, ref contentref.ContentRef, actor access.Actor) (access.Resolution, error) {
 	switch ref.ContentKind {
 	case kindPost:
 		p, up, g, found, err := m.postAccess(ctx, actor, ref.ContentID)
