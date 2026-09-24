@@ -681,6 +681,7 @@
     margin-bottom: 8px;
   }
   .profile-cover {
+    isolation: isolate;
     height: 190px;
     display: flex;
     align-items: flex-start;
@@ -1154,11 +1155,18 @@
     border: 1px solid var(--border);
     max-width: 16rem;
   }
-  .cover-upload {
+  .cover-edit {
     position: absolute;
     right: 14px;
     bottom: 14px;
     z-index: 2;
+    cursor: pointer;
+  }
+  .avatar-edit {
+    position: absolute;
+    right: 2px;
+    bottom: 2px;
+    cursor: pointer;
   }
   .post-gallery {
     display: flex;

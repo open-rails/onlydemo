@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useState, type FormEvent } from "react";
+import { cn } from "cn";
 import { APIError, request, postPage } from "../api";
 import { NotFoundPage } from "../App";
 import { useAuth } from "../session";
@@ -22,7 +23,7 @@ import {
   UserGroupIcon,
 } from "@hugeicons/core-free-icons";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -118,7 +119,16 @@ export function ChannelPage() {
             </small>
           </div>
           {current.can_manage && (
-            <SlotUpload target={target} slot="banner" label="Banner" onDone={slots.refresh} className="slot-upload cover-upload" />
+            <SlotUpload
+              target={target}
+              slot="banner"
+              label="Edit cover"
+              onDone={slots.refresh}
+              className={cn(
+                buttonVariants({ variant: "secondary", size: "sm" }),
+                "cover-edit rounded-full border-white/20 bg-black/55 text-white backdrop-blur-md hover:bg-black/70",
+              )}
+            />
           )}
         </Cover>
         <div className="profile-body">
@@ -131,7 +141,17 @@ export function ChannelPage() {
                 className="avatar-xl"
               />
               {current.can_manage && (
-                <SlotUpload target={target} slot="avatar" label="Avatar" onDone={slots.refresh} />
+                <SlotUpload
+                  target={target}
+                  slot="avatar"
+                  label="Change avatar"
+                  iconOnly
+                  onDone={slots.refresh}
+                  className={cn(
+                    buttonVariants({ variant: "secondary", size: "icon-sm" }),
+                    "avatar-edit rounded-full border-2 border-card shadow-sm",
+                  )}
+                />
               )}
             </span>
             <div className="inline-actions">

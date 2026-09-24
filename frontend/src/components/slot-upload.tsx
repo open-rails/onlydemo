@@ -11,18 +11,24 @@ export function SlotUpload({
   label,
   onDone,
   className,
+  iconOnly,
 }: {
   target: RefBody;
   slot: string;
   label: string;
   onDone: () => void;
   className?: string;
+  iconOnly?: boolean;
 }) {
   const up = useUpload(uploads);
   return (
     <label className={className ?? "slot-upload"} title={up.error ? uploadMessage(up.error) : label}>
       {up.status === "uploading" ? <Spinner /> : <HugeiconsIcon icon={Camera01Icon} size={16} />}
-      <span>{up.status === "error" ? uploadMessage(up.error) : label}</span>
+      {up.status === "error" ? (
+        <span>{uploadMessage(up.error)}</span>
+      ) : (
+        <span className={iconOnly ? "sr-only" : undefined}>{label}</span>
+      )}
       <input
         type="file"
         accept="image/jpeg,image/png,image/webp,image/gif"
