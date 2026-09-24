@@ -173,11 +173,13 @@ and commits (`/api/v1/media/upload/*`).
   `media-access`, never the bucket.
 - **Video.** A commit enqueues the encode in River schema `media_worker`;
   ContentKit's `cmd/media-worker` (`task media:worker`, needs ffmpeg) writes a
-  byte-range HLS ladder (ContentKit's default 2160–480, rungs up to the source
-  height), a seek sprite and one MP4 download per quality. The player
-  (hls.js) loads `/api/v1/media/post/{id}/hls/{file}/master.m3u8` from the read
-  API; segments come from `media-access`. Downloads are saved as
-  `{post-slug}-{file}-{720p}.mp4`.
+  byte-range HLS ladder (ContentKit's default rungs 2160–480 by short side, so
+  vertical and 21:9 sources keep their aspect; capped at 4096 px per side and
+  3840×2160 area), a seek sprite and one MP4 download per rung. Sources outside
+  1:2.4–2.4:1 fail; editors see why (`failed`). The player (hls.js) loads
+  `/api/v1/media/post/{id}/hls/{file}/master.m3u8` from the read API, sized at
+  the source's `w`/`h`; segments come from `media-access`. Downloads are saved
+  as `{post-slug}-{file}-{rung}p.mp4`.
 - **Uploads.** Post images need `channel:posts:create`, channel slots
   `channel:settings:manage`, a user their own avatar. The UploadLimiter
   rate-limits each uploader (429) and holds each channel's quota: presign
@@ -274,9 +276,10 @@ ContentKit handlers, the libvips job, the `media-worker` ffmpeg encode and the
 image/video post (HLS playlists and byte ranges, downloads, locked viewers,
 ceilings; skipped without ffmpeg locally), what anonymous, member, buyer and members_ppv
 buyer (after membership lapse) viewers get, editor/admin bypass, the default
-ladder reaching the encoder, editor-only variants and edit data, rate and
-quota refusals (presign and commit), slots (crop, rotate, re-crop, versioned
-srcset widths, also from a post image) and
+ladder reaching the encoder, 9:21 and 21:9 sources (rung-keyed renditions,
+playlists and downloads) and a refused 3:1 one, editor-only variants and edit
+data, rate and quota refusals (presign and commit), slots (upload with a crop,
+rotate, re-crop, versioned srcset widths, also from a post image) and
 post erasure. `task dev:up && task test:media`
 runs it locally; CI runs it on every push. CI also builds/vets Go and
 builds/lints the frontend. The libraries retain their full automated qualification. A real sandbox

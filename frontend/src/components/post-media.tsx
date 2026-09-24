@@ -5,6 +5,7 @@ import { useUploadQueue } from "@openrails/contentkit-upload/react";
 import type { Op } from "@openrails/contentkit-upload";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
+  AlertCircleIcon,
   ArrowDown01Icon,
   ArrowUp01Icon,
   BlurIcon,
@@ -45,7 +46,7 @@ const TEASER = "teaser";
 // The editor variant is a downscaled whole source; crops stay in its original pixels.
 const slotSource = (f?: MediaFile) =>
   f?.url && f.dims ? { url: f.url, width: f.dims.w, height: f.dims.h } : null;
-const ready = (f: MediaFile) => (isVideo(f.type) ? !!f.hls : !!f.url);
+const ready = (f: MediaFile) => (isVideo(f.type) ? !!f.hls || !!f.failed : !!f.url);
 const pending = (files?: MediaFile[]) =>
   !!files?.some((f) => !f.locked && !ready(f));
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
@@ -56,7 +57,15 @@ function lockedLabel(files: MediaFile[]) {
   return videos ? `${label} locked (${plural(videos, "video")})` : `${label} locked`;
 }
 
-// Per-quality downloads of one video: keys are "{file}-{height}p".
+// Why a video cannot be encoded, for its editors (ContentKit's hls.error).
+function failureMessage(reason: string) {
+  return /aspect/i.test(reason)
+    ? "Its shape is not supported: videos must be between 1:2.4 (tall) and 2.4:1 (wide)."
+    : "It could not be processed. Try another file or format.";
+}
+
+// Per-quality downloads of one video: keys are "{file}-{rung}p", the rung
+// being the short side (a vertical 1080p is 1080 wide).
 function Downloads({ name, downloads }: { name: string; downloads: MediaDownload[] }) {
   const mine = downloads
     .filter((d) => d.key.startsWith(`${name}-`))
@@ -92,6 +101,15 @@ export function PostGallery({ postID, viewer }: { postID: number; viewer?: strin
     <div className="post-gallery">
       {shown.map((f) => {
         if (isVideo(f.type)) {
+          if (f.failed)
+            return (
+              <figure key={f.index} className="video-failed" role="alert">
+                <HugeiconsIcon icon={AlertCircleIcon} size={20} />
+                <span>
+                  <strong>{f.name}</strong> can't be played. {failureMessage(f.failed)}
+                </span>
+              </figure>
+            );
           if (!f.hls || !f.name)
             return (
               <figure key={f.index} className="video-pending">
@@ -162,7 +180,7 @@ export function PostMediaEditor({ postID, channel }: { postID: number; channel?:
     queryKey: ["post-media-editor", postID],
     queryFn: () => readPost(postID, "editor"),
     refetchInterval: (q) =>
-      q.state.data?.files.some((f) => !isVideo(f.type) && (!f.url || !f.dims)) ? 3000 : false,
+      q.state.data?.files.some((f) => (isVideo(f.type) ? !f.hls && !f.failed : !f.url || !f.dims)) ? 3000 : false,
   });
   const editable = new Map((editor.data?.files ?? []).map((f) => [f.name, f]));
   const refresh = () =>
@@ -253,6 +271,11 @@ export function PostMediaEditor({ postID, channel }: { postID: number; channel?:
             <HugeiconsIcon icon={isVideo(f.type) ? Video01Icon : Image01Icon} size={16} />
             <span className="media-name">{f.name}</span>
             {f.edit && <Badge variant="outline">Edited</Badge>}
+            {editable.get(f.name)?.failed && (
+              <Badge variant="destructive" title={failureMessage(editable.get(f.name)!.failed!)}>
+                Can't play
+              </Badge>
+            )}
             {teaser?.original === f.original && (
               <Badge variant="secondary">
                 <HugeiconsIcon icon={BlurIcon} data-icon="inline-start" />

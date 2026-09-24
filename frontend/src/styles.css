@@ -1232,6 +1232,7 @@
   }
   .video-frame {
     position: relative;
+    margin-inline: auto;
     overflow: hidden;
     border-radius: 12px;
     background: #000;
@@ -1254,6 +1255,17 @@
     color: #fff;
     font-size: 0.875rem;
     background: rgb(0 0 0 / 0.6);
+  }
+  .post-gallery .video-failed {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    font-size: 0.875rem;
+    color: var(--destructive);
+    background: color-mix(in oklab, var(--destructive) 8%, transparent);
+    border: 1px solid color-mix(in oklab, var(--destructive) 30%, transparent);
   }
   .post-gallery .video-pending {
     display: flex;

@@ -62,7 +62,7 @@ var (
 	mediaKinds = []media.Kind{
 		{Name: kindPost, Types: append(append([]string{}, imageTypes...), videoTypes...), MaxBytes: maxVideoBytes, MaxFiles: maxPostFiles,
 			TypeLimits: map[string]media.Limit{"image": {MaxBytes: maxImageBytes}, "video": {MaxFiles: maxPostVideos}},
-			Specs:      postSpecs, Video: &media.Video{}}, // default ladder, up to 2160p
+			Specs:      postSpecs, Video: &media.Video{}}, // default ladder (short sides up to 2160), aspects 1:2.4–2.4:1
 		{Name: kindChannel, Types: imageTypes, MaxBytes: maxImageBytes, Slots: map[string]media.Slot{slotAvatar: avatarSlot, slotCover: coverSlot}},
 		{Name: media.UserKind, Types: imageTypes, MaxBytes: maxImageBytes, Slots: map[string]media.Slot{slotAvatar: avatarSlot}},
 	}
@@ -453,7 +453,8 @@ func (m *mediaService) eraseUser(ctx context.Context, user string) error {
 
 var qualityKey = regexp.MustCompile(`^(.+)-(\d+p)$`)
 
-// downloadName saves a post's video download as "{post-slug}-{file}-{720p}.mp4".
+// downloadName saves a post's video download as "{post-slug}-{file}-{rung}p.mp4"
+// (video.DownloadKey: rungs are short sides, so a vertical 1080p is 1080 wide).
 func (m *mediaService) downloadName(ctx context.Context, ref contentref.ContentRef, key string, d media.Download) (string, error) {
 	id, err := strconv.ParseInt(ref.ContentID, 10, 64)
 	if err != nil || ref.ContentKind != kindPost {

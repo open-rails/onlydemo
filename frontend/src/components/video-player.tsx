@@ -84,7 +84,15 @@ export function VideoPlayer({ base, width, height }: { base: string; width?: num
     };
   }, [base]);
   return (
-    <div className="video-frame" style={width && height ? { aspectRatio: `${width} / ${height}` } : undefined}>
+    // The source's true aspect, no taller than most of the viewport, so a
+    // vertical video is a tall frame rather than a letterboxed 16:9 one.
+    <div
+      className="video-frame"
+      style={{
+        aspectRatio: width && height ? `${width} / ${height}` : "16 / 9",
+        width: width && height ? `min(100%, calc(80svh * ${width / height}))` : undefined,
+      }}
+    >
       <video ref={video} controls playsInline preload="metadata" onPlay={() => setStarted(true)} />
       {poster && !started && (
         <div

@@ -24,6 +24,7 @@ export interface MediaFile {
   teaser?: boolean;
   locked?: boolean;
   hls?: boolean;
+  failed?: string; // editors only: why the video cannot be encoded
   edit?: Edit;
   dims?: { w: number; h: number };
   variant?: string;
