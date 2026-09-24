@@ -33,6 +33,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -480,6 +481,76 @@ func TestMediaEndToEnd(t *testing.T) {
 			t.Fatalf("avatar edit %+v", got)
 		}
 		h.waitSlot(t, "avatar from post image", avatar, before["version"].(string), 128, 256)
+	})
+
+	t.Run("composer drafts: publish with media, discard leaves nothing", func(t *testing.T) {
+		listed := func(id int64) bool {
+			res, raw := anon.do("GET", "/api/v1/posts?channel_id="+channelID+"&limit=50", nil, "")
+			var list []post
+			if res.StatusCode != 200 || json.Unmarshal(raw, &list) != nil {
+				t.Fatalf("list %d: %s", res.StatusCode, raw)
+			}
+			return slices.ContainsFunc(list, func(p post) bool { return p.ID == id })
+		}
+		draft := func() int64 {
+			return int64(owner.call("POST", "/api/v1/posts", map[string]any{"channel_id": channelID, "draft": true}, "", 201)["id"].(float64))
+		}
+
+		id := draft()
+		ref := postRefBody(id)
+		a := owner.upload(ref, "", testPNG(t, 400, 300, color.RGBA{1, 2, 3, 255}), "image/png", 200)
+		editor.presign(ref, "", testPNG(t, 10, 10, color.RGBA{9, 9, 9, 255}), "image/png", 403, "")
+		owner.call("POST", "/api/v1/media/upload/commit", map[string]any{"ref": ref, "ops": []media.Op{
+			{Op: media.OpInsert, Name: "teaser", Original: a, Meta: map[string]any{"teaser": true}}, {Op: media.OpInsert, Name: "a.png", Original: a}}}, "", 200)
+		h.waitDerived(owner, id)
+		stranger.call("GET", fmt.Sprintf("/api/v1/media/post/%d", id), nil, "", 404)
+		editor.call("GET", fmt.Sprintf("/api/v1/media/post/%d", id), nil, "", 404)
+		owner.call("GET", fmt.Sprintf("/api/v1/posts/%d", id), nil, "", 404)
+		owner.call("PATCH", fmt.Sprintf("/api/v1/posts/%d", id), map[string]any{"title": "x"}, "", 404)
+		if listed(id) {
+			t.Fatal("draft listed")
+		}
+		editor.call("POST", "/api/v1/posts", map[string]any{"channel_id": channelID, "draft_id": id, "slug": "stolen", "title": "t", "body": "b"}, "", 404)
+		pub := owner.call("POST", "/api/v1/posts", map[string]any{"channel_id": channelID, "draft_id": id, "slug": "composed", "title": "Composed", "body": "b", "access_policy": "membership"}, "", 201)
+		if int64(pub["id"].(float64)) != id || pub["draft"] != nil || !listed(id) {
+			t.Fatalf("published draft %v", pub)
+		}
+		if r := h.read(stranger, id).res; r.Access == "full" || len(r.Files) != 2 || r.Files[0].URL == "" || !r.Files[1].Locked {
+			t.Fatalf("published media for a stranger %+v", r)
+		}
+
+		gone := draft()
+		gref := postRefBody(gone)
+		g := owner.upload(gref, "", testPNG(t, 300, 300, color.RGBA{4, 5, 6, 255}), "image/png", 200)
+		owner.call("POST", "/api/v1/media/upload/commit", map[string]any{"ref": gref, "ops": []media.Op{{Op: media.OpInsert, Name: "g.png", Original: g}}}, "", 200)
+		owner.upload(gref, "", testPNG(t, 200, 200, color.RGBA{7, 8, 9, 255}), "image/png", 200) // uploaded, never committed
+		editor.call("DELETE", fmt.Sprintf("/api/v1/posts/%d", gone), nil, "", 404)
+		owner.call("DELETE", fmt.Sprintf("/api/v1/posts/%d", gone), nil, "", 204)
+		var rows int
+		if err := h.srv.posts.pool.QueryRow(ctx, `SELECT count(*) FROM `+h.srv.posts.table+` WHERE id=$1`, gone).Scan(&rows); err != nil || rows != 0 {
+			t.Fatalf("discarded draft row: %d %v", rows, err)
+		}
+		eventually(t, "discarded draft folder erased", func() bool { return h.count(fmt.Sprintf("%s/post/%d/", h.cfg.Media.Tenant, gone)) == 0 })
+
+		stale := draft()
+		if _, err := h.srv.posts.pool.Exec(ctx, `UPDATE `+h.srv.posts.table+` SET created_at=NOW()-INTERVAL '25 hours' WHERE id=$1`, stale); err != nil {
+			t.Fatal(err)
+		}
+		fresh := draft()
+		if err := (&postDraftSweepWorker{api: h.srv.posts}).Work(ctx, nil); err != nil {
+			t.Fatal(err)
+		}
+		var left []int64
+		rs, _ := h.srv.posts.pool.Query(ctx, `SELECT id FROM `+h.srv.posts.table+` WHERE id=ANY($1)`, []int64{stale, fresh})
+		for rs.Next() {
+			var v int64
+			_ = rs.Scan(&v)
+			left = append(left, v)
+		}
+		rs.Close()
+		if !slices.Equal(left, []int64{fresh}) {
+			t.Fatalf("sweep left %v, want only the fresh draft %d", left, fresh)
+		}
 	})
 
 	t.Run("post deletion erases its folder and releases quota", func(t *testing.T) {

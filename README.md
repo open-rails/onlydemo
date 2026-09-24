@@ -185,6 +185,13 @@ and commits (`/api/v1/media/upload/*`).
   `/api/v1/media/post/{id}/hls/{file}/master.m3u8` from the read API, sized at
   the source's `w`/`h`; segments come from `media-access`. Downloads are saved
   as `{post-slug}-{file}-{rung}p.mp4`.
+- **Composer.** The first file added to "New post" creates the post as a
+  draft (`POST /api/v1/posts {channel_id, draft: true}`: no slug, never
+  listed, visible and uploadable only by its author), so uploads have a folder
+  and can be cropped and picked as the teaser before publishing. Files commit
+  in the order added; Publish sends `draft_id` and turns the draft into the
+  post. Cancel deletes the draft with its folder (`DELETE /api/v1/posts/{id}`);
+  drafts abandoned for 24 h are swept hourly.
 - **Uploads.** Post images need `channel:posts:create`, channel slots
   `channel:settings:manage`, a user their own avatar. The UploadLimiter
   rate-limits each uploader (429) and holds each channel's quota: presign

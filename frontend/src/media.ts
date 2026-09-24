@@ -70,6 +70,29 @@ export function withMediaType(file: File) {
   return type ? new File([file], file.name, { type, lastModified: file.lastModified }) : file;
 }
 
+// Client-side checks of the post ceilings; the server enforces them again.
+export function screenFiles(list: Iterable<File>, have: { files: number; videos: number }) {
+  let { files: count, videos } = have;
+  const accepted: File[] = [];
+  const refused: string[] = [];
+  for (const file of [...list].map(withMediaType)) {
+    const video = isVideo(file.type);
+    if (!imageTypes.includes(file.type) && !videoTypes.includes(file.type))
+      refused.push(`${file.name}: unsupported type.`);
+    else if (file.size > (video ? limits.videoBytes : limits.imageBytes))
+      refused.push(`${file.name}: over the ${video ? "20 GiB video" : "25 MiB image"} limit.`);
+    else if (count >= limits.files) refused.push(`${file.name}: a post holds at most ${limits.files} files.`);
+    else if (video && videos >= limits.videos)
+      refused.push(`${file.name}: a post holds at most ${limits.videos} videos.`);
+    else {
+      accepted.push(file);
+      count++;
+      if (video) videos++;
+    }
+  }
+  return { accepted, refused };
+}
+
 // HLS routes of the read API; relative playlists resolve under the master.
 export const hlsBase = (postID: number | string, name: string) =>
   `/api/v1/media/post/${postID}/hls/${encodeURIComponent(name)}/`;

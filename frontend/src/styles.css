@@ -1219,12 +1219,16 @@
   }
   .media-list li {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
+    gap: 4px 8px;
     min-width: 0;
   }
+  .media-list li .inline-actions {
+    margin-left: auto;
+  }
   .media-list .media-name {
-    flex: 1;
+    flex: 1 1 7rem;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1234,9 +1238,86 @@
   .media-list .queued {
     opacity: 0.85;
   }
+  .media-list [data-failed] {
+    opacity: 1;
+  }
+  .media-editor.in-composer {
+    padding: 0;
+    border-top: 0;
+  }
+  .media-editor h3 {
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+  .media-thumb {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    overflow: hidden;
+    border-radius: 8px;
+    color: var(--muted-foreground);
+    background: var(--muted);
+  }
+  .media-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .media-drop {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 24px 16px;
+    text-align: center;
+    cursor: pointer;
+    border: 1.5px dashed var(--border);
+    border-radius: 12px;
+    color: var(--muted-foreground);
+    transition: border-color 120ms, background-color 120ms;
+  }
+  .media-drop strong {
+    color: var(--foreground);
+    font-size: 0.9rem;
+  }
+  .media-drop:hover,
+  .media-drop[data-over],
+  .upload-button[data-over] {
+    border-color: var(--primary);
+    background: color-mix(in oklab, var(--primary) 6%, transparent);
+  }
+  .media-drop[data-disabled] {
+    cursor: progress;
+    opacity: 0.7;
+  }
+  .media-drop:has(input:focus-visible) {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  .media-refused {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 0.8125rem;
+    color: var(--destructive);
+  }
+  .discard-confirm {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .discard-confirm p {
+    flex: 1 1 16rem;
+    font-size: 0.875rem;
+  }
   .media-list progress {
     width: 80px;
     height: 6px;
+    accent-color: var(--primary);
   }
   .video-frame {
     position: relative;

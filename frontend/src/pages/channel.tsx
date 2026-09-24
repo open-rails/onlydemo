@@ -66,7 +66,7 @@ import { ChannelTeam } from "../components/channel-team";
 import { SlotEditError, SlotEditMenu, SlotEditor } from "@openrails/contentkit-upload/ui";
 import { channelRef, useSlot, useSlotSaved } from "../media";
 import { subscribeLabel, usePay } from "../components/pay";
-import { channelsPath, channelPath } from "../paths";
+import { channelsPath, channelPath, postPath } from "../paths";
 
 export function ChannelPage() {
   const { channel: slug = "" } = useParams();
@@ -313,6 +313,7 @@ export function ChannelPage() {
         channelID={id}
         hasMembership={current.membership.status !== "none"}
         onClose={() => setEditor(false)}
+        onSaved={(saved) => navigate(postPath(saved))}
       />
     </>
   );

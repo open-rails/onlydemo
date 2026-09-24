@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useCallback, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { request } from "../api";
 import type { AccessPolicy, Post } from "../models";
@@ -30,6 +30,8 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { FormError } from "./states";
 import { MemberStar } from "./policy-badge";
+import { DraftMediaEditor, MediaDrop, type DraftMediaHandle } from "./post-media";
+import { screenFiles } from "../media";
 
 const policies: Array<{ value: AccessPolicy; title: string; detail: string }> =
   [
@@ -70,11 +72,20 @@ export function PostEditor({
   onClose: () => void;
   onSaved?: (post: Post) => void;
 }) {
+  // Closing a composer that holds a draft asks first: it deletes the draft.
+  const [hasDraft, setHasDraft] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const requestClose = () => (hasDraft ? setConfirming(true) : onClose());
+  const close = () => {
+    setHasDraft(false);
+    setConfirming(false);
+    onClose();
+  };
   return (
     <Dialog
       open={open}
       onOpenChange={(value) => {
-        if (!value) onClose();
+        if (!value) requestClose();
       }}
     >
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl">
@@ -91,8 +102,12 @@ export function PostEditor({
           channelID={channelID}
           hasMembership={hasMembership}
           post={post}
-          onClose={onClose}
+          onClose={close}
           onSaved={onSaved}
+          onDraft={setHasDraft}
+          requestClose={requestClose}
+          confirming={confirming}
+          setConfirming={setConfirming}
         />
         )}
       </DialogContent>
@@ -105,14 +120,55 @@ function EditorForm({
   post,
   onClose,
   onSaved,
+  onDraft,
+  requestClose,
+  confirming,
+  setConfirming,
 }: {
   channelID: string;
   hasMembership: boolean;
   post?: Post;
   onClose: () => void;
   onSaved?: (post: Post) => void;
+  onDraft: (has: boolean) => void;
+  requestClose: () => void;
+  confirming: boolean;
+  setConfirming: (v: boolean) => void;
 }) {
   const client = useQueryClient();
+  // New posts upload into a draft created with the first file; Publish turns
+  // it into the post, Cancel deletes it with its media.
+  const [draft, setDraft] = useState<{ id: number; files: File[] }>();
+  const [mediaBusy, setMediaBusy] = useState(false);
+  const [refused, setRefused] = useState<string[]>([]);
+  const media = useRef<DraftMediaHandle>(null);
+  const onBusy = useCallback((busy: boolean) => setMediaBusy(busy), []);
+  const createDraft = useMutation({
+    mutationFn: () =>
+      request<{ id: number }>("/api/v1/posts", {
+        method: "POST",
+        body: JSON.stringify({ channel_id: channelID, draft: true }),
+      }),
+  });
+  const addFirst = (list: File[]) => {
+    const { accepted, refused } = screenFiles(list, { files: 0, videos: 0 });
+    setRefused(refused);
+    if (accepted.length === 0) return;
+    createDraft.mutate(undefined, {
+      onSuccess: ({ id }) => {
+        setDraft({ id, files: accepted });
+        onDraft(true);
+      },
+    });
+  };
+  const discard = useMutation({
+    mutationFn: async () => {
+      media.current?.discard();
+      if (draft) await request(`/api/v1/posts/${draft.id}`, { method: "DELETE" });
+    },
+    onSuccess: onClose,
+  });
+
   const [policy, setPolicy] = useState<AccessPolicy>(
     post?.access_policy || "public",
   );
@@ -125,7 +181,7 @@ function EditorForm({
         body: JSON.stringify(body),
       }),
     onSuccess: async (saved) => {
-      // Follow a renamed slug before refetching the old URL.
+      // Follow a renamed slug (or open the new post) before refetching.
       onSaved?.(saved);
       await client.invalidateQueries();
       onClose();
@@ -138,6 +194,7 @@ function EditorForm({
     try {
       save.mutate({
         ...(post ? {} : { channel_id: channelID }),
+        ...(draft ? { draft_id: draft.id } : {}),
         title: String(data.get("title")).trim(),
         slug: String(data.get("slug")).trim(),
         body: String(data.get("body")),
@@ -200,6 +257,28 @@ function EditorForm({
             placeholder="Start writing…"
           />
         </Field>
+        {!post &&
+          (draft ? (
+            <DraftMediaEditor key={draft.id} postID={draft.id} initial={draft.files} handle={media} onBusy={onBusy} />
+          ) : (
+            <Field>
+              <FieldLabel>Images and videos</FieldLabel>
+              <MediaDrop empty onFiles={addFirst} disabled={createDraft.isPending} />
+              {createDraft.isPending && (
+                <FieldDescription>
+                  <Spinner className="inline" /> Preparing uploads…
+                </FieldDescription>
+              )}
+              {refused.length > 0 && (
+                <ul className="media-refused" role="alert">
+                  {refused.map((r) => (
+                    <li key={r}>{r}</li>
+                  ))}
+                </ul>
+              )}
+              <FormError>{createDraft.error?.message}</FormError>
+            </Field>
+          ))}
         <FieldSet>
           <FieldLegend variant="label">Who can read this?</FieldLegend>
           <RadioGroup
@@ -261,17 +340,30 @@ function EditorForm({
             </FieldDescription>
           </Field>
         )}
-        <FormError>{validation || save.error?.message}</FormError>
-        <DialogFooter>
-          <Button type="button" variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" disabled={save.isPending}>
-            {save.isPending && <Spinner data-icon="inline-start" />}
-            {post ? "Save changes" : "Publish post"}
-            <HugeiconsIcon icon={ArrowRight02Icon} data-icon="inline-end" />
-          </Button>
-        </DialogFooter>
+        <FormError>{validation || save.error?.message || discard.error?.message}</FormError>
+        {confirming ? (
+          <div className="discard-confirm" role="alertdialog" aria-label="Discard this post?">
+            <p>Discard this post? Its uploaded images and videos are deleted.</p>
+            <Button type="button" variant="ghost" onClick={() => setConfirming(false)}>
+              Keep editing
+            </Button>
+            <Button type="button" variant="destructive" disabled={discard.isPending} onClick={() => discard.mutate()}>
+              {discard.isPending && <Spinner data-icon="inline-start" />}
+              Discard
+            </Button>
+          </div>
+        ) : (
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={requestClose}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={save.isPending || mediaBusy || createDraft.isPending}>
+              {(save.isPending || mediaBusy) && <Spinner data-icon="inline-start" />}
+              {post ? "Save changes" : mediaBusy ? "Uploading…" : "Publish post"}
+              <HugeiconsIcon icon={ArrowRight02Icon} data-icon="inline-end" />
+            </Button>
+          </DialogFooter>
+        )}
       </FieldGroup>
     </form>
   );

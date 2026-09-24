@@ -86,7 +86,7 @@ func (api *postAPI) checkout(c fiber.Ctx, publicURL string) error {
 		return databaseError(c, err)
 	}
 	defer release()
-	post, err = scanPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1 AND deleted_at IS NULL AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL)`, id))
+	post, err = scanPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1 AND deleted_at IS NULL`+published+` AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL)`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, 404, "post not found")
 	}

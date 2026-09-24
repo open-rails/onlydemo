@@ -305,6 +305,11 @@ func (m *mediaService) resolve(ctx context.Context, ref contentref.ContentRef, a
 		} else if err != nil {
 			return access.Resolution{}, err
 		}
+		if p.Draft {
+			// Only its author (or a site admin) sees a draft; Resolve then makes them its editor.
+			g, err := m.CanUpload(ctx, actor, ref)
+			return access.Resolution{Visible: g.Allowed, Accessible: g.Allowed}, err
+		}
 		ok, err := m.editorial(ctx, actor.ID, p.ChannelID)
 		if err == nil && !ok {
 			ok, err = tiered.Decide(ctx, m.billing.checker(), actor, postPolicy(p))
@@ -314,7 +319,7 @@ func (m *mediaService) resolve(ctx context.Context, ref contentref.ContentRef, a
 	return access.Resolution{}, nil
 }
 
-// CanUpload: post media needs channel:posts:create, channel slots need
+// CanUpload: post media needs channel:posts:create (a draft: its author), channel slots need
 // channel:settings:manage, a user uploads only their own avatar. Site admins
 // may upload anywhere and are exempt from the UploadLimiter. The channel owns
 // the quota of its posts.
@@ -341,7 +346,7 @@ func (m *mediaService) CanUpload(ctx context.Context, actor access.Actor, ref co
 			return g, err
 		}
 		g.Owner = channelOwner(p.ChannelID)
-		if !g.Allowed {
+		if !g.Allowed && (!p.Draft || p.AuthorID == user) {
 			g.Allowed, err = m.channels.allowed(ctx, user, p.ChannelID, channelCreatePermission)
 		}
 		return g, err

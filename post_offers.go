@@ -32,6 +32,24 @@ type postArchiveArgs struct {
 
 func (postArchiveArgs) Kind() string { return "demo_archive_post" }
 
+// Abandoned composers (a closed tab) leave drafts; the sweep deletes them.
+const draftLifetime = 24 * time.Hour
+
+type postDraftSweepArgs struct{}
+
+func (postDraftSweepArgs) Kind() string { return "demo_sweep_post_drafts" }
+
+type postDraftSweepWorker struct {
+	river.WorkerDefaults[postDraftSweepArgs]
+	api *postAPI
+}
+
+func (w *postDraftSweepWorker) Work(ctx context.Context, _ *river.Job[postDraftSweepArgs]) error {
+	return pgx.BeginFunc(ctx, w.api.pool, func(tx pgx.Tx) error {
+		return w.api.deleteDraftsTx(ctx, tx, `id IN (SELECT id FROM `+w.api.table+` WHERE published_at IS NULL AND created_at < $1 LIMIT 500)`, time.Now().Add(-draftLifetime))
+	})
+}
+
 type postOfferWorker struct {
 	river.WorkerDefaults[postOfferArgs]
 	api *postAPI
@@ -61,6 +79,9 @@ func (api *postAPI) RiverJobs() riverkit.Contribution {
 		}
 		river.AddWorker(cfg.Workers, &postOfferWorker{api: api})
 		river.AddWorker(cfg.Workers, &postArchiveWorker{api: api})
+		river.AddWorker(cfg.Workers, &postDraftSweepWorker{api: api})
+		cfg.PeriodicJobs = append(cfg.PeriodicJobs, river.NewPeriodicJob(river.PeriodicInterval(time.Hour),
+			func() (river.JobArgs, *river.InsertOpts) { return postDraftSweepArgs{}, nil }, &river.PeriodicJobOpts{RunOnStart: true}))
 		return nil
 	}, func(_ context.Context, binding riverkit.Binding) error { api.jobs = binding.Client; return nil }, func() error { api.jobs = nil; return nil })
 }
