@@ -49,7 +49,7 @@ export const limits = {
   files: 50,
   videos: 10,
   imageBytes: 25 << 20,
-  videoBytes: 2 * 1024 ** 3,
+  videoBytes: 20 * 1024 ** 3,
 };
 export const imageTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 export const videoTypes = ["video/mp4", "video/webm", "video/quicktime", "video/x-matroska"];
@@ -94,9 +94,9 @@ export function uploadMessage(error: unknown) {
     case "rate_limited":
       return `Upload limit reached. Try again in ${Math.ceil((error.retryAfter ?? 60) / 60)} min.`;
     case "quota_exceeded":
-      return "This channel is out of storage.";
+      return "This channel's storage is full. Remove files from its posts to make room.";
     case "too_large":
-      return "That file is too large (images 25 MiB, videos 2 GiB).";
+      return "That file is too large (images 25 MiB, videos 20 GiB).";
     case "too_many_files":
       return `A post holds at most ${limits.files} files, ${limits.videos} of them videos.`;
     case "type_not_allowed":

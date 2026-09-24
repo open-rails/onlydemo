@@ -18,8 +18,8 @@ importers:
         specifier: ^1.1.10
         version: 1.1.10(react@19.3.0)
       '@open-rails/contentkit-upload':
-        specifier: file:vendor/open-rails-contentkit-upload-0.17.0.tgz
-        version: file:vendor/open-rails-contentkit-upload-0.17.0.tgz(react@19.3.0)
+        specifier: file:vendor/open-rails-contentkit-upload-0.19.0.tgz
+        version: file:vendor/open-rails-contentkit-upload-0.19.0.tgz(react@19.3.0)
       '@openrails/auth-ui':
         specifier: https://github.com/open-rails/auth-ui/releases/download/v0.3.1/openrails-auth-ui-0.3.1.tgz
         version: https://github.com/open-rails/auth-ui/releases/download/v0.3.1/openrails-auth-ui-0.3.1.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -421,8 +421,8 @@ packages:
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
 
-  '@open-rails/contentkit-upload@file:vendor/open-rails-contentkit-upload-0.17.0.tgz':
-    resolution: {integrity: sha512-VaDlKP8LHiy2w6xxLLQ4SuqbSvzM6ESCm8LYbpUD79YflLUfkz4VMWht3oDjNzbEWZBR+nmGiH215h/6bye5PQ==, tarball: file:vendor/open-rails-contentkit-upload-0.17.0.tgz}
+  '@open-rails/contentkit-upload@file:vendor/open-rails-contentkit-upload-0.19.0.tgz':
+    resolution: {integrity: sha512-tW03bcGoDonix8DMQKN30CQAcbikGS9OdST0eYCelcZftbh9wHkx2fILK2YumfWXOWNM5YHlwueKGlEIUmNKTg==, tarball: file:vendor/open-rails-contentkit-upload-0.19.0.tgz}
     version: 0.0.0
     engines: {node: '>=22'}
     peerDependencies:
@@ -2762,7 +2762,7 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.3
 
-  '@open-rails/contentkit-upload@file:vendor/open-rails-contentkit-upload-0.17.0.tgz(react@19.3.0)':
+  '@open-rails/contentkit-upload@file:vendor/open-rails-contentkit-upload-0.19.0.tgz(react@19.3.0)':
     dependencies:
       '@noble/hashes': 2.4.0
     optionalDependencies:

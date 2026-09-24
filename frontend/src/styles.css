@@ -717,6 +717,10 @@
     gap: 12px;
     margin-top: -56px;
     position: relative;
+    pointer-events: none; /* its empty space overlaps the cover's buttons */
+  }
+  .profile-top > * {
+    pointer-events: auto;
   }
   .profile-top .inline-actions {
     gap: 8px;

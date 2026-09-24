@@ -11,19 +11,21 @@ directory is `/dev/routes`. AuthKit protocol anchors stay at
 
 ## Run locally
 
-Use Go 1.26.6, Node 24, pnpm 11, Docker, libvips (`libvips-dev`; the image
-job is CGO) and ffmpeg with ffprobe (the video worker; `apt install ffmpeg`). Copy `.env.example` to `.env`, set `MEDIA_TOKEN_KEY`, then:
+Prerequisites: Docker, Go 1.26.6, Node 24 with pnpm 11, libvips (`libvips-dev`;
+the image job is CGO) and ffmpeg with ffprobe (the video worker). Copy
+`.env.example` to `.env` and set `MEDIA_TOKEN_KEY`
+(`echo "dev:$(openssl rand -base64 32)"`), then:
 
 ```sh
-task dev:up   # PostgreSQL (with PGroonga, for ContentKit) and MinIO with the media bucket
-task migrate
+task dev:up   # PostgreSQL (with PGroonga) and MinIO with the media bucket; idempotent
 task run
 task seed     # optional display channels and posts, created through the API
 ```
 
-`task run` serves Go with Air, the frontend with Vite, the media access
-worker (`task media:access`) and the video encode worker (`task media:worker`),
-reloading on change; open http://localhost:5173. `task run:embedded` builds the frontend into
+`task run` migrates (idempotent), then serves Go with Air, the frontend with
+Vite, the media access worker (`task media:access`) and the video encode
+worker (`task media:worker`), reloading on change; open http://localhost:5173.
+The MinIO console is http://localhost:59001 (`onlydemo` / `onlydemo-dev-secret`). `task run:embedded` builds the frontend into
 the single Go binary and serves everything from http://localhost:3000.
 `task seed` targets http://127.0.0.1:3000; pass `-- --url <base>` for another
 server. It is idempotent.
@@ -77,7 +79,7 @@ results are synchronous and OpenRails reconciles from the gateway.
 | `MEDIA_S3_*` | Media bucket: `ENDPOINT`, `PUBLIC_ENDPOINT` (browser presign host), `BUCKET`, `REGION`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY` |
 | `MEDIA_URL`, `MEDIA_DELIVERY`, `MEDIA_COOKIE_DOMAIN` | media-access origin; `cookie` (default) or `url` delivery |
 | `MEDIA_TOKEN_KEY`, `MEDIA_TOKEN_KEY_PREVIOUS` | `{kid}:{base64 32+ bytes}` signing keys shared with media-access |
-| `MEDIA_UPLOAD_FILES_PER_HOUR`, `MEDIA_UPLOAD_BYTES_PER_DAY`, `MEDIA_CHANNEL_QUOTA_BYTES` | Upload limits (defaults 60, 2 GiB, 5 GiB) |
+| `MEDIA_UPLOAD_FILES_PER_HOUR`, `MEDIA_UPLOAD_BYTES_PER_DAY`, `MEDIA_CHANNEL_QUOTA_BYTES` | Upload limits (defaults 60, 100 GiB, 500 GiB) |
 
 There is no separate billing database URL or billing encryption key. Credentials
 are supplied as a host-owned snapshot. The app and billing library use fresh
@@ -140,14 +142,18 @@ is published); the app presigns and commits (`/api/v1/media/upload/*`).
   MKV) mixed in one order, plus an optional image `teaser` derived as a
   blurred WebP (the app refuses a video teaser). ContentKit holds the caps
   (`Kind.MaxFiles`, `TypeLimits`): 50 files per post (teaser included), 10 of
-  them videos; images up to 25 MiB, videos up to 2 GiB; 409 `too_many_files`. `channel`: public `avatar` and `banner`
-  slots, set from the channel's cropped `avatar-source`/`banner-source` files
-  (`commit-slot-from-file`, `Slot.Aspect` 1 and 3; only managers read those
-  sources). `user`: public `avatar_80`/`avatar_320`.
+  them videos; images up to 25 MiB, videos up to 20 GiB (multipart, 4K sources); 409 `too_many_files`. `channel`: public `avatar` and `banner`
+  slots (`Slot.Aspect` 1 and 3), cropped from an uploaded
+  `avatar-source`/`banner-source` file of the channel or, with "Use as channel
+  avatar/banner" on a post image, from that post (`commit-slot-from-file` with
+  `from`; the manager must be allowed to upload to both). `user`: public
+  `avatar_80`/`avatar_320`.
 - **Edits.** Crop and rotate are ContentKit's non-destructive file edits
   (commit op `edit`): variants re-derive from the untouched original. The
-  cropper (react-easy-crop with the SDK's `useCrop`) draws the `Unedited`
-  `editor` variant; readers with full access can request it too. Item order lives in the
+  cropper (react-easy-crop with the SDK's `useCrop`) draws the `Unedited`,
+  `EditorOnly` `editor` variant. Only editors (whoever may upload to the item:
+  its channel's posters or managers, site admins; `Resolution.Editor`) are
+  signed it and get `edit`/`dims`. Item order lives in the
   manifest; the post row keeps only its access policy.
 - **Reads.** `GET /api/v1/media/post/{id}?variant=large,blurred` resolves once
   with the post rule (`media/tiered` over OpenRails: membership key,
@@ -157,15 +163,16 @@ is published); the app presigns and commits (`/api/v1/media/upload/*`).
   `media-access`, never the bucket.
 - **Video.** A commit enqueues the encode in River schema `media_worker`;
   ContentKit's `cmd/media-worker` (`task media:worker`, needs ffmpeg) writes a
-  byte-range HLS ladder (rungs up to the source height, ContentKit's fixed
-  2160–480 ladder), a seek sprite and one MP4 download per quality. The player
+  byte-range HLS ladder (ContentKit's default 2160–480, rungs up to the source
+  height), a seek sprite and one MP4 download per quality. The player
   (hls.js) loads `/api/v1/media/post/{id}/hls/{file}/master.m3u8` from the read
   API; segments come from `media-access`. Downloads are saved as
   `{post-slug}-{file}-{720p}.mp4`.
 - **Uploads.** Post images need `channel:posts:create`, channel slots
   `channel:settings:manage`, a user their own avatar. The UploadLimiter
-  rate-limits each uploader (429) and holds each channel's quota (413); site
-  admins are exempt. Deleting a post erases its folder and releases quota;
+  rate-limits each uploader (429) and holds each channel's quota: presign
+  refuses early and a commit that would exceed it fails (413
+  `quota_exceeded`, shown in the editor); site admins are exempt. Deleting a post erases its folder and releases quota;
   channel purge erases post and channel folders; account purge erases the
   avatar.
 - **Delivery.** Production uses cookie mode: the site and `media.` host share a
@@ -256,8 +263,10 @@ ContentKit handlers, the libvips job, the `media-worker` ffmpeg encode and the
 `media-access` binary (fake Stripe only): uploads and variants, a mixed
 image/video post (HLS playlists and byte ranges, downloads, locked viewers,
 ceilings; skipped without ffmpeg locally), what anonymous, member, buyer and members_ppv
-buyer (after membership lapse) viewers get, editor/admin bypass, rate and
-quota refusals, public slots and post erasure. `task dev:up && task test:media`
+buyer (after membership lapse) viewers get, editor/admin bypass, the default
+ladder reaching the encoder, editor-only variants and edit data, rate and
+quota refusals (presign and commit), public slots (also from a post image) and
+post erasure. `task dev:up && task test:media`
 runs it locally; CI runs it on every push. CI also builds/vets Go and
 builds/lints the frontend. The libraries retain their full automated qualification. A real sandbox
 purchase/subscription walkthrough is a separate deliberate activity with retained

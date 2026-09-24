@@ -193,7 +193,9 @@ export function PostPage() {
             )}
           </div>
           <PostGallery postID={item.id} viewer={auth.user?.id} />
-          {canEdit && <PostMediaEditor postID={item.id} />}
+          {canEdit && (
+            <PostMediaEditor postID={item.id} channel={channel.data?.can_manage ? item.channel_id : undefined} />
+          )}
           {!item.can_read && (
             <div className="locked-content">
               <div

@@ -48,6 +48,7 @@ import (
 	"github.com/open-rails/contentkit/media"
 	mediaS3 "github.com/open-rails/contentkit/media/s3"
 	"github.com/open-rails/contentkit/media/token"
+	"github.com/open-rails/contentkit/media/video"
 	"github.com/open-rails/openrails"
 	openrailsembed "github.com/open-rails/openrails/embed"
 )
@@ -171,6 +172,26 @@ func TestMediaEndToEnd(t *testing.T) {
 		owner.presign(ref, "", big, "image/png", 413, media.CodeQuota)
 		admin.presign(ref, "", big, "image/png", 200, "") // site admins are exempt
 
+		// Quota binds at commit too: an original that got past presign (here
+		// an exempt upload; in general a lapsed reservation) cannot be committed
+		// past the channel's quota, and the refused commit writes nothing.
+		orig := admin.upload(ref, "", big, "image/png", 200)
+		used, _, err := h.srv.media.limiter.Usage(ctx, h.cfg.Media.Tenant, channelOwner(channelID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		over := owner.call("POST", "/api/v1/media/upload/commit", map[string]any{"ref": ref, "ops": []media.Op{{Op: media.OpInsert, Name: "big.png", Original: orig}}}, "", 413)
+		if over["code"] != media.CodeQuota {
+			t.Fatalf("commit over quota: %v", over)
+		}
+		after, _, err := h.srv.media.limiter.Usage(ctx, h.cfg.Media.Tenant, channelOwner(channelID))
+		if err != nil || after != used {
+			t.Fatalf("usage %d after a refused commit, was %d (%v)", after, used, err)
+		}
+		if files := owner.call("GET", fmt.Sprintf("/api/v1/posts/%d/media", posts["public"]), nil, "", 200)["files"].([]any); len(files) != 2 {
+			t.Fatalf("refused commit changed the manifest: %v", files)
+		}
+
 		spam := spammer.call("POST", "/api/v1/channels", map[string]any{"slug": "spam", "name": "Spam"}, "", 201)
 		sp := spammer.call("POST", "/api/v1/posts", map[string]any{"channel_id": spam["id"], "slug": "spam-post", "title": "s", "body": "s"}, "", 201)
 		spamRef := postRefBody(int64(sp["id"].(float64)))
@@ -274,6 +295,16 @@ func TestMediaEndToEnd(t *testing.T) {
 		h.expectRange(t, blob, r.cookie, o, n, 206)
 		h.expectRange(t, blob, "", o, n, 403)
 
+		// Videos keep ContentKit's default ladder (up to 2160p): the worker
+		// recorded that recipe.
+		man, _, err := h.srv.media.manifests.Get(ctx, h.srv.media.postRef(id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hls := man.Files[2].HLS; hls.Spec != video.Spec(media.DefaultLadder) {
+			t.Fatalf("hls spec %s, want the default ladder's %s", hls.Spec, video.Spec(media.DefaultLadder))
+		}
+
 		// Downloads: one per quality, saved under the post's name.
 		if len(r.res.Downloads) != 1 || r.res.Downloads[0].Key != "clip.mp4-240p" || r.res.Downloads[0].Name != "p-mixed-clip-240p.mp4" {
 			t.Fatalf("downloads %+v", r.res.Downloads)
@@ -316,8 +347,28 @@ func TestMediaEndToEnd(t *testing.T) {
 		h.expectFetch(t, f.URL, h.read(owner, id).cookie, 200)
 		res, raw := owner.do("GET", fmt.Sprintf("/api/v1/media/post/%d?variant=editor", id), nil, "")
 		var ed media.ReadResult
-		if res.StatusCode != 200 || json.Unmarshal(raw, &ed) != nil || ed.Files[0].Variant != "editor" {
+		if res.StatusCode != 200 || json.Unmarshal(raw, &ed) != nil || ed.Files[0].Variant != "editor" || ed.Files[0].URL == "" {
 			t.Fatalf("editor variant: %d %s", res.StatusCode, raw)
+		}
+		if f := editor.call("GET", fmt.Sprintf("/api/v1/posts/%d/media", id), nil, "", 200)["files"].([]any)[0].(map[string]any); f["edit"] == nil {
+			t.Fatalf("uploader file list lacks the edit: %v", f)
+		}
+		// Readers with full access get neither the uncropped variant nor the
+		// edit and source dims.
+		for _, p := range []peer{stranger, anon, member} {
+			res, raw := p.do("GET", fmt.Sprintf("/api/v1/media/post/%d?variant=editor", id), nil, "")
+			var r media.ReadResult
+			if res.StatusCode != 200 || json.Unmarshal(raw, &r) != nil || r.Access != media.AccessFull {
+				t.Fatalf("%s editor read: %d %s", p.name, res.StatusCode, raw)
+			}
+			for _, f := range r.Files {
+				if f.URL != "" || f.Variant != "" || f.Edit != nil || f.Dims != nil {
+					t.Fatalf("%s got editor data: %+v", p.name, f)
+				}
+			}
+			if f := h.read(p, id).res.Files[0]; f.URL == "" || f.Edit != nil || f.Dims != nil || f.Width != 240 {
+				t.Fatalf("%s large read %+v", p.name, f)
+			}
 		}
 	})
 
@@ -347,6 +398,37 @@ func TestMediaEndToEnd(t *testing.T) {
 		if r := h.read2(stranger, "channel", channelID); r.Access != media.AccessNone || !r.Files[0].Locked {
 			t.Fatalf("stranger channel read %+v", r)
 		}
+	})
+
+	t.Run("channel avatar from a post image", func(t *testing.T) {
+		chRef := map[string]string{"kind": kindChannel, "id": channelID}
+		from := postRefBody(posts["public"])
+		slot := map[string]any{"ref": chRef, "slot": "avatar", "from": from, "file": "b.png", "edit": map[string]any{"crop": map[string]int{"x": 0, "y": 100, "w": 480}}}
+		// Channel editors post but do not manage the channel's look.
+		editor.call("POST", "/api/v1/media/upload/commit-slot-from-file", slot, "", 403)
+		// Managing a channel is not enough to take another channel's images.
+		other := stranger.call("POST", "/api/v1/channels", map[string]any{"slug": "elsewhere", "name": "Elsewhere"}, "", 201)
+		stranger.call("POST", "/api/v1/media/upload/commit-slot-from-file",
+			map[string]any{"ref": map[string]string{"kind": kindChannel, "id": other["id"].(string)}, "slot": "avatar", "from": from, "file": "b.png"}, "", 403)
+		owner.call("POST", "/api/v1/media/upload/commit-slot-from-file", slot, "", 204)
+
+		// Slot.Aspect 1 derives the crop height; the avatar re-encodes from the
+		// post image's source through it.
+		item, err := h.srv.media.kinds.Item(h.srv.media.ref(kindChannel, channelID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		key, _ := item.SlotOriginal("avatar")
+		orig, err := h.srv.media.store.Head(ctx, key)
+		if err != nil || !strings.Contains(orig.Metadata[media.SlotEditMeta], `"h":480`) {
+			t.Fatalf("avatar original %+v %v", orig.Metadata, err)
+		}
+		pub, _ := item.Public("avatar")
+		eventually(t, "avatar from post image", func() bool {
+			obj, err := h.srv.media.store.Head(ctx, pub)
+			return err == nil && obj.Metadata["source"] == strings.Trim(orig.ETag, `"`)
+		})
+		h.waitPublic(t, anon.call("GET", "/api/v1/channels/"+channelID, nil, "", 200)["avatar_url"].(string))
 	})
 
 	t.Run("post deletion erases its folder and releases quota", func(t *testing.T) {

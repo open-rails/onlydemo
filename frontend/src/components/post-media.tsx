@@ -129,7 +129,14 @@ export function PostGallery({ postID, viewer }: { postID: number; viewer?: strin
 // Creator tools: upload images and videos with the ContentKit SDK (hashing,
 // resumable multipart, reorder before commit), then reorder, remove or pick
 // an image as the teaser. ContentKit derives image variants and HLS.
-export function PostMediaEditor({ postID }: { postID: number }) {
+// Channel slots a post image can fill (managers only), cropped at the slot's aspect.
+const channelSlots = {
+  avatar: { aspect: 1, label: "Use as channel avatar", short: "Avatar" },
+  banner: { aspect: 3, label: "Use as channel banner", short: "Banner" },
+};
+type ChannelSlot = keyof typeof channelSlots;
+
+export function PostMediaEditor({ postID, channel }: { postID: number; channel?: string }) {
   const client = useQueryClient();
   const files = useQuery({
     queryKey: ["post-files", postID],
@@ -137,7 +144,8 @@ export function PostMediaEditor({ postID }: { postID: number }) {
   });
   const queue = useUploadQueue(uploads, { ref: postRef(postID) });
   const [error, setError] = useState("");
-  const [cropping, setCropping] = useState<string>();
+  const [notice, setNotice] = useState("");
+  const [cropping, setCropping] = useState<{ name: string; slot?: ChannelSlot }>();
   // The unedited "editor" variant, source dims and current edit per image.
   const editor = useQuery({
     queryKey: ["post-media-editor", postID],
@@ -180,7 +188,7 @@ export function PostMediaEditor({ postID }: { postID: number }) {
       if (!imageTypes.includes(file.type) && !videoTypes.includes(file.type))
         refused.push(`${file.name}: unsupported type.`);
       else if (file.size > (video ? limits.videoBytes : limits.imageBytes))
-        refused.push(`${file.name}: over the ${video ? "2 GiB video" : "25 MiB image"} limit.`);
+        refused.push(`${file.name}: over the ${video ? "20 GiB video" : "25 MiB image"} limit.`);
       else if (count >= limits.files)
         refused.push(`${file.name}: a post holds at most ${limits.files} files.`);
       else if (video && videos >= limits.videos)
@@ -269,11 +277,26 @@ export function PostMediaEditor({ postID }: { postID: number }) {
                   variant="ghost"
                   aria-label="Crop and rotate"
                   disabled={!editable.get(f.name)?.dims}
-                  onClick={() => setCropping(f.name)}
+                  onClick={() => setCropping({ name: f.name })}
                 >
                   <HugeiconsIcon icon={CropIcon} />
                 </Button>
               )}
+              {channel &&
+                !isVideo(f.type) &&
+                (Object.keys(channelSlots) as ChannelSlot[]).map((slot) => (
+                  <Button
+                    key={slot}
+                    size="sm"
+                    variant="ghost"
+                    title={channelSlots[slot].label}
+                    aria-label={channelSlots[slot].label}
+                    disabled={!editable.get(f.name)?.dims}
+                    onClick={() => setCropping({ name: f.name, slot })}
+                  >
+                    {channelSlots[slot].short}
+                  </Button>
+                ))}
               {!isVideo(f.type) && (
                 <Button
                   size="sm"
@@ -344,16 +367,29 @@ export function PostMediaEditor({ postID }: { postID: number }) {
       </ol>
       {cropping && (
         <CropDialog
-          title="Crop and rotate"
-          src={editable.get(cropping)?.url}
-          dims={editable.get(cropping)?.dims}
-          initial={editable.get(cropping)?.edit}
-          onSave={(e) => uploads.edit(postRef(postID), cropping, e).then(refresh)}
+          title={cropping.slot ? channelSlots[cropping.slot].label : "Crop and rotate"}
+          src={editable.get(cropping.name)?.url}
+          dims={editable.get(cropping.name)?.dims}
+          aspect={cropping.slot && channelSlots[cropping.slot].aspect}
+          initial={cropping.slot ? undefined : editable.get(cropping.name)?.edit}
+          onSave={(e) =>
+            cropping.slot && channel
+              ? uploads
+                  .setSlotFromFile({ kind: "channel", id: channel }, cropping.slot, cropping.name, e ?? {}, {
+                    from: postRef(postID),
+                  })
+                  .then(() => {
+                    setNotice(`Channel ${cropping.slot} updated; it shows once processed.`);
+                    return client.invalidateQueries({ queryKey: ["channel"] });
+                  })
+              : uploads.edit(postRef(postID), cropping.name, e).then(refresh)
+          }
           onClose={() => setCropping(undefined)}
         />
       )}
       {queue.blocked && <FormError>{uploadMessage(queue.blocked)}</FormError>}
       <FormError>{error}</FormError>
+      {notice && <p className="muted text-sm">{notice}</p>}
       {queue.items.length > 0 && (
         <Button
           disabled={!queue.ready || publish.isPending}
