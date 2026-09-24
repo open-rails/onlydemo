@@ -758,9 +758,6 @@
     margin-top: 12px;
     font-size: 1.45rem;
   }
-  .online {
-    color: var(--success);
-  }
   .profile-bio {
     margin-top: 12px;
     font-size: 0.92rem;

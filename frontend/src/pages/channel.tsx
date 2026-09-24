@@ -212,7 +212,7 @@ export function ChannelPage() {
             {current.name}
           </h1>
           <p className="handle">
-            @{current.slug} · <span className="online">Available now</span>
+            @{current.slug}
           </p>
           {current.description && (
             <p className="profile-bio">{current.description}</p>
