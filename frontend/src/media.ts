@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createUploadClient, UploadError } from "@openrails/contentkit-upload";
-import type { CommitFile, Edit, Op, RefBody, SlotManifest } from "@openrails/contentkit-upload";
+import type { CommitFile, Edit, EncodeProgress, Op, RefBody, SlotManifest } from "@openrails/contentkit-upload";
 import { auth, request } from "./api";
 
 // Browser uploads go straight to the bucket; the app only presigns and commits.
@@ -25,6 +25,7 @@ export interface MediaFile {
   locked?: boolean;
   hls?: boolean;
   failed?: string; // editors only: why the video cannot be encoded
+  progress?: EncodeProgress; // live encode progress while the video is pending
   edit?: Edit;
   dims?: { w: number; h: number };
   variant?: string;
@@ -99,6 +100,10 @@ export const hlsBase = (postID: number | string, name: string) =>
 
 // The read API resolves access once and returns URLs only for what this
 // viewer may see (cookie mode sets the folder cookie for full access).
+// The item's current encode step, including the poster/preview pass after publish.
+export const readVideoProgress = (id: number | string) =>
+  request<{ progress?: EncodeProgress }>(`/api/v1/media/post/${id}/video-images`);
+
 export const readPost = (id: number | string, variants: string) =>
   request<MediaRead>(`/api/v1/media/post/${id}?variant=${variants}`);
 

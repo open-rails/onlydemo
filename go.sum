@@ -312,6 +312,12 @@ github.com/open-rails/contentkit v0.26.0 h1:7c+xGcCGv/1oNsNB6KkCq1/UZ3THv6K/ObRP
 github.com/open-rails/contentkit v0.26.0/go.mod h1:sPU9AL4COG4ZClwheVVliBPpjWY1n/Sg2o+8k09GWjw=
 github.com/open-rails/contentkit v0.28.0 h1:Xt+UwUB5sHPgkxFkC2XTAHfdtalVhw2pRmRRgLOL/bM=
 github.com/open-rails/contentkit v0.28.0/go.mod h1:sPU9AL4COG4ZClwheVVliBPpjWY1n/Sg2o+8k09GWjw=
+github.com/open-rails/contentkit v0.29.0 h1:++MVl++VyZzZDOSe0YiIsuAFdndlkM3n8EEzDalq188=
+github.com/open-rails/contentkit v0.29.0/go.mod h1:sPU9AL4COG4ZClwheVVliBPpjWY1n/Sg2o+8k09GWjw=
+github.com/open-rails/contentkit v0.30.0 h1:ZWJiFyxpGKa4qOLB3kyekjC46ciOTfkokftxpc2wtrY=
+github.com/open-rails/contentkit v0.30.0/go.mod h1:sPU9AL4COG4ZClwheVVliBPpjWY1n/Sg2o+8k09GWjw=
+github.com/open-rails/contentkit v0.31.0 h1:JZaG+rpdr2JusvwXhe10w5/2sIVqEvtFtugxTvnHJYM=
+github.com/open-rails/contentkit v0.31.0/go.mod h1:sPU9AL4COG4ZClwheVVliBPpjWY1n/Sg2o+8k09GWjw=
 github.com/open-rails/helpers v0.3.0 h1:SE5YuAO3mOwcUF5ttkffHn2KNHPRQv9q83OUsoH6IMs=
 github.com/open-rails/helpers v0.3.0/go.mod h1:SGBErWMyTPllcGAfiHvZf5qvEBDZpT17c7KS/s11Y/Y=
 github.com/open-rails/migratekit v1.0.5 h1:5D9b+Yp8+q5PQWl1U4fYrh+dcVcUTg3ROQAx26fhy/Y=

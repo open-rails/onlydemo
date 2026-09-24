@@ -247,6 +247,7 @@ func newMedia(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth
 		return nil, err
 	}
 	if m.reader, err = media.NewReader(media.ReaderOptions{Manifests: m.manifests, Kinds: kinds, Resolver: m, Hooks: hooks,
+		Progress: video.NewProgressSource(pool),
 		Delivery: media.Delivery{Mode: mc.Delivery, BaseURL: mc.URL, CookieDomain: mc.CookieDomain, SigningKey: signing}}); err != nil {
 		return nil, err
 	}

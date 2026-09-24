@@ -1,5 +1,5 @@
 import { useEffect, useImperativeHandle, useRef, useState, type DragEvent, type Ref } from "react";
-import { HoverPreviewPicker, ImageCropDialog, VideoPosterPicker, useMessages } from "@openrails/contentkit-upload/ui";
+import { EncodeProgress, HoverPreviewPicker, ImageCropDialog, VideoPosterPicker, useMessages } from "@openrails/contentkit-upload/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useUploadQueue, type UseUploadQueue } from "@openrails/contentkit-upload/react";
 import type { Op } from "@openrails/contentkit-upload";
@@ -31,6 +31,7 @@ import {
   screenFiles,
   postRef,
   readPost,
+  readVideoProgress,
   uploadMessage,
   uploads,
   videoTypes,
@@ -113,7 +114,9 @@ export function PostGallery({ postID, viewer }: { postID: number; viewer?: strin
           if (!f.hls || !f.name)
             return (
               <figure key={f.index} className="video-pending">
-                <Spinner /> Processing video…
+                <div className="video-encode">
+                  <EncodeProgress progress={f.progress} />
+                </div>
               </figure>
             );
           return (
@@ -306,6 +309,14 @@ function MediaEditor({
     refetchInterval: (q) => (q.state.data?.poster.pending || q.state.data?.hover_preview.pending ? 3000 : false),
   });
   const imagesOf = videoImages.data;
+  const encodePending = (editor.data?.files ?? []).some((f) => isVideo(f.type) && !f.hls && !f.failed);
+  const encode = useQuery({
+    queryKey: ["post-media-encode", postID],
+    queryFn: () => readVideoProgress(postID),
+    enabled: hasVideo,
+    refetchInterval: (q) => (encodePending || q.state.data?.progress ? 2000 : false),
+  });
+  const imagesStep = encode.data?.progress?.phase === "images" ? encode.data.progress : undefined;
   const posterFile = imagesOf?.poster.selection?.file;
   const refresh = () =>
     client.invalidateQueries({
@@ -403,12 +414,7 @@ function MediaEditor({
                   Poster
                 </Badge>
               )}
-              {video && e && !e.hls && !e.failed && (
-                <Badge variant="outline">
-                  <Spinner data-icon="inline-start" />
-                  Processing video…
-                </Badge>
-              )}
+              {video && e && !e.hls && !e.failed && <div className="media-encode"><EncodeProgress progress={e.progress} /></div>}
               {e?.failed && (
                 <Badge variant="destructive" title={failureMessage(e.failed)}>
                   Can't play
@@ -556,6 +562,11 @@ function MediaEditor({
           </li>
         ))}
       </ol>
+      {imagesStep && (
+        <div className="media-encode media-images">
+          <EncodeProgress progress={imagesStep} />
+        </div>
+      )}
       {picking && (
         <>
           <VideoPosterPicker
