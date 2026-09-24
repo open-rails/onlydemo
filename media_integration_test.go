@@ -254,7 +254,7 @@ func newMediaHarness(t *testing.T) *mediaHarness {
 	t.Cleanup(h.removeBucket)
 	worker := startMediaAccess(t, endpoint, h.bucket, access, secret, tokenKey)
 
-	h.cfg = Config{DatabaseURL: pool.Config().ConnString(), PublicURL: h.base, AuthIssuer: h.base, AuthAudience: "demo-media-test",
+	h.cfg = Config{MembershipHours: 720, DatabaseURL: pool.Config().ConnString(), PublicURL: h.base, AuthIssuer: h.base, AuthAudience: "demo-media-test",
 		PSPs: map[string]openrailsembed.PSPConfig{"stripe": {"stripe": {AccountID: "acct_demo_test",
 			Secrets: map[string]string{"secret_key": "sk_test_fake_only", "webhook_signing_secret": testWebhookSecret}}}}, AuthKeysPath: "",
 		Media: mediaConfig{Tenant: "o", S3Endpoint: endpoint, S3PublicEndpoint: endpoint, S3Bucket: h.bucket, S3Region: "us-east-1",
