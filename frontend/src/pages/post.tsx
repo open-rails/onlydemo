@@ -271,7 +271,6 @@ export function PostPage() {
       </div>
       <PostEditor
         post={item}
-        channelID={item.channel_id}
         hasMembership={channel.data?.membership.status !== "none"}
         open={editor}
         onClose={() => setEditor(false)}

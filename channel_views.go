@@ -250,25 +250,9 @@ func (api *postAPI) me(c fiber.Ctx) error {
 	if err != nil {
 		return billingUnavailable(c)
 	}
-	groups, err := api.auth.client.ListSubjectGroups(c.Context(), authkit.UserSubject(user))
+	managed, err := api.channels.editable(c, user)
 	if err != nil {
 		return billingUnavailable(c)
-	}
-	managed := []channelView{}
-	for _, g := range groups {
-		if g.Persona != channelPersona {
-			continue
-		}
-		v, e := api.channels.view(c, g.GroupID, false)
-		if errors.Is(e, authkit.ErrGroupNotFound) {
-			continue
-		}
-		if e != nil {
-			return billingUnavailable(c)
-		}
-		if v.CanEdit {
-			managed = append(managed, v)
-		}
 	}
 	before := int64(0)
 	if raw := c.Query("before"); raw != "" {
@@ -323,4 +307,38 @@ func (api *postAPI) me(c fiber.Ctx) error {
 	}
 	c.Set("Cache-Control", "no-store")
 	return c.JSON(fiber.Map{"user": fiber.Map{"id": profile.ID, "username": profile.Username, "email": profile.Email, "avatar": avatar[slotKey{profile.ID, slotAvatar}]}, "manageable_channels": managed, "purchased_posts": purchased, "has_more": more, "next_cursor": next, "subscriptions": subscriptions.Data, "payments": payments.Data})
+}
+
+// editable lists the channels the user can publish to.
+func (api *channelAPI) editable(c fiber.Ctx, user string) ([]channelView, error) {
+	groups, err := api.auth.client.ListSubjectGroups(c.Context(), authkit.UserSubject(user))
+	if err != nil {
+		return nil, err
+	}
+	out := []channelView{}
+	for _, g := range groups {
+		if g.Persona != channelPersona {
+			continue
+		}
+		v, e := api.view(c, g.GroupID, false)
+		if errors.Is(e, authkit.ErrGroupNotFound) {
+			continue
+		}
+		if e != nil {
+			return nil, e
+		}
+		if v.CanEdit {
+			out = append(out, v)
+		}
+	}
+	return out, nil
+}
+
+func (api *channelAPI) mine(c fiber.Ctx) error {
+	list, err := api.editable(c, viewer(c))
+	if err != nil {
+		return billingUnavailable(c)
+	}
+	c.Set("Cache-Control", "no-store")
+	return c.JSON(fiber.Map{"data": list})
 }

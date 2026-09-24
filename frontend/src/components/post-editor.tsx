@@ -1,7 +1,7 @@
-import { useCallback, useRef, useState, type FormEvent } from "react";
+import { useCallback, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { request } from "../api";
-import type { AccessPolicy, Post } from "../models";
+import type { AccessPolicy, Channel, Post } from "../models";
 import { micros } from "../format";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowRight02Icon } from "@hugeicons/core-free-icons";
@@ -25,6 +25,7 @@ import {
   FieldTitle,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
@@ -57,83 +58,74 @@ const policies: Array<{ value: AccessPolicy; title: string; detail: string }> =
     },
   ];
 const membershipPolicies: AccessPolicy[] = ["membership", "members_ppv"];
+// Editing an existing post; new posts are written on the /post/new page.
 export function PostEditor({
-  channelID,
-  hasMembership,
   post,
+  hasMembership,
   open,
   onClose,
   onSaved,
 }: {
-  channelID: string;
+  post: Post;
   hasMembership: boolean;
-  post?: Post;
   open: boolean;
   onClose: () => void;
-  onSaved?: (post: Post) => void;
+  onSaved: (post: Post) => void;
 }) {
-  // Closing a composer that holds a draft asks first: it deletes the draft.
-  const [hasDraft, setHasDraft] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-  const requestClose = () => (hasDraft ? setConfirming(true) : onClose());
-  const close = () => {
-    setHasDraft(false);
-    setConfirming(false);
-    onClose();
-  };
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(value) => {
-        if (!value) requestClose();
-      }}
-    >
+    <Dialog open={open} onOpenChange={(value) => !value && onClose()}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{post ? "Edit post" : "Write a new post"}</DialogTitle>
+          <DialogTitle>Edit post</DialogTitle>
           <DialogDescription>
-            Publish to your channel. Readers never become members of your
-            editorial team.
+            Changes publish immediately to your channel.
           </DialogDescription>
         </DialogHeader>
         {open && (
-        <EditorForm
-          key={post?.id || "new"}
-          channelID={channelID}
-          hasMembership={hasMembership}
-          post={post}
-          onClose={close}
-          onSaved={onSaved}
-          onDraft={setHasDraft}
-          requestClose={requestClose}
-          confirming={confirming}
-          setConfirming={setConfirming}
-        />
+          <PostForm
+            key={post.id}
+            channelID={post.channel_id}
+            hasMembership={hasMembership}
+            post={post}
+            onSaved={(saved) => {
+              onSaved(saved);
+              onClose();
+            }}
+            onCancel={onClose}
+            Actions={DialogFooter}
+          />
         )}
       </DialogContent>
     </Dialog>
   );
 }
-function EditorForm({
+export function PostForm({
   channelID,
   hasMembership,
   post,
-  onClose,
+  channels,
+  onChannel,
   onSaved,
+  onCancel,
   onDraft,
-  requestClose,
-  confirming,
+  confirming = false,
   setConfirming,
+  onDiscarded,
+  Actions = FormActions,
 }: {
   channelID: string;
   hasMembership: boolean;
   post?: Post;
-  onClose: () => void;
-  onSaved?: (post: Post) => void;
-  onDraft: (has: boolean) => void;
-  requestClose: () => void;
-  confirming: boolean;
-  setConfirming: (v: boolean) => void;
+  // Several postable channels show a picker, locked once a draft holds media.
+  channels?: Channel[];
+  onChannel?: (channel: Channel) => void;
+  onSaved: (post: Post) => void;
+  onCancel: () => void;
+  onDraft?: (has: boolean) => void;
+  confirming?: boolean;
+  setConfirming?: (v: boolean) => void;
+  onDiscarded?: () => void;
+  Actions?: (props: { children: ReactNode }) => ReactNode;
 }) {
   const client = useQueryClient();
   // New posts upload into a draft created with the first file; Publish turns
@@ -157,7 +149,7 @@ function EditorForm({
     createDraft.mutate(undefined, {
       onSuccess: ({ id }) => {
         setDraft({ id, files: accepted });
-        onDraft(true);
+        onDraft?.(true);
       },
     });
   };
@@ -166,12 +158,17 @@ function EditorForm({
       media.current?.discard();
       if (draft) await request(`/api/v1/posts/${draft.id}`, { method: "DELETE" });
     },
-    onSuccess: onClose,
+    onSuccess: () => onDiscarded?.(),
   });
 
-  const [policy, setPolicy] = useState<AccessPolicy>(
+  const [chosen, setPolicy] = useState<AccessPolicy>(
     post?.access_policy || "public",
   );
+  // A new post moved to a channel without membership falls back to public.
+  const policy =
+    !post && !hasMembership && membershipPolicies.includes(chosen)
+      ? "public"
+      : chosen;
   const [validation, setValidation] = useState("");
   const offer = post?.offers?.find((value) => !value.auto_renew);
   const save = useMutation({
@@ -182,9 +179,8 @@ function EditorForm({
       }),
     onSuccess: async (saved) => {
       // Follow a renamed slug (or open the new post) before refetching.
-      onSaved?.(saved);
+      onSaved(saved);
       await client.invalidateQueries();
-      onClose();
     },
   });
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -217,6 +213,33 @@ function EditorForm({
   return (
     <form onSubmit={submit}>
       <FieldGroup>
+        {channels && channels.length > 1 && (
+          <Field>
+            <FieldLabel htmlFor="post-channel">Channel</FieldLabel>
+            <NativeSelect
+              id="post-channel"
+              className="w-full"
+              value={channelID}
+              disabled={!!draft || createDraft.isPending}
+              onChange={(event) => {
+                const next = channels.find((c) => c.id === event.target.value);
+                if (next) onChannel?.(next);
+              }}
+            >
+              {channels.map((channel) => (
+                <NativeSelectOption key={channel.id} value={channel.id}>
+                  {channel.name} (@{channel.slug})
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            {draft && (
+              <FieldDescription>
+                Media is uploading to this channel. Discard the post to publish
+                somewhere else.
+              </FieldDescription>
+            )}
+          </Field>
+        )}
         <div className="input-row">
           <Field>
             <FieldLabel htmlFor="post-title">Title</FieldLabel>
@@ -344,7 +367,7 @@ function EditorForm({
         {confirming ? (
           <div className="discard-confirm" role="alertdialog" aria-label="Discard this post?">
             <p>Discard this post? Its uploaded images and videos are deleted.</p>
-            <Button type="button" variant="ghost" onClick={() => setConfirming(false)}>
+            <Button type="button" variant="ghost" onClick={() => setConfirming?.(false)}>
               Keep editing
             </Button>
             <Button type="button" variant="destructive" disabled={discard.isPending} onClick={() => discard.mutate()}>
@@ -353,8 +376,12 @@ function EditorForm({
             </Button>
           </div>
         ) : (
-          <DialogFooter>
-            <Button type="button" variant="ghost" onClick={requestClose}>
+          <Actions>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => (draft ? setConfirming?.(true) : onCancel())}
+            >
               Cancel
             </Button>
             <Button type="submit" disabled={save.isPending || mediaBusy || createDraft.isPending}>
@@ -362,9 +389,12 @@ function EditorForm({
               {post ? "Save changes" : mediaBusy ? "Uploading…" : "Publish post"}
               <HugeiconsIcon icon={ArrowRight02Icon} data-icon="inline-end" />
             </Button>
-          </DialogFooter>
+          </Actions>
         )}
       </FieldGroup>
     </form>
   );
+}
+function FormActions({ children }: { children: ReactNode }) {
+  return <div className="form-actions">{children}</div>;
 }

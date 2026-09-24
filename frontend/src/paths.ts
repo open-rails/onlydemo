@@ -4,3 +4,5 @@ export const newChannelPath = "/c/new";
 export const channelPath = (slug: string) => `/c/${encodeURIComponent(slug)}`;
 export const postPath = (post: { channel_slug: string; slug: string }) =>
   `${channelPath(post.channel_slug)}/${encodeURIComponent(post.slug)}`;
+export const newPostPath = (channelSlug?: string) =>
+  "/post/new" + (channelSlug ? `?channel=${encodeURIComponent(channelSlug)}` : "");

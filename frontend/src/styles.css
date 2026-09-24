@@ -291,6 +291,15 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
   }
+  .sidebar-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .sidebar-secondary {
+    align-self: center;
+    color: var(--muted-foreground);
+  }
   .sidebar-footer {
     margin-top: auto;
     display: flex;
@@ -1006,6 +1015,7 @@
     .sidebar .brand > span:last-child,
   .side-nav a span,
   .sidebar-cta span,
+  .sidebar-secondary span,
   .sidebar-footer button span,
   .sidebar-user > span:last-child {
       display: none;
@@ -1077,6 +1087,12 @@
     }
     .tabbar a.active {
       color: var(--primary);
+    }
+    .tabbar a.tabbar-post {
+      width: 46px;
+      border-radius: 50%;
+      background: var(--primary);
+      color: var(--primary-foreground);
     }
     .feed-card,
   .profile {

@@ -38,3 +38,22 @@ export const canJoin = (channel?: Channel) =>
   !channel.membership.member &&
   channel.membership.status === "open" &&
   (channel.membership.free || !!channel.membership.offer);
+
+export const myChannelsKey = (user?: string) => ["my-channels", user];
+const lastKey = (user: string) => `onlydemo-post-channel:${user}`;
+
+// The channel the composer preselects next time: last used or visited.
+export function rememberPostChannel(user: string, channelID: string) {
+  try {
+    localStorage.setItem(lastKey(user), channelID);
+  } catch {
+    /* Falls back to the first channel. */
+  }
+}
+export function recallPostChannel(user: string) {
+  try {
+    return localStorage.getItem(lastKey(user));
+  } catch {
+    return null;
+  }
+}

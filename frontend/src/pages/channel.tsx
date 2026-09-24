@@ -4,7 +4,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useEffect, useState, type FormEvent } from "react";
 import { cn } from "cn";
 import { APIError, request, postPage } from "../api";
@@ -60,20 +60,18 @@ import {
   Loading,
 } from "../components/states";
 import { Avatar, Cover, PostCard } from "../components/cards";
-import { membershipOffer } from "../channels";
-import { PostEditor } from "../components/post-editor";
+import { membershipOffer, myChannelsKey, rememberPostChannel } from "../channels";
 import { ChannelTeam } from "../components/channel-team";
 import { SlotEditError, SlotEditMenu, SlotEditor } from "@openrails/contentkit-upload/ui";
 import { channelRef, useSlot, useSlotSaved } from "../media";
 import { subscribeLabel, usePay } from "../components/pay";
-import { channelsPath, channelPath, postPath } from "../paths";
+import { channelsPath, channelPath, newPostPath } from "../paths";
 
 export function ChannelPage() {
   const { channel: slug = "" } = useParams();
   const auth = useAuth();
   const navigate = useNavigate();
   const client = useQueryClient();
-  const [editor, setEditor] = useState(false);
   const pay = usePay();
   const [tab, setTab] = useState("posts");
   const channel = useQuery({
@@ -102,6 +100,11 @@ export function ChannelPage() {
   const cover = useSlot(channelRef(id), "cover", channel.data?.cover, manage);
   const saved = useSlotSaved();
   const canonical = channel.data?.slug;
+  const editable = channel.data?.can_edit ? channel.data.id : "";
+  const userID = auth.user?.id;
+  useEffect(() => {
+    if (userID && editable) rememberPostChannel(userID, editable);
+  }, [userID, editable]);
   useEffect(() => {
     // A former slug still resolves; show the current URL.
     if (canonical && canonical !== slug)
@@ -195,7 +198,10 @@ export function ChannelPage() {
             </span>
             <div className="inline-actions">
               {current.can_edit && (
-                <Button onClick={() => setEditor(true)}>
+                <Button
+                  nativeButton={false}
+                  render={<Link to={newPostPath(current.slug)} />}
+                >
                   <HugeiconsIcon icon={Add01Icon} data-icon="inline-start" />
                   New post
                 </Button>
@@ -256,7 +262,10 @@ export function ChannelPage() {
             title="No posts yet."
             action={
               current.can_edit ? (
-                <Button onClick={() => setEditor(true)}>
+                <Button
+                  nativeButton={false}
+                  render={<Link to={newPostPath(current.slug)} />}
+                >
                   Write the first post
                 </Button>
               ) : undefined
@@ -308,13 +317,6 @@ export function ChannelPage() {
           }
         />
       )}
-      <PostEditor
-        open={editor}
-        channelID={id}
-        hasMembership={current.membership.status !== "none"}
-        onClose={() => setEditor(false)}
-        onSaved={(saved) => navigate(postPath(saved))}
-      />
     </>
   );
 }
@@ -617,6 +619,9 @@ function ChannelSettings({
 export function NewChannelPage() {
   const auth = useAuth();
   const navigate = useNavigate();
+  const client = useQueryClient();
+  // Arrived from Post without a channel: continue to the composer after.
+  const thenPost = useSearchParams()[0].get("then") === "post";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   if (!auth.user)
@@ -640,7 +645,10 @@ export function NewChannelPage() {
           name: String(data.get("name")).trim(),
         }),
       });
-      navigate(channelPath(channel.slug));
+      await client.invalidateQueries({ queryKey: myChannelsKey(auth.user?.id) });
+      navigate(thenPost ? newPostPath(channel.slug) : channelPath(channel.slug), {
+        replace: thenPost,
+      });
     } catch (cause) {
       setError(
         cause instanceof Error
@@ -654,10 +662,11 @@ export function NewChannelPage() {
   return (
     <div className="page-narrow">
       <div className="page-heading">
-        <h1>Become a creator</h1>
+        <h1>{thenPost ? "Create a channel to post" : "Become a creator"}</h1>
         <p>
-          Your channel is your creator profile. You become its owner and can
-          invite editors after it exists.
+          {thenPost
+            ? "Posts are published to a channel, your creator profile. You need one before you can post; your new post opens right after."
+            : "Your channel is your creator profile. You become its owner and can invite editors after it exists."}
         </p>
       </div>
       <Card>
@@ -704,7 +713,7 @@ export function NewChannelPage() {
                 </Button>
                 <Button type="submit" disabled={busy}>
                   {busy && <Spinner data-icon="inline-start" />}
-                  Create channel
+                  {thenPost ? "Create channel and write post" : "Create channel"}
                   <HugeiconsIcon icon={ArrowRight02Icon} data-icon="inline-end" />
                 </Button>
               </div>

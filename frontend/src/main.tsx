@@ -15,6 +15,7 @@ import { AppLayout, NotFoundPage, RequireAccount } from "./App";
 import { HomePage, ChannelsPage } from "./pages/explore";
 import { ChannelPage, NewChannelPage } from "./pages/channel";
 import { PostPage } from "./pages/post";
+import { NewPostPage } from "./pages/compose";
 import { AccountPage } from "./pages/account";
 import { InvitePage } from "./components/channel-team";
 import {
@@ -48,6 +49,14 @@ const router = createBrowserRouter([
       { path: "/c/new", element: <NewChannelPage /> },
       { path: "/c/:channel", element: <ChannelPage /> },
       { path: "/c/:channel/:post", element: <PostPage /> },
+      {
+        path: "/post/new",
+        element: (
+          <RequireAccount reason="Sign in to publish a post to your channel.">
+            <NewPostPage />
+          </RequireAccount>
+        ),
+      },
       { path: "/reset", element: <ResetPasswordPage /> },
       { path: "/verify", element: <VerifyLinkPage /> },
       { path: "/login/callback", element: <AuthCallbackPage /> },

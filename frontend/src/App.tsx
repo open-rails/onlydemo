@@ -11,6 +11,7 @@ import {
   LinkSquare02Icon,
   Logout03Icon,
   Moon02Icon,
+  QuillWrite02Icon,
   ShoppingBag01Icon,
   SquareLock02Icon,
   Wallet01Icon,
@@ -24,7 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { EmptyState, Loading } from "./components/states";
 import { UserAvatar, SuggestedCreators } from "./components/cards";
-import { channelsPath, newChannelPath } from "./paths";
+import { channelsPath, newChannelPath, newPostPath } from "./paths";
 
 export function AppLayout() {
   const auth = useAuth();
@@ -67,6 +68,27 @@ export function AppLayout() {
     ["/me?tab=channels", "My channels", UserGroupIcon],
     ["/me?tab=settings", "Account", UserIcon],
   ];
+  const tabs = nav.filter(([to]) => to !== "/me?tab=channels");
+  const tabLink = ([to, label, icon]: (typeof nav)[number]) => (
+    <Link
+      key={to}
+      to={to}
+      className={active(to) ? "active" : undefined}
+      aria-label={label}
+    >
+      <HugeiconsIcon icon={icon} size={24} />
+    </Link>
+  );
+  // Signed out, Post opens sign-in over the composer route, which resumes after.
+  const postLink = (props: { className?: string; children?: ReactNode } = {}) => (
+    <Link
+      to={newPostPath()}
+      onClick={() => {
+        if (!auth.loading && !auth.user) auth.openLogin();
+      }}
+      {...props}
+    />
+  );
   const themeButton = (
     <Button
       variant="ghost"
@@ -101,6 +123,16 @@ export function AppLayout() {
           <Logo />
         </Link>
         <div className="inline-actions">
+          <Button
+            size="icon"
+            className="rounded-full"
+            nativeButton={false}
+            aria-label="Post"
+            title="Post"
+            render={postLink()}
+          >
+            <HugeiconsIcon icon={QuillWrite02Icon} />
+          </Button>
           {themeButton}
           {!auth.loading &&
             (auth.user ? (
@@ -139,15 +171,30 @@ export function AppLayout() {
               </Link>
             ))}
           </nav>
-          <Button
-            size="lg"
-            className="sidebar-cta"
-            nativeButton={false}
-            render={<Link to={newChannelPath} />}
-          >
-            <HugeiconsIcon icon={Add01Icon} />
-            <span>New channel</span>
-          </Button>
+          <div className="sidebar-actions">
+            <Button
+              size="lg"
+              className="sidebar-cta"
+              nativeButton={false}
+              aria-label="Post"
+              render={postLink()}
+            >
+              <HugeiconsIcon icon={QuillWrite02Icon} />
+              <span>Post</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="sidebar-secondary"
+              nativeButton={false}
+              aria-label="New channel"
+              title="New channel"
+              render={<Link to={newChannelPath} />}
+            >
+              <HugeiconsIcon icon={Add01Icon} />
+              <span>New channel</span>
+            </Button>
+          </div>
           <div className="sidebar-footer">
             {themeButton}
             {auth.loading ? (
@@ -204,18 +251,17 @@ export function AppLayout() {
         </aside>
       </div>
       <nav className="tabbar" aria-label="Mobile navigation">
-        {nav
-          .filter(([to]) => to !== "/me?tab=channels")
-          .map(([to, label, icon]) => (
-            <Link
-              key={to}
-              to={to}
-              className={active(to) ? "active" : undefined}
-              aria-label={label}
-            >
-              <HugeiconsIcon icon={icon} size={24} />
-            </Link>
-          ))}
+        {tabs.slice(0, 2).map(tabLink)}
+        {postLink({
+          className: "tabbar-post",
+          children: (
+            <>
+              <HugeiconsIcon icon={QuillWrite02Icon} size={24} />
+              <span className="sr-only">Post</span>
+            </>
+          ),
+        })}
+        {tabs.slice(2).map(tabLink)}
       </nav>
     </>
   );
@@ -232,7 +278,13 @@ function Logo() {
     </>
   );
 }
-export function RequireAccount({ children }: { children: ReactNode }) {
+export function RequireAccount({
+  children,
+  reason = "Sign in to see your subscriptions, unlocked posts, and the channels you run.",
+}: {
+  children: ReactNode;
+  reason?: string;
+}) {
   const auth = useAuth();
   if (auth.loading) return <Loading label="Loading your account…" />;
   if (!auth.user)
@@ -250,8 +302,7 @@ export function RequireAccount({ children }: { children: ReactNode }) {
             </div>
           }
         >
-          Sign in to see your subscriptions, unlocked posts, and the channels
-          you run.
+          {reason}
         </EmptyState>
       </div>
     );
