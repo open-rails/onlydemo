@@ -11,8 +11,8 @@ directory is `/dev/routes`. AuthKit protocol anchors stay at
 
 ## Run locally
 
-Use Go 1.26.6, Node 24, pnpm 11, Docker and libvips (`libvips-dev`; the image
-job is CGO). Copy `.env.example` to `.env`, set `MEDIA_TOKEN_KEY`, then:
+Use Go 1.26.6, Node 24, pnpm 11, Docker, libvips (`libvips-dev`; the image
+job is CGO) and ffmpeg with ffprobe (the video worker; `apt install ffmpeg`). Copy `.env.example` to `.env`, set `MEDIA_TOKEN_KEY`, then:
 
 ```sh
 task dev:up   # PostgreSQL (with PGroonga, for ContentKit) and MinIO with the media bucket
@@ -21,8 +21,9 @@ task run
 task seed     # optional display channels and posts, created through the API
 ```
 
-`task run` serves Go with Air, the frontend with Vite and the media access
-worker (`task media:access`), reloading on change; open http://localhost:5173. `task run:embedded` builds the frontend into
+`task run` serves Go with Air, the frontend with Vite, the media access
+worker (`task media:access`) and the video encode worker (`task media:worker`),
+reloading on change; open http://localhost:5173. `task run:embedded` builds the frontend into
 the single Go binary and serves everything from http://localhost:3000.
 `task seed` targets http://127.0.0.1:3000; pass `-- --url <base>` for another
 server. It is idempotent.
@@ -130,14 +131,23 @@ not a calendar month); a change applies to prices set afterwards. Repricing move
 
 ## Media
 
-Images use ContentKit media: one private bucket, a folder per item, originals
-never served. Browsers upload straight to the bucket with
+Images and videos use ContentKit media: one private bucket, a folder per item,
+originals never served. Browsers upload straight to the bucket with
 `@open-rails/contentkit-upload` (vendored in `frontend/vendor` until the package
 is published); the app presigns and commits (`/api/v1/media/upload/*`).
 
-- **Kinds.** `post`: ordered images (`large`, `thumb`) plus an optional `teaser`
-  file, derived as a blurred WebP. `channel`: public `avatar` and `banner`
-  slots. `user`: public `avatar_80`/`avatar_320`. Item order lives in the
+- **Kinds.** `post`: images (`large`, `thumb`) and videos (MP4, WebM, MOV,
+  MKV) mixed in one order, plus an optional image `teaser` derived as a
+  blurred WebP (the app refuses a video teaser). ContentKit holds the caps
+  (`Kind.MaxFiles`, `TypeLimits`): 50 files per post (teaser included), 10 of
+  them videos; images up to 25 MiB, videos up to 2 GiB; 409 `too_many_files`. `channel`: public `avatar` and `banner`
+  slots, set from the channel's cropped `avatar-source`/`banner-source` files
+  (`commit-slot-from-file`, `Slot.Aspect` 1 and 3; only managers read those
+  sources). `user`: public `avatar_80`/`avatar_320`.
+- **Edits.** Crop and rotate are ContentKit's non-destructive file edits
+  (commit op `edit`): variants re-derive from the untouched original. The
+  cropper (react-easy-crop with the SDK's `useCrop`) draws the `Unedited`
+  `editor` variant; readers with full access can request it too. Item order lives in the
   manifest; the post row keeps only its access policy.
 - **Reads.** `GET /api/v1/media/post/{id}?variant=large,blurred` resolves once
   with the post rule (`media/tiered` over OpenRails: membership key,
@@ -145,6 +155,13 @@ is published); the app presigns and commits (`/api/v1/media/upload/*`).
   editors and site admins read everything). Full access gets every file;
   anyone else who can see the post gets the teaser only. Files are served by
   `media-access`, never the bucket.
+- **Video.** A commit enqueues the encode in River schema `media_worker`;
+  ContentKit's `cmd/media-worker` (`task media:worker`, needs ffmpeg) writes a
+  byte-range HLS ladder (rungs up to the source height, ContentKit's fixed
+  2160–480 ladder), a seek sprite and one MP4 download per quality. The player
+  (hls.js) loads `/api/v1/media/post/{id}/hls/{file}/master.m3u8` from the read
+  API; segments come from `media-access`. Downloads are saved as
+  `{post-slug}-{file}-{720p}.mp4`.
 - **Uploads.** Post images need `channel:posts:create`, channel slots
   `channel:settings:manage`, a user their own avatar. The UploadLimiter
   rate-limits each uploader (429) and holds each channel's quota (413); site
@@ -235,8 +252,10 @@ explicit quote confirmation/cancellation and retained deletion. Unexpected provi
 requests fail locally; no real Stripe request or credential is used.
 
 `TestMediaEndToEnd` runs the media proof on real PostgreSQL, MinIO, the
-ContentKit handlers, the libvips job and the `media-access` binary (fake Stripe
-only): uploads and variants, what anonymous, member, buyer and members_ppv
+ContentKit handlers, the libvips job, the `media-worker` ffmpeg encode and the
+`media-access` binary (fake Stripe only): uploads and variants, a mixed
+image/video post (HLS playlists and byte ranges, downloads, locked viewers,
+ceilings; skipped without ffmpeg locally), what anonymous, member, buyer and members_ppv
 buyer (after membership lapse) viewers get, editor/admin bypass, rate and
 quota refusals, public slots and post erasure. `task dev:up && task test:media`
 runs it locally; CI runs it on every push. CI also builds/vets Go and

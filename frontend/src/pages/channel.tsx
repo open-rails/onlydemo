@@ -64,7 +64,7 @@ import { Avatar, Cover, PostCard } from "../components/cards";
 import { membershipOffer } from "../channels";
 import { PostEditor } from "../components/post-editor";
 import { ChannelTeam } from "../components/channel-team";
-import { SlotUpload } from "../components/slot-upload";
+import { SlotCropUpload } from "../components/slot-upload";
 import { useSlotVersion } from "../media";
 import { MembershipDialog } from "../components/membership";
 import { channelsPath, channelPath } from "../paths";
@@ -115,7 +115,6 @@ export function ChannelPage() {
       />
     );
   const current = channel.data;
-  const target = { kind: "channel", id: current.id };
   const postCount = current.post_count ?? posts.data?.length ?? 0;
   return (
     <>
@@ -131,9 +130,10 @@ export function ChannelPage() {
             </small>
           </div>
           {current.can_manage && (
-            <SlotUpload
-              target={target}
+            <SlotCropUpload
+              channel={current.id}
               slot="banner"
+              aspect={3}
               label="Edit cover"
               onDone={slots.refresh}
               className={cn(
@@ -153,9 +153,10 @@ export function ChannelPage() {
                 className="avatar-xl"
               />
               {current.can_manage && (
-                <SlotUpload
-                  target={target}
+                <SlotCropUpload
+                  channel={current.id}
                   slot="avatar"
+                  aspect={1}
                   label="Change avatar"
                   iconOnly
                   onDone={slots.refresh}

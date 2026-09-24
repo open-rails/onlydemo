@@ -28,10 +28,18 @@ tasks:
         MEDIA_ACCESS_S3_SECRET_ACCESS_KEY="$MEDIA_S3_SECRET_ACCESS_KEY" \
         MEDIA_ACCESS_TOKEN_KEY="$MEDIA_TOKEN_KEY" \
         MEDIA_ACCESS_TOKEN_KEY_PREVIOUS="${MEDIA_TOKEN_KEY_PREVIOUS:-}" \
+        MEDIA_ACCESS_CORS_ORIGINS="${MEDIA_ACCESS_CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}" \
         go run github.com/open-rails/contentkit/cmd/media-access
 
+  media:worker:
+    desc: Run the video encode worker (ContentKit cmd/media-worker at the go.mod version; needs ffmpeg)
+    cmds:
+      - |
+        MEDIA_WORKER_THREADS="${MEDIA_WORKER_THREADS:-2}" \
+        go run github.com/open-rails/contentkit/cmd/media-worker
+
   run:
-    desc: Run Go with Air, the React frontend with Vite and the media access worker
+    desc: Run Go with Air, the React frontend with Vite, the media access worker and the video worker
     cmds:
       - |
         set -e
@@ -39,7 +47,9 @@ tasks:
         FRONTEND_PID=$!
         task media:access &
         MEDIA_PID=$!
-        trap 'kill "$FRONTEND_PID" "$MEDIA_PID" 2>/dev/null || true' EXIT INT TERM
+        task media:worker &
+        WORKER_PID=$!
+        trap 'kill "$FRONTEND_PID" "$MEDIA_PID" "$WORKER_PID" 2>/dev/null || true' EXIT INT TERM
         PUBLIC_URL="${DEV_PUBLIC_URL:-http://localhost:5173}" {{.AIR_BIN}} -c air.toml
 
   run:embedded:
@@ -50,7 +60,9 @@ tasks:
         set -e
         task media:access &
         MEDIA_PID=$!
-        trap 'kill "$MEDIA_PID" 2>/dev/null || true' EXIT INT TERM
+        task media:worker &
+        WORKER_PID=$!
+        trap 'kill "$MEDIA_PID" "$WORKER_PID" 2>/dev/null || true' EXIT INT TERM
         go run . serve
 
   seed:
