@@ -17,7 +17,6 @@ import {
   Add01Icon,
   ArrowLeft02Icon,
   ArrowRight02Icon,
-  StarIcon,
   Tick02Icon,
   UserGroupIcon,
 } from "@hugeicons/core-free-icons";
@@ -201,14 +200,6 @@ export function ChannelPage() {
                   New post
                 </Button>
               )}
-              <Button
-                variant="outline"
-                size="icon-lg"
-                className="rounded-full"
-                aria-label="Favorite creator"
-              >
-                <HugeiconsIcon icon={StarIcon} />
-              </Button>
             </div>
           </div>
           <h1 className="profile-name">
