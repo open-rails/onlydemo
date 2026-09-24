@@ -21,7 +21,7 @@
     "@hugeicons/react": "^1.1.10",
     "@openrails/auth-ui": "https://github.com/open-rails/auth-ui/releases/download/v0.3.1/openrails-auth-ui-0.3.1.tgz",
     "@openrails/billing-ui": "https://github.com/open-rails/billing-ui/releases/download/v0.9.0/openrails-billing-ui-0.9.0.tgz",
-    "@openrails/contentkit-upload": "https://github.com/open-rails/contentkit/releases/download/v0.24.0/openrails-contentkit-upload-0.24.0.tgz",
+    "@openrails/contentkit-upload": "https://github.com/open-rails/contentkit/releases/download/v0.25.0/openrails-contentkit-upload-0.25.0.tgz",
     "@tanstack/react-query": "^5.100.11",
     "class-variance-authority": "^0.7.1",
     "cn": "0.4.0",
