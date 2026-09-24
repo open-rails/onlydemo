@@ -262,7 +262,6 @@ export function PostForm({
             <Input
               id="post-title"
               name="title"
-              required={!hasMedia}
               maxLength={200}
               autoFocus
               defaultValue={post?.title}

@@ -1165,13 +1165,6 @@
     gap: 8px;
     padding-bottom: 12px;
   }
-  .post-gallery [data-ckui="gallery-header"],
-  .post-gallery .video-downloads {
-    padding-inline: 16px;
-  }
-  .post-gallery [data-ckui="stage"] {
-    border-radius: 0;
-  }
   .media-editor {
     display: flex;
     flex-direction: column;
@@ -1364,4 +1357,13 @@
   .pay-toast svg {
     color: var(--success);
   }
+}
+
+/* Unlayered: the SDK's scoped .ckui styles would otherwise win. */
+.post-gallery [data-ckui="gallery-header"],
+.post-gallery .video-downloads {
+  padding-inline: 16px;
+}
+.post-gallery [data-ckui="stage"] {
+  border-radius: 0;
 }
