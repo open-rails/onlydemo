@@ -610,7 +610,18 @@ func TestMediaEndToEnd(t *testing.T) {
 		if err := h.srv.posts.pool.QueryRow(ctx, `SELECT count(*) FROM `+h.srv.posts.table+` WHERE id=$1`, gone).Scan(&rows); err != nil || rows != 0 {
 			t.Fatalf("discarded draft row: %d %v", rows, err)
 		}
-		eventually(t, "discarded draft folder erased", func() bool { return h.count(fmt.Sprintf("%s/post/%d/", h.cfg.Media.Tenant, gone)) == 0 })
+		var left []string
+		func() {
+			defer func() {
+				if t.Failed() {
+					t.Logf("left in the discarded draft's folder: %v", left)
+				}
+			}()
+			eventually(t, "discarded draft folder erased", func() bool {
+				left = h.keys(fmt.Sprintf("%s/post/%d/", h.cfg.Media.Tenant, gone))
+				return len(left) == 0
+			})
+		}()
 
 		stale := draft()
 		if _, err := h.srv.posts.pool.Exec(ctx, `UPDATE `+h.srv.posts.table+` SET created_at=NOW()-INTERVAL '25 hours' WHERE id=$1`, stale); err != nil {
@@ -856,6 +867,18 @@ func (h *mediaHarness) removeBucket() {
 		}
 	}
 	_, _ = h.s3.DeleteBucket(ctx, &s3.DeleteBucketInput{Bucket: &h.bucket})
+}
+
+func (h *mediaHarness) keys(prefix string) []string {
+	out, err := h.s3.ListObjectsV2(h.ctx, &s3.ListObjectsV2Input{Bucket: &h.bucket, Prefix: &prefix})
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	var keys []string
+	for _, o := range out.Contents {
+		keys = append(keys, *o.Key)
+	}
+	return keys
 }
 
 func (h *mediaHarness) count(prefix string) int {
