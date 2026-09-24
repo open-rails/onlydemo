@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -17,8 +18,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
-	"github.com/open-rails/contentkit/media/tiered"
 	authkitfiber "github.com/open-rails/authkit/adapters/fiber"
+	"github.com/open-rails/contentkit/media/tiered"
 	"github.com/open-rails/openrails"
 	"github.com/riverqueue/river"
 )
@@ -82,6 +83,7 @@ func postID(c fiber.Ctx) (int64, error) {
 	}
 	return id, nil
 }
+func normalSlug(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
 func viewer(c fiber.Ctx) string {
 	if cl, ok := authkitfiber.UserClaims(c); ok {
 		return cl.UserID
@@ -212,12 +214,29 @@ func (api *postAPI) list(c fiber.Ctx) error {
 	c.Set("Cache-Control", "no-store")
 	return c.JSON(posts)
 }
+
+// get resolves a stable id; billing return pages use it to find the current URL.
 func (api *postAPI) get(c fiber.Ctx) error {
 	id, err := postID(c)
 	if err != nil {
 		return clientError(c, 400, err.Error())
 	}
-	p, err := scanPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1 AND deleted_at IS NULL AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL)`, id))
+	return api.show(c, api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1 AND deleted_at IS NULL AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL)`, id))
+}
+
+// getBySlug serves /c/<channel>/<post>: post slugs are unique within a channel.
+func (api *postAPI) getBySlug(c fiber.Ctx) error {
+	channel, err := api.channels.resolve(c.Context(), c.Params("channel"))
+	if errors.Is(err, authkit.ErrGroupNotFound) {
+		return clientError(c, 404, "post not found")
+	}
+	if err != nil {
+		return billingUnavailable(c)
+	}
+	return api.show(c, api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE channel_id=$1 AND slug=$2 AND deleted_at IS NULL AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL)`, channel, strings.ToLower(c.Params("slug"))))
+}
+func (api *postAPI) show(c fiber.Ctx, row pgx.Row) error {
+	p, err := scanPost(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, 404, "post not found")
 	}
@@ -231,6 +250,12 @@ func (api *postAPI) get(c fiber.Ctx) error {
 	c.Set("Cache-Control", "no-store")
 	return c.JSON(posts[0])
 }
+
+var postSlug = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+
+// Words a future /c/<channel>/<word> page could need.
+var reservedPostSlugs = map[string]bool{"new": true, "edit": true, "settings": true, "members": true, "team": true, "posts": true, "about": true, "subscribe": true}
+
 func validatePost(p post) error {
 	if strings.TrimSpace(p.Slug) == "" || strings.TrimSpace(p.Title) == "" || strings.TrimSpace(p.Body) == "" {
 		return errors.New("slug, title and body are required")
@@ -238,12 +263,19 @@ func validatePost(p post) error {
 	if len(p.Title) > 300 || len(p.Body) > 1_000_000 || len(p.Slug) > 120 {
 		return errors.New("post is too large")
 	}
+	if !postSlug.MatchString(p.Slug) {
+		return errors.New("Post slugs use lowercase letters, numbers and single dashes.")
+	}
+	if reservedPostSlugs[p.Slug] {
+		return errors.New("That post slug is reserved. Choose another.")
+	}
 	switch p.AccessPolicy {
 	case "public", "membership", "members_ppv", "ppv":
 		return nil
 	}
 	return errors.New("invalid access_policy")
 }
+
 const noMembership = "create a channel membership before publishing membership posts"
 
 func (api *postAPI) create(c fiber.Ctx) error {
@@ -261,7 +293,7 @@ func (api *postAPI) create(c fiber.Ctx) error {
 	if err != nil {
 		return clientError(c, 400, "invalid channel_id")
 	}
-	p := post{AuthorID: viewer(c), ChannelID: id, BillingKey: uuid.NewString(), Slug: *in.Slug, Title: *in.Title, Body: *in.Body, AccessPolicy: "public", OfferStatus: "none"}
+	p := post{AuthorID: viewer(c), ChannelID: id, BillingKey: uuid.NewString(), Slug: normalSlug(*in.Slug), Title: *in.Title, Body: *in.Body, AccessPolicy: "public", OfferStatus: "none"}
 	if in.AccessPolicy != nil {
 		p.AccessPolicy = *in.AccessPolicy
 	}
@@ -357,7 +389,7 @@ func (api *postAPI) update(c fiber.Ctx) error {
 	}
 	revision, wasPaid := p.UpdatedAt, paidPolicy(p.AccessPolicy)
 	if in.Slug != nil {
-		p.Slug = *in.Slug
+		p.Slug = normalSlug(*in.Slug)
 	}
 	if in.Title != nil {
 		p.Title = *in.Title
@@ -517,8 +549,8 @@ func writeError(c fiber.Ctx, err error) error {
 	switch {
 	case errors.Is(err, errJobsUnavailable):
 		return clientError(c, 503, err.Error())
-	case errors.As(err, &pgErr) && pgErr.Code == "23505":
-		return clientError(c, 409, "slug is already in use")
+	case errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "posts_channel_slug_idx":
+		return clientError(c, 409, "That post slug is already used in this channel. Choose another.")
 	}
 	return databaseError(c, err)
 }

@@ -1,10 +1,11 @@
 package main
 
 import (
+	"context"
 	"errors"
-	"github.com/open-rails/contentkit/media"
 	"github.com/gofiber/fiber/v3"
 	"github.com/open-rails/authkit"
+	"github.com/open-rails/contentkit/media"
 	"github.com/open-rails/openrails"
 	"regexp"
 	"strconv"
@@ -14,15 +15,15 @@ import (
 var channelSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,99}$`)
 
 type channelView struct {
-	ID            string                   `json:"id"`
-	Slug          string                   `json:"slug"`
-	Name          string                   `json:"name"`
-	Role          string                   `json:"role,omitempty"`
-	CanManage     bool                     `json:"can_manage"`
-	CanEdit       bool                     `json:"can_edit"`
-	AvatarURL     string                   `json:"avatar_url"`
-	BannerURL     string                   `json:"banner_url"`
-	Membership    channelMembership        `json:"membership"`
+	ID         string            `json:"id"`
+	Slug       string            `json:"slug"`
+	Name       string            `json:"name"`
+	Role       string            `json:"role,omitempty"`
+	CanManage  bool              `json:"can_manage"`
+	CanEdit    bool              `json:"can_edit"`
+	AvatarURL  string            `json:"avatar_url"`
+	BannerURL  string            `json:"banner_url"`
+	Membership channelMembership `json:"membership"`
 }
 
 func (api *channelAPI) view(c fiber.Ctx, id string, offers bool) (channelView, error) {
@@ -132,22 +133,29 @@ func (api *channelAPI) list(c fiber.Ctx) error {
 	c.Set("Cache-Control", "no-store")
 	return c.JSON(fiber.Map{"data": data, "has_more": more, "next_cursor": next})
 }
-func (api *channelAPI) publicGet(c fiber.Ctx) error {
-	// Public reads address a channel by its AuthKit group slug or its id.
-	id, err := channelID(c.Params("id"))
+
+// resolve addresses a channel by its AuthKit group slug (or former-name alias) or its id.
+func (api *channelAPI) resolve(ctx context.Context, raw string) (string, error) {
+	if id, err := channelID(raw); err == nil {
+		return id, nil
+	}
+	slug := strings.ToLower(raw)
+	if !channelSlug.MatchString(slug) {
+		return "", authkit.ErrGroupNotFound
+	}
+	group, err := api.auth.client.GroupInstanceForSlug(ctx, authkit.GroupRef{Persona: channelPersona, Instance: slug})
 	if err != nil {
-		slug := strings.ToLower(c.Params("id"))
-		if !channelSlug.MatchString(slug) {
-			return clientError(c, 404, "channel not found")
-		}
-		group, e := api.auth.client.GroupInstanceForSlug(c.Context(), authkit.GroupRef{Persona: channelPersona, Instance: slug})
-		if errors.Is(e, authkit.ErrGroupNotFound) {
-			return clientError(c, 404, "channel not found")
-		}
-		if e != nil {
-			return billingUnavailable(c)
-		}
-		id = group.ID
+		return "", err
+	}
+	return group.ID, nil
+}
+func (api *channelAPI) publicGet(c fiber.Ctx) error {
+	id, err := api.resolve(c.Context(), c.Params("id"))
+	if errors.Is(err, authkit.ErrGroupNotFound) {
+		return clientError(c, 404, "channel not found")
+	}
+	if err != nil {
+		return billingUnavailable(c)
 	}
 	v, err := api.view(c, id, true)
 	if errors.Is(err, authkit.ErrGroupNotFound) {

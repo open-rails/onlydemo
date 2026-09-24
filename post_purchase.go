@@ -6,6 +6,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -61,7 +63,7 @@ func (api *postAPI) checkout(c fiber.Ctx, publicURL string) error {
 	if err != nil {
 		return databaseError(c, err)
 	}
-	request := checkoutRequest(viewer(c), postResource(post.BillingKey), key, in.PriceID, in.Payment, openrails.OfferPermanent, publicURL)
+	request := checkoutRequest(viewer(c), postResource(post.BillingKey), key, in.PriceID, in.Payment, openrails.OfferPermanent, publicURL, url.Values{"post": {strconv.FormatInt(id, 10)}})
 	replay, err := api.billing.client.LookupCheckoutSession(c.Context(), request)
 	if err == nil {
 		if replay.Status == "created" {
@@ -128,7 +130,7 @@ func (api *channelAPI) subscribe(c fiber.Ctx, publicURL string) error {
 	if err != nil {
 		return clientError(c, 400, "invalid channel id")
 	}
-	request := checkoutRequest(viewer(c), membershipResource(id), key, in.PriceID, in.Payment, openrails.OfferRecurring, publicURL)
+	request := checkoutRequest(viewer(c), membershipResource(id), key, in.PriceID, in.Payment, openrails.OfferRecurring, publicURL, url.Values{"channel": {id}})
 	replay, err := api.billing.client.LookupCheckoutSession(c.Context(), request)
 	if err == nil {
 		if replay.Status == "created" {

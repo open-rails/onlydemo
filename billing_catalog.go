@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -39,6 +40,7 @@ func (b *billingService) access(ctx context.Context, user string, keys []string)
 	}
 	return result, nil
 }
+
 // checker adapts OpenRails entitlements to media/tiered.
 func (b *billingService) checker() tiered.Checker {
 	return tiered.CheckerFunc(b.access)
@@ -170,9 +172,12 @@ func (b *billingService) ArchiveChannelCatalog(ctx context.Context, id string) e
 		}
 	}
 }
-func checkoutRequest(user, resource, key, priceID string, payment openrails.CheckoutPaymentOptions, kind openrails.OfferKind, publicURL string) openrails.CreateCheckoutSessionRequest {
+
+// returnTo names the purchased thing by stable id; the return page resolves its
+// current /c/ URL, so a slug rename neither breaks the link nor a key replay.
+func checkoutRequest(user, resource, key, priceID string, payment openrails.CheckoutPaymentOptions, kind openrails.OfferKind, publicURL string, returnTo url.Values) openrails.CreateCheckoutSessionRequest {
 	digest := sha256.Sum256([]byte(user + "\x00" + resource + "\x00" + key))
-	return openrails.CreateCheckoutSessionRequest{OfferKind: kind, Customer: openrails.CheckoutCustomerIdentity{ID: user}, Entitlement: resource, PriceID: priceID, IdempotencyKey: "demo-" + hex.EncodeToString(digest[:]), PaymentOptions: payment, SuccessURL: publicURL + "/checkout/return", CancelURL: publicURL + "/checkout/return?canceled=1", Metadata: map[string]string{"resource": resource}}
+	return openrails.CreateCheckoutSessionRequest{OfferKind: kind, Customer: openrails.CheckoutCustomerIdentity{ID: user}, Entitlement: resource, PriceID: priceID, IdempotencyKey: "demo-" + hex.EncodeToString(digest[:]), PaymentOptions: payment, SuccessURL: publicURL + "/checkout/return?" + returnTo.Encode(), CancelURL: publicURL + "/checkout/return?canceled=1&" + returnTo.Encode(), Metadata: map[string]string{"resource": resource}}
 }
 
 func (b *billingService) GetCheckout(ctx context.Context, user, id string) (*openrails.CheckoutSession, error) {

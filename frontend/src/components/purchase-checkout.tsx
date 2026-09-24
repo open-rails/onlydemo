@@ -363,7 +363,7 @@ export function PurchaseCheckout({
           nativeButton={false}
           render={
             <a
-              href={`/checkout/return?checkout_id=${encodeURIComponent(current.id)}`}
+              href={`/checkout/return?checkout_id=${encodeURIComponent(current.id)}&post=${post.id}`}
             />
           }
         >

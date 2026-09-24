@@ -13,6 +13,7 @@ import {
 } from "../components/cards";
 import { useChannels } from "../channels";
 import { useAuth } from "../session";
+import { channelsPath, newChannelPath } from "../paths";
 
 function usePosts() {
   const { user } = useAuth();
@@ -80,7 +81,7 @@ export function HomePage() {
           icon={Image01Icon}
           title="Your feed is empty."
           action={
-            <Button nativeButton={false} render={<Link to="/channels" />}>
+            <Button nativeButton={false} render={<Link to={channelsPath} />}>
               Find creators
             </Button>
           }
@@ -111,7 +112,7 @@ export function ChannelsPage() {
       <div className="page-title">
         <h1>Explore creators</h1>
         {auth.user && (
-          <Button size="sm" nativeButton={false} render={<Link to="/channels/new" />}>
+          <Button size="sm" nativeButton={false} render={<Link to={newChannelPath} />}>
             <HugeiconsIcon icon={Add01Icon} data-icon="inline-start" />
             New channel
           </Button>

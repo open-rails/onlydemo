@@ -21,6 +21,7 @@ import {
   type Post,
 } from "../models";
 import { hue, membershipOffer, useChannels } from "../channels";
+import { channelsPath, channelPath, postPath } from "../paths";
 
 const tint = (seed: string | number) =>
   ({ "--h": hue(seed) }) as CSSProperties;
@@ -88,7 +89,7 @@ export function PostCard({
   return (
     <article className="feed-card">
       <header className="feed-head">
-        <Link to={`/channels/${post.channel_slug}`} className="feed-author">
+        <Link to={channelPath(post.channel_slug)} className="feed-author">
           <Avatar name={name} seed={post.channel_id} src={post.channel_avatar_url} />
           <span>
             <strong>
@@ -104,13 +105,13 @@ export function PostCard({
       </header>
       <div className="feed-text">
         <h3>
-          <Link to={`/posts/${post.id}`}>{post.title}</Link>
+          <Link to={postPath(post)}>{post.title}</Link>
         </h3>
         {post.can_read && post.body && <p>{post.body}</p>}
       </div>
       {!post.can_read && (
         <Link
-          to={`/posts/${post.id}`}
+          to={postPath(post)}
           className="feed-media"
           style={tint(post.channel_id)}
           aria-label={`Unlock ${post.title}`}
@@ -133,8 +134,8 @@ export function PostCard({
               <Link
                 to={
                   needsMembership
-                    ? `/channels/${post.channel_slug}`
-                    : `/posts/${post.id}`
+                    ? channelPath(post.channel_slug)
+                    : postPath(post)
                 }
               />
             }
@@ -168,7 +169,7 @@ export function PostCard({
           size="icon"
           aria-label="Open post"
           nativeButton={false}
-          render={<Link to={`/posts/${post.id}`} />}
+          render={<Link to={postPath(post)} />}
         >
           <HugeiconsIcon icon={Message01Icon} size={21} />
         </Button>
@@ -195,7 +196,7 @@ export function ChannelCard({ channel }: { channel: Channel }) {
       <div className="creator-card-body">
         <Avatar name={channel.name} seed={channel.id} src={channel.avatar_url} className="avatar-lg" />
         <h3>
-          <Link to={`/channels/${channel.slug}`}>{channel.name}</Link>
+          <Link to={channelPath(channel.slug)}>{channel.name}</Link>
         </h3>
         <p className="handle">@{channel.slug}</p>
         {channel.description && (
@@ -217,7 +218,7 @@ export function ChannelCard({ channel }: { channel: Channel }) {
           <Button
             size="sm"
             nativeButton={false}
-            render={<Link to={`/channels/${channel.slug}`} />}
+            render={<Link to={channelPath(channel.slug)} />}
           >
             {channel.membership.member
               ? "View profile"
@@ -240,14 +241,14 @@ export function SuggestedCreators({ strip = false }: { strip?: boolean }) {
     <section className={cn("suggested", strip && "suggested-strip")}>
       <div className="suggested-heading">
         <h2>Suggestions</h2>
-        <Button variant="link" size="sm" nativeButton={false} render={<Link to="/channels" />}>
+        <Button variant="link" size="sm" nativeButton={false} render={<Link to={channelsPath} />}>
           See all
         </Button>
       </div>
       <div className="suggested-list">
         {list.map((channel) => (
           <Link
-            to={`/channels/${channel.slug}`}
+            to={channelPath(channel.slug)}
             key={channel.id}
             className="suggested-item"
           >

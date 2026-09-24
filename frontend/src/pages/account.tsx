@@ -27,6 +27,7 @@ import { Avatar, PostCard, ChannelCard } from "../components/cards";
 import { SlotUpload } from "../components/slot-upload";
 import { useSlotVersion } from "../media";
 import { useAuth } from "../session";
+import { channelsPath, newChannelPath } from "../paths";
 
 const titles: Record<string, string> = {
   library: "Purchased",
@@ -131,7 +132,7 @@ export function AccountPage() {
                     appear here.
                   </p>
                 </div>
-                <Button nativeButton={false} render={<Link to="/channels/new" />}>
+                <Button nativeButton={false} render={<Link to={newChannelPath} />}>
                   <HugeiconsIcon icon={Add01Icon} data-icon="inline-start" />
                   Create channel
                 </Button>
@@ -182,7 +183,7 @@ function Library({
       }
       action={
         !searching ? (
-          <Button nativeButton={false} render={<Link to="/channels" />}>
+          <Button nativeButton={false} render={<Link to={channelsPath} />}>
             Explore creators
           </Button>
         ) : undefined
@@ -203,7 +204,7 @@ function Billing() {
   return (
     <AccountBillingScope>
       <AccountBilling
-        plansHref="/channels"
+        plansHref={channelsPath}
         psps={config.data?.psps}
         cardSetupReturnURL={(id) =>
           `${location.origin}/me?tab=billing&setup_id=${encodeURIComponent(id)}`

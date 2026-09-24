@@ -200,6 +200,7 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, c
 	app.Post("/api/v1/channels/:id/leave", required, channels.leave)
 	app.Post("/api/v1/channels/:id/subscribe", required, func(c fiber.Ctx) error { return channels.subscribe(c, cfg.PublicURL) })
 	app.Get("/api/v1/channels/:id/members", required, channels.members)
+	app.Get("/api/v1/channels/:channel/posts/:slug", optional, posts.getBySlug)
 	app.Post("/api/v1/channels/:id/members", required, channels.members)
 	app.Delete("/api/v1/channels/:id/members/:user_id", required, channels.members)
 	app.Get("/api/v1/me", required, posts.me)

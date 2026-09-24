@@ -61,12 +61,14 @@ export function PostEditor({
   post,
   open,
   onClose,
+  onSaved,
 }: {
   channelID: string;
   hasMembership: boolean;
   post?: Post;
   open: boolean;
   onClose: () => void;
+  onSaved?: (post: Post) => void;
 }) {
   return (
     <Dialog
@@ -90,6 +92,7 @@ export function PostEditor({
           hasMembership={hasMembership}
           post={post}
           onClose={onClose}
+          onSaved={onSaved}
         />
         )}
       </DialogContent>
@@ -101,11 +104,13 @@ function EditorForm({
   hasMembership,
   post,
   onClose,
+  onSaved,
 }: {
   channelID: string;
   hasMembership: boolean;
   post?: Post;
   onClose: () => void;
+  onSaved?: (post: Post) => void;
 }) {
   const client = useQueryClient();
   const [policy, setPolicy] = useState<AccessPolicy>(
@@ -119,7 +124,9 @@ function EditorForm({
         method: post ? "PATCH" : "POST",
         body: JSON.stringify(body),
       }),
-    onSuccess: async () => {
+    onSuccess: async (saved) => {
+      // Follow a renamed slug before refetching the old URL.
+      onSaved?.(saved);
       await client.invalidateQueries();
       onClose();
     },
@@ -171,10 +178,15 @@ function EditorForm({
               id="post-slug"
               name="slug"
               required
-              pattern="[a-z0-9\-]+"
+              pattern="[a-z0-9]+(-[a-z0-9]+)*"
+              maxLength={120}
               defaultValue={post?.slug}
               placeholder="a-short-slug"
             />
+            <FieldDescription>
+              Unique within this channel. Lowercase letters, numbers, and
+              dashes.
+            </FieldDescription>
           </Field>
         </div>
         <Field>

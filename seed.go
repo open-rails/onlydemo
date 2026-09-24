@@ -23,19 +23,19 @@ type seedCreator struct {
 
 var seedCreators = []seedCreator{
 	{"lunarose", "lunarose", "Luna Rose", "9990000", []seedPost{
-		{"luna-welcome", "Welcome to my channel", "Hi everyone! This is where I share behind-the-scenes photos from every shoot.", "public", ""},
-		{"luna-golden-hour", "Golden hour set", "The full golden hour set from last weekend, forty unedited frames.", "membership", ""},
-		{"luna-studio-diary", "Studio diary: lighting notes", "Every light, modifier and setting I used this month, with diagrams.", "ppv", "4990000"},
+		{"welcome", "Welcome to my channel", "Hi everyone! This is where I share behind-the-scenes photos from every shoot.", "public", ""},
+		{"golden-hour", "Golden hour set", "The full golden hour set from last weekend, forty unedited frames.", "membership", ""},
+		{"studio-diary", "Studio diary: lighting notes", "Every light, modifier and setting I used this month, with diagrams.", "ppv", "4990000"},
 	}},
 	{"chefmarco", "chefmarco", "Chef Marco", "5990000", []seedPost{
-		{"marco-knife-skills", "Five knife skills everyone needs", "Julienne, brunoise, chiffonade, tourné and the rock chop, step by step.", "public", ""},
-		{"marco-sunday-ragu", "My Sunday ragù", "The six-hour ragù my grandmother taught me, with every trick included.", "membership", ""},
-		{"marco-pasta-masterclass", "Fresh pasta masterclass", "A complete written masterclass: doughs, shapes, fillings and sauces.", "members_ppv", "7990000"},
+		{"knife-skills", "Five knife skills everyone needs", "Julienne, brunoise, chiffonade, tourné and the rock chop, step by step.", "public", ""},
+		{"sunday-ragu", "My Sunday ragù", "The six-hour ragù my grandmother taught me, with every trick included.", "membership", ""},
+		{"pasta-masterclass", "Fresh pasta masterclass", "A complete written masterclass: doughs, shapes, fillings and sauces.", "members_ppv", "7990000"},
 	}},
 	{"fitwithkai", "fitwithkai", "Fit with Kai", "7990000", []seedPost{
-		{"kai-morning-mobility", "Ten-minute morning mobility", "A short routine to loosen hips, shoulders and spine before work.", "public", ""},
-		{"kai-12-week-plan", "12-week strength plan", "Progressive overload plan with three full-body sessions each week.", "membership", ""},
-		{"kai-nutrition-guide", "Nutrition guide", "Macros, meal timing and a two-week sample menu.", "ppv", "9990000"},
+		{"morning-mobility", "Ten-minute morning mobility", "A short routine to loosen hips, shoulders and spine before work.", "public", ""},
+		{"12-week-plan", "12-week strength plan", "Progressive overload plan with three full-body sessions each week.", "membership", ""},
+		{"nutrition-guide", "Nutrition guide", "Macros, meal timing and a two-week sample menu.", "ppv", "9990000"},
 	}},
 	{"inksketch", "inksketch", "Ink & Sketch", "free", []seedPost{
 		{"ink-hello", "Sketchbook tour", "A flip through this year's sketchbook, page by page.", "public", ""},

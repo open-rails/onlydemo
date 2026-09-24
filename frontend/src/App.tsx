@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { EmptyState, Loading } from "./components/states";
 import { Avatar, SuggestedCreators } from "./components/cards";
+import { channelsPath, newChannelPath } from "./paths";
 
 export function AppLayout() {
   const auth = useAuth();
@@ -60,7 +61,7 @@ export function AppLayout() {
   };
   const nav: [string, string, IconSvgElement][] = [
     ["/", "Home", Home01Icon],
-    ["/channels", "Explore", DiscoverCircleIcon],
+    [channelsPath, "Explore", DiscoverCircleIcon],
     ["/me?tab=billing", "Billing", Wallet01Icon],
     ["/me?tab=library", "Purchased", ShoppingBag01Icon],
     ["/me?tab=channels", "My channels", UserGroupIcon],
@@ -142,7 +143,7 @@ export function AppLayout() {
             size="lg"
             className="sidebar-cta"
             nativeButton={false}
-            render={<Link to="/channels/new" />}
+            render={<Link to={newChannelPath} />}
           >
             <HugeiconsIcon icon={Add01Icon} />
             <span>New channel</span>

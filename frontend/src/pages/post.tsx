@@ -5,7 +5,7 @@ import {
   useParams,
   useSearchParams,
 } from "react-router-dom";
-import { lazy, Suspense, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useEffect, useState, type CSSProperties } from "react";
 import { APIError, sessionKey, request } from "../api";
 import { NotFoundPage } from "../App";
 import { useAuth } from "../session";
@@ -56,6 +56,7 @@ import { PostGallery, PostMediaEditor } from "../components/post-media";
 import { Avatar } from "../components/cards";
 import { canJoin, hue } from "../channels";
 import { MembershipDialog } from "../components/membership";
+import { channelPath, postPath } from "../paths";
 const PurchaseCheckout = lazy(() =>
   import("../components/purchase-checkout").then((module) => ({
     default: module.PurchaseCheckout,
@@ -70,7 +71,7 @@ function latestCheckout(user?: string) {
   }
 }
 export function PostPage() {
-  const { id = "" } = useParams();
+  const { channel: channelSlug = "", post: postSlug = "" } = useParams();
   const auth = useAuth();
   const navigate = useNavigate();
   const client = useQueryClient();
@@ -80,8 +81,11 @@ export function PostPage() {
   const [join, setJoin] = useState(false);
   const [selectedPrice, setSelectedPrice] = useState("");
   const post = useQuery({
-    queryKey: ["post", id, auth.user?.id],
-    queryFn: () => request<Post>(`/api/v1/posts/${id}`),
+    queryKey: ["post", channelSlug, postSlug, auth.user?.id],
+    queryFn: () =>
+      request<Post>(
+        `/api/v1/channels/${encodeURIComponent(channelSlug)}/posts/${encodeURIComponent(postSlug)}`,
+      ),
     refetchInterval: (query) =>
       query.state.data?.offer_status === "pending" ? 2000 : false,
   });
@@ -94,11 +98,18 @@ export function PostPage() {
   const offers = post.data?.offers?.filter((offer) => !offer.auto_renew) || [];
   const offer =
     offers.find((value) => value.price_id === selectedPrice) || offers[0];
+  const canonical = post.data && postPath(post.data);
+  useEffect(() => {
+    // A former channel slug still resolves; show the current URL.
+    if (canonical && canonical !== location.pathname)
+      navigate(canonical, { replace: true });
+  }, [canonical, navigate]);
   const remove = useMutation({
-    mutationFn: () => request(`/api/v1/posts/${id}`, { method: "DELETE" }),
+    mutationFn: () =>
+      request(`/api/v1/posts/${post.data!.id}`, { method: "DELETE" }),
     onSuccess: () => {
       void client.invalidateQueries();
-      navigate(`/channels/${post.data?.channel_slug}`);
+      navigate(channelPath(post.data?.channel_slug || ""));
     },
   });
   if (post.isPending) return <Loading />;
@@ -133,7 +144,7 @@ export function PostPage() {
           size="icon"
           aria-label="Back to creator"
           nativeButton={false}
-          render={<Link to={`/channels/${item.channel_slug}`} />}
+          render={<Link to={channelPath(item.channel_slug)} />}
         >
           <HugeiconsIcon icon={ArrowLeft02Icon} />
         </Button>
@@ -142,7 +153,7 @@ export function PostPage() {
       <div className="reader-layout">
         <article className="feed-card reader-main">
           <header className="feed-head">
-            <Link to={`/channels/${item.channel_slug}`} className="feed-author">
+            <Link to={channelPath(item.channel_slug)} className="feed-author">
               <Avatar name={creator} seed={item.channel_id} src={item.channel_avatar_url} />
               <span>
                 <strong>
@@ -333,6 +344,7 @@ export function PostPage() {
         hasMembership={channel.data?.membership.status !== "none"}
         open={editor}
         onClose={() => setEditor(false)}
+        onSaved={(saved) => navigate(postPath(saved), { replace: true })}
       />
       <Dialog open={deleting} onOpenChange={setDeleting}>
         <DialogContent>
@@ -369,9 +381,28 @@ export function PostPage() {
     </>
   );
 }
+// Checkouts name the purchased post or channel by stable id; its current URL
+// is resolved here so slug renames never strand a return.
+function useReturnTarget(search: URLSearchParams) {
+  const postID = search.get("post");
+  const channelID = search.get("channel");
+  const target = useQuery({
+    queryKey: ["checkout-target", postID, channelID],
+    queryFn: async () =>
+      postID
+        ? postPath(await request<Post>(`/api/v1/posts/${encodeURIComponent(postID)}`))
+        : channelPath(
+            (await request<Channel>(`/api/v1/channels/${encodeURIComponent(channelID!)}`)).slug,
+          ),
+    enabled: !!(postID || channelID),
+  });
+  return { path: target.data, label: postID ? "Open post" : "Open channel" };
+}
 export function CheckoutReturnPage() {
   const [search] = useSearchParams();
   const auth = useAuth();
+  const navigate = useNavigate();
+  const target = useReturnTarget(search);
   const id = search.get("checkout_id") || latestCheckout(auth.user?.id);
   const status = useQuery({
     queryKey: ["checkout", id, auth.user?.id],
@@ -409,15 +440,27 @@ export function CheckoutReturnPage() {
       } else void status.refetch();
     },
   });
+  const complete = status.data?.status === "succeeded";
+  useEffect(() => {
+    if (complete && target.path) navigate(target.path, { replace: true });
+  }, [complete, target.path, navigate]);
+  const back = target.path && (
+    <Button variant="outline" nativeButton={false} render={<Link to={target.path} />}>
+      {target.label}
+    </Button>
+  );
   if (!id)
     return (
       <EmptyState
         icon={Alert02Icon}
         title="No checkout reference in this browser."
         action={
-          <Button variant="outline" nativeButton={false} render={<Link to="/me" />}>
-            View purchased
-          </Button>
+          <div className="inline-actions">
+            <Button variant="outline" nativeButton={false} render={<Link to="/me" />}>
+              View purchased
+            </Button>
+            {back}
+          </div>
         }
       >
         Sign in using the same browser tab that started checkout, or check your
@@ -430,7 +473,6 @@ export function CheckoutReturnPage() {
       <ErrorState error={status.error} retry={() => void status.refetch()} />
     );
   const value = status.data!;
-  const complete = value.status === "succeeded";
   const ended = terminalCheckout(value.status);
   return (
     <div className="centered-page">
@@ -458,9 +500,11 @@ export function CheckoutReturnPage() {
                 View purchased
                 <HugeiconsIcon icon={ArrowRight02Icon} data-icon="inline-end" />
               </Button>
-              <Button variant="outline" nativeButton={false} render={<Link to="/" />}>
-                Back home
-              </Button>
+              {back || (
+                <Button variant="outline" nativeButton={false} render={<Link to="/" />}>
+                  Back home
+                </Button>
+              )}
               {!complete && (
                 <Button variant="ghost" onClick={() => void status.refetch()}>
                   Check again

@@ -91,6 +91,12 @@ channel owners can manage the channel and share owner/editor roles; editors can
 publish and edit but cannot manage owners or delete the channel. Ordinary readers,
 subscribers and purchasers are **not** added to the publishing group.
 
+URLs derive from current slugs: `/c` lists channels, `/c/new` creates one,
+`/c/<channel>` and `/c/<channel>/<post>` (API:
+`GET /api/v1/channels/<channel>/posts/<post>`). Post slugs are unique within
+their channel. Checkout returns carry the stable post/channel id and resolve
+the current URL, so renames never break a link.
+
 Posts have one of four content policies:
 
 - **Public:** free to read.

@@ -29,4 +29,5 @@ CREATE TABLE posts (
 
 CREATE INDEX posts_channel_id_idx ON posts (channel_id);
 CREATE UNIQUE INDEX posts_billing_key_idx ON posts (billing_key);
-CREATE UNIQUE INDEX posts_live_slug_idx ON posts (slug) WHERE deleted_at IS NULL;
+-- Post slugs are scoped to their channel: /c/<channel>/<post>.
+CREATE UNIQUE INDEX posts_channel_slug_idx ON posts (channel_id, slug) WHERE deleted_at IS NULL;

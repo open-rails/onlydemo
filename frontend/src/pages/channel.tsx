@@ -5,7 +5,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { cn } from "cn";
 import { APIError, request, postPage } from "../api";
 import { NotFoundPage } from "../App";
@@ -67,10 +67,12 @@ import { ChannelTeam } from "../components/channel-team";
 import { SlotUpload } from "../components/slot-upload";
 import { useSlotVersion } from "../media";
 import { MembershipDialog } from "../components/membership";
+import { channelsPath, channelPath } from "../paths";
 
 export function ChannelPage() {
-  const { slug = "" } = useParams();
+  const { channel: slug = "" } = useParams();
   const auth = useAuth();
+  const navigate = useNavigate();
   const client = useQueryClient();
   const [editor, setEditor] = useState(false);
   const [membership, setMembership] = useState(false);
@@ -96,6 +98,12 @@ export function ChannelPage() {
     ...postQuery,
     data: postQuery.data?.pages.flatMap((page) => page.data),
   };
+  const canonical = channel.data?.slug;
+  useEffect(() => {
+    // A former slug still resolves; show the current URL.
+    if (canonical && canonical !== slug)
+      navigate(channelPath(canonical), { replace: true });
+  }, [canonical, slug, navigate]);
   if (channel.isPending) return <Loading />;
   if (channel.error instanceof APIError && channel.error.status === 404)
     return <NotFoundPage />;
@@ -113,7 +121,7 @@ export function ChannelPage() {
     <>
       <section className="profile">
         <Cover seed={current.id} src={slots.src(current.banner_url)} className="profile-cover">
-          <Link to="/channels" className="cover-back" aria-label="Back">
+          <Link to={channelsPath} className="cover-back" aria-label="Back">
             <HugeiconsIcon icon={ArrowLeft02Icon} size={20} />
           </Link>
           <div className="cover-title">
@@ -618,7 +626,7 @@ export function NewChannelPage() {
           name: String(data.get("name")).trim(),
         }),
       });
-      navigate(`/channels/${channel.slug}`);
+      navigate(channelPath(channel.slug));
     } catch (cause) {
       setError(
         cause instanceof Error
@@ -676,7 +684,7 @@ export function NewChannelPage() {
                 <Button
                   variant="ghost"
                   nativeButton={false}
-                  render={<Link to="/channels" />}
+                  render={<Link to={channelsPath} />}
                 >
                   Cancel
                 </Button>

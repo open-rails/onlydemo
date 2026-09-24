@@ -132,7 +132,10 @@ func smoke() error {
 	if post, err = owner.activeOffer(path, ownerToken); err != nil {
 		return err
 	}
-	preview, err := buyer.call("GET", path, buyerToken, nil, "", 200)
+	if err = smokeChannelScopedSlugs(owner, ownerToken, ch["id"].(string), post["id"]); err != nil {
+		return fmt.Errorf("channel-scoped post slugs: %w", err)
+	}
+	preview, err := buyer.call("GET", "/api/v1/channels/smoke-channel/posts/smoke-post", buyerToken, nil, "", 200)
 	if err != nil {
 		return err
 	}
@@ -191,6 +194,9 @@ func smoke() error {
 	}
 	if err = stripe.settle(ctx, base, webhookPath); err != nil {
 		return err
+	}
+	if got, want := stripe.form.Get("success_url"), fmt.Sprintf("%s/checkout/return?post=%.0f", base, post["id"].(float64)); got != want {
+		return fmt.Errorf("checkout success_url %q, want %q", got, want)
 	}
 	paid, err := buyer.call("GET", path, buyerToken, nil, "", 200)
 	if err != nil {
@@ -423,6 +429,9 @@ func smoke() error {
 	if _, err = buyer.call("GET", path, buyerToken, nil, "", 404); err != nil {
 		return err
 	}
+	if _, err = buyer.call("GET", "/api/v1/channels/smoke-channel/posts/smoke-post", buyerToken, nil, "", 404); err != nil {
+		return err
+	}
 	if _, err = owner.call("DELETE", "/api/v1/channels/"+channelID, ownerToken, nil, "", 404); err != nil {
 		return err
 	}
@@ -444,11 +453,58 @@ func smoke() error {
 	if _, err = owner.call("DELETE", "/auth/v1/user", ownerToken, map[string]any{"password": "Manual-smoke-password-42!"}, "", 204); err != nil {
 		return fmt.Errorf("retired channel still blocked owner account deletion: %w", err)
 	}
-	fmt.Println("Manual smoke passed: native auth, resource offers/reprice replay, permanent paid access, members-only purchase refusal, native saved-card membership/quote/confirmation/cancellation, membership close/free/join/leave/paid transitions, future included posts, separate publishing roles, post soft deletion with archived product, retained channel soft deletion and owner account deletion. Zero real provider requests.")
+	fmt.Println("Manual smoke passed: native auth, channel-scoped post slugs, resource offers/reprice replay, permanent paid access, members-only purchase refusal, native saved-card membership/quote/confirmation/cancellation, membership close/free/join/leave/paid transitions, future included posts, separate publishing roles, post soft deletion with archived product, retained channel soft deletion and owner account deletion. Zero real provider requests.")
 	return nil
 }
 
 var stripeRail = map[string]string{"rail": "stripe"}
+
+// Post slugs are unique per channel and addressed as /c/<channel>/<post>.
+func smokeChannelScopedSlugs(owner smokeClient, token, channelID string, postID any) error {
+	other, err := owner.call("POST", "/api/v1/channels", token, map[string]any{"slug": "smoke-other", "name": "Other smoke"}, "", 201)
+	if err != nil {
+		return err
+	}
+	twin, err := owner.call("POST", "/api/v1/posts", token, map[string]any{"channel_id": other["id"], "slug": "smoke-post", "title": "Same slug", "body": "Other channel"}, "", 201)
+	if err != nil {
+		return fmt.Errorf("same slug in another channel: %w", err)
+	}
+	dup, err := owner.call("POST", "/api/v1/posts", token, map[string]any{"channel_id": channelID, "slug": "smoke-post", "title": "Duplicate", "body": "Same channel"}, "", 409)
+	if err != nil {
+		return err
+	}
+	if dup["error"] != "That post slug is already used in this channel. Choose another." {
+		return fmt.Errorf("duplicate slug message %v", dup["error"])
+	}
+	for _, slug := range []string{"new", "Bad Slug", "a--b"} {
+		if _, err = owner.call("POST", "/api/v1/posts", token, map[string]any{"channel_id": channelID, "slug": slug, "title": "t", "body": "b"}, "", 400); err != nil {
+			return fmt.Errorf("invalid slug %q: %w", slug, err)
+		}
+	}
+	first, err := owner.call("GET", "/api/v1/channels/smoke-channel/posts/smoke-post", "", nil, "", 200)
+	if err != nil {
+		return err
+	}
+	second, err := owner.call("GET", "/api/v1/channels/smoke-other/posts/smoke-post", "", nil, "", 200)
+	if err != nil {
+		return err
+	}
+	if first["id"] != postID || second["id"] != twin["id"] || second["channel_slug"] != "smoke-other" {
+		return fmt.Errorf("slug lookup resolved the wrong posts")
+	}
+	twinPath := fmt.Sprintf("/api/v1/posts/%.0f", twin["id"].(float64))
+	if _, err = owner.call("PATCH", twinPath, token, map[string]any{"slug": "smoke-renamed"}, "", 200); err != nil {
+		return err
+	}
+	if _, err = owner.call("GET", "/api/v1/channels/smoke-other/posts/smoke-renamed", "", nil, "", 200); err != nil {
+		return err
+	}
+	if _, err = owner.call("GET", "/api/v1/channels/smoke-other/posts/smoke-post", "", nil, "", 404); err != nil {
+		return err
+	}
+	_, err = owner.call("DELETE", "/api/v1/channels/"+other["id"].(string), token, nil, "", 202)
+	return err
+}
 
 type smokeClient struct {
 	base   string
