@@ -57,7 +57,7 @@ const (
 	testWebhookSecret = "whsec_media_test_fake_only"
 	testPassword      = "Media-test-password-42!"
 	testQuota         = 3 << 20
-	testFilesPerHour  = 16
+	testFilesPerHour  = 20
 )
 
 func TestMediaEndToEnd(t *testing.T) {
@@ -212,10 +212,16 @@ func TestMediaEndToEnd(t *testing.T) {
 		h.waitSlot(t, "channel avatar", h.channelSlot(anon, channelID, "avatar"), "", 128, 256)
 
 		stranger.upload(map[string]string{"kind": media.UserKind, "id": owner.id}, "avatar", testPNG(t, 64, 64, color.White), "image/png", 403)
-		stranger.upload(map[string]string{"kind": media.UserKind, "id": stranger.id}, "avatar", testPNG(t, 600, 600, color.Black), "image/png", 200)
+		// The SDK crops before upload: commit-slot carries the edit (Aspect 1
+		// derives the height), so a 400px crop of a 600px image has no 512.
+		_, got := stranger.uploadSlot(map[string]string{"kind": media.UserKind, "id": stranger.id}, "avatar", testPNG(t, 600, 600, color.Black),
+			map[string]any{"crop": map[string]int{"x": 100, "y": 150, "w": 400}, "rotate": 90})
+		if e := got["edit"].(map[string]any); e["crop"].(map[string]any)["h"] != float64(400) || e["rotate"] != float64(90) {
+			t.Fatalf("user avatar commit %+v", got)
+		}
 		h.waitSlot(t, "user avatar", func() any {
 			return stranger.call("GET", "/api/v1/me", nil, "", 200)["user"].(map[string]any)["avatar"]
-		}, "", 128, 256, 512)
+		}, "", 128, 256)
 	})
 
 	t.Run("mixed images and videos", func(t *testing.T) {
@@ -232,7 +238,7 @@ func TestMediaEndToEnd(t *testing.T) {
 		}
 
 		img := owner.upload(ref, "", testPNG(t, 640, 360, color.RGBA{10, 120, 90, 255}), "image/png", 200)
-		clip := owner.upload(ref, "", testVideo(t), "video/mp4", 200)
+		clip := owner.upload(ref, "", testVideo(t, 320, 240), "video/mp4", 200)
 		commit := func(ops []media.Op, status int) map[string]any {
 			return owner.call("POST", "/api/v1/media/upload/commit", map[string]any{"ref": ref, "ops": ops}, "", status)
 		}
@@ -326,6 +332,68 @@ func TestMediaEndToEnd(t *testing.T) {
 		h.playlist(stranger, base+variants[0], 404)
 		if res, _ := stranger.do("GET", fmt.Sprintf("/api/v1/media/post/%d/download/clip.mp4-240p", id), nil, ""); res.StatusCode != 404 {
 			t.Fatalf("stranger download %d", res.StatusCode)
+		}
+	})
+
+	t.Run("aspect-aware ladder", func(t *testing.T) {
+		if !h.video {
+			t.Skip("ffmpeg not installed")
+		}
+		body := map[string]any{"channel_id": channelID, "slug": "p-aspects", "title": "aspects", "body": "text", "access_policy": "public"}
+		id := int64(owner.call("POST", "/api/v1/posts", body, "", 201)["id"].(float64))
+		ref := postRefBody(id)
+		// 9:21 and 21:9 get real 720 and 480 rungs (short sides) at their own
+		// aspect; 3:1 is outside the default 1:2.4–2.4:1 and fails.
+		owner.call("POST", "/api/v1/media/upload/commit", map[string]any{"ref": ref, "ops": []media.Op{
+			{Op: media.OpInsert, Name: "tall.mp4", Original: owner.upload(ref, "", testVideo(t, 720, 1680), "video/mp4", 200)},
+			{Op: media.OpInsert, Name: "wide.mp4", Original: owner.upload(ref, "", testVideo(t, 1680, 720), "video/mp4", 200)},
+			{Op: media.OpInsert, Name: "band.mp4", Original: owner.upload(ref, "", testVideo(t, 480, 160), "video/mp4", 200)},
+		}}, "", 200)
+		h.waitDerived(owner, id)
+
+		o := h.read(owner, id).res.Files
+		if o[0].Width != 720 || o[0].Height != 1680 || !o[0].HLS || o[1].Width != 1680 || o[1].Height != 720 || !o[1].HLS {
+			t.Fatalf("owner read %+v", o)
+		}
+		if o[2].HLS || !strings.Contains(o[2].Failed, "aspect") {
+			t.Fatalf("3:1 video %+v", o[2])
+		}
+		r := h.read(member, id)
+		if f := r.res.Files[2]; f.HLS || f.Failed != "" {
+			t.Fatalf("reader sees the failure reason: %+v", f)
+		}
+		man, _, err := h.srv.media.manifests.Get(ctx, h.srv.media.postRef(id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if e := man.Files[2].HLS; e == nil || e.Error == "" || len(e.Video) != 0 {
+			t.Fatalf("band hls %+v", e)
+		}
+		for i, c := range []struct {
+			name string
+			want [][3]int // rung, w, h
+		}{{"tall.mp4", [][3]int{{720, 720, 1680}, {480, 480, 1120}}}, {"wide.mp4", [][3]int{{720, 1680, 720}, {480, 1120, 480}}}} {
+			var got [][3]int
+			for _, v := range man.Files[i].HLS.Video {
+				got = append(got, [3]int{v.Rung, v.Width, v.Height})
+			}
+			if fmt.Sprint(got) != fmt.Sprint(c.want) {
+				t.Fatalf("%s renditions %v, want %v", c.name, got, c.want)
+			}
+			master := h.playlist(member, fmt.Sprintf("/api/v1/media/post/%d/hls/%s/master.m3u8", id, c.name), 200)
+			for _, v := range c.want {
+				if !strings.Contains(master, fmt.Sprintf("RESOLUTION=%dx%d", v[1], v[2])) || !strings.Contains(master, fmt.Sprintf("video/%d.m3u8", v[0])) {
+					t.Fatalf("%s master lacks %dp %dx%d:\n%s", c.name, v[0], v[1], v[2], master)
+				}
+				h.playlist(member, fmt.Sprintf("/api/v1/media/post/%d/hls/%s/video/%d.m3u8", id, c.name, v[0]), 200)
+			}
+		}
+		var keys []string
+		for _, d := range r.res.Downloads {
+			keys = append(keys, d.Key+"="+d.Name)
+		}
+		if want := "tall.mp4-480p=p-aspects-tall-480p.mp4 tall.mp4-720p=p-aspects-tall-720p.mp4 wide.mp4-480p=p-aspects-wide-480p.mp4 wide.mp4-720p=p-aspects-wide-720p.mp4"; strings.Join(keys, " ") != want {
+			t.Fatalf("downloads %v", keys)
 		}
 	})
 
@@ -603,10 +671,10 @@ func startMediaWorker(t *testing.T, dbURL, endpoint, bucket, access, secret stri
 	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
 }
 
-// testVideo is a 2 s 320x240 H.264/AAC MP4.
-func testVideo(t *testing.T) []byte {
+// testVideo is a 2 s w×h H.264/AAC MP4.
+func testVideo(t *testing.T, w, h int) []byte {
 	out := filepath.Join(t.TempDir(), "clip.mp4")
-	b, err := exec.Command("ffmpeg", "-v", "error", "-nostdin", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=10:duration=2",
+	b, err := exec.Command("ffmpeg", "-v", "error", "-nostdin", "-f", "lavfi", "-i", fmt.Sprintf("testsrc=size=%dx%d:rate=10:duration=2", w, h),
 		"-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
 		"-threads", "1", "-c:a", "aac", "-shortest", "-y", out).CombinedOutput()
 	if err != nil {
@@ -739,13 +807,26 @@ func (p peer) presign(ref map[string]string, slot string, data []byte, typ strin
 }
 
 // upload plays the browser SDK: presign, checksum-bound PUT straight to the
-// bucket, and commit-slot for slots. It returns the original's name.
+// bucket, and commit-slot (centred crop) for slots. It returns the original's name.
 func (p peer) upload(ref map[string]string, slot string, data []byte, typ string, status int) string {
+	p.h.t.Helper()
+	name, _ := p.put(ref, slot, data, typ, status, nil)
+	return name
+}
+
+// uploadSlot uploads a slot original and commits it with edit, as the SDK's
+// uploadSlot does, returning the commit-slot reply (the slot manifest).
+func (p peer) uploadSlot(ref map[string]string, slot string, data []byte, edit map[string]any) (string, map[string]any) {
+	p.h.t.Helper()
+	return p.put(ref, slot, data, "image/png", 200, edit)
+}
+
+func (p peer) put(ref map[string]string, slot string, data []byte, typ string, status int, edit map[string]any) (string, map[string]any) {
 	p.h.t.Helper()
 	plan := p.presign(ref, slot, data, typ, status, "")
 	if status != 200 || plan["exists"] == true {
 		name, _ := plan["name"].(string)
-		return name
+		return name, nil
 	}
 	put := plan["put"].(map[string]any)
 	req, err := http.NewRequestWithContext(p.h.ctx, put["method"].(string), put["url"].(string), bytes.NewReader(data))
@@ -767,11 +848,16 @@ func (p peer) upload(ref map[string]string, slot string, data []byte, typ string
 	if res.StatusCode != 200 {
 		p.h.t.Fatalf("PUT %d: %s", res.StatusCode, raw)
 	}
+	var reply map[string]any
 	if slot != "" {
 		sum := sha256.Sum256(data)
-		p.call("POST", "/api/v1/media/upload/commit-slot", map[string]any{"ref": ref, "slot": slot, "sha256": hex.EncodeToString(sum[:])}, "", 200)
+		body := map[string]any{"ref": ref, "slot": slot, "sha256": hex.EncodeToString(sum[:])}
+		if edit != nil {
+			body["edit"] = edit
+		}
+		reply = p.call("POST", "/api/v1/media/upload/commit-slot", body, "", 200)
 	}
-	return plan["name"].(string)
+	return plan["name"].(string), reply
 }
 
 func (h *mediaHarness) read2(p peer, kind, id string) media.ReadResult {
@@ -808,12 +894,12 @@ func (h *mediaHarness) read(p peer, id int64) readResult {
 }
 
 // waitDerived waits for the image job to fill every image's variant and the
-// media-worker to encode every video.
+// media-worker to encode every video (or, read by an editor, refuse it).
 func (h *mediaHarness) waitDerived(p peer, id int64) {
 	eventually(h.t, fmt.Sprintf("variants of post %d", id), func() bool {
 		r := h.read(p, id)
 		for _, f := range r.res.Files {
-			if isVideoType(f.Type) && !f.HLS || !isVideoType(f.Type) && f.URL == "" {
+			if isVideoType(f.Type) && !f.HLS && f.Failed == "" || !isVideoType(f.Type) && f.URL == "" {
 				return false
 			}
 		}

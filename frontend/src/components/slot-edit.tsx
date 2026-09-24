@@ -105,7 +105,8 @@ export function SlotEdit({
         progress={crop.status === "saving" ? crop.progress : undefined}
         rendering={crop.status === "saving" && crop.rendering}
         error={crop.status === "error" && crop.source ? error(crop.error) : undefined}
-        onEditChange={crop.setEdit}
+        // No onEditChange: the dialog reports a new edit object on every
+        // render (SDK v0.22.0), so mirroring it into useSlotCrop loops.
         onConfirm={(edit) => void crop.save(edit)}
       />
     </>
