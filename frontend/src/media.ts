@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createUploadClient, UploadError } from "@openrails/contentkit-upload";
-import type { CommitFile, Edit, EncodeProgress, Op, ReadResult, RefBody, SlotManifest, VideoImages } from "@openrails/contentkit-upload";
+import type { CommitFile, Edit, EncodeProgress, ErrorDetails, Op, ReadResult, RefBody, SlotManifest, VideoImages } from "@openrails/contentkit-upload";
 import { mediaMessage } from "./media-errors";
 import { auth, request } from "./api";
 
@@ -25,7 +25,9 @@ export interface MediaFile {
   teaser?: boolean;
   locked?: boolean;
   hls?: boolean;
-  failed?: string; // editors only: why the video cannot be encoded
+  failed?: string; // editors only: why the file cannot be processed
+  failed_code?: string; // editors only: a typed image refusal (animation_not_allowed, image_too_large, …)
+  failed_details?: ErrorDetails;
   progress?: EncodeProgress; // live encode progress while the video is pending
   edit?: Edit;
   dims?: { w: number; h: number };

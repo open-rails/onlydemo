@@ -154,6 +154,11 @@ and commits (`/api/v1/media/upload/*`).
   (`Kind.MaxFiles`, `TypeLimits`): 50 files per post (teaser included), 10 of
   them videos; images up to 25 MiB, videos up to 20 GiB (multipart, 4K sources); 409 `too_many_files`. `channel`: public `avatar` (1:1, 128/512 px) and
   `cover` (3:1, 900/3000 px, crops from 600 px) slots; `user`: `avatar`.
+- **Formats.** Images: JPEG, PNG, WebP, GIF, AVIF (`imageTypes` in media.go
+  and frontend/src/media.ts). Animated GIF/WebP stay animated everywhere
+  (ContentKit's default `Animation` allow; no slot rejects). Animated AVIF is
+  refused until libheif 1.19. Refusals are typed and toasted; errors surface
+  as sonner toasts through `UploadUiProvider onError`.
 - **Slots.** The SDK UI crops before saving (`AvatarUpload` on the account
   page; `SlotEditor` + `SlotEditMenu` over the channel header): the original
   is kept, EXIF orientation applied, and ContentKit renders the small and

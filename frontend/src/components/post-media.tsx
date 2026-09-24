@@ -44,14 +44,14 @@ import { CropDialog } from "./crop-dialog";
 import { SortableList } from "./sortable-list";
 import { UploadError, slotError as slotFailure } from "@openrails/contentkit-upload";
 import { toast } from "sonner";
-import { toastMediaError } from "../media-errors";
+import { mediaMessage, toastMediaError } from "../media-errors";
 import { FormError } from "./states";
 
 const TEASER = "teaser";
 // The editor variant is a downscaled whole source; crops stay in its original pixels.
 const slotSource = (f?: MediaFile) =>
   f?.url && f.dims ? { url: f.url, width: f.dims.w, height: f.dims.h } : null;
-const ready = (f: MediaFile) => (isVideo(f.type) ? !!f.hls || !!f.failed : !!f.url);
+const ready = (f: MediaFile) => (isVideo(f.type) ? !!f.hls : !!f.url) || !!f.failed;
 const pending = (files?: MediaFile[]) =>
   !!files?.some((f) => !f.locked && !ready(f));
 // Why a video cannot be encoded, for its editors (ContentKit's hls.error).
@@ -274,7 +274,7 @@ function MediaEditor({
     queryKey: ["post-media-editor", postID],
     queryFn: () => readPost(postID, "editor"),
     refetchInterval: (q) =>
-      q.state.data?.files.some((f) => (isVideo(f.type) ? !f.hls && !f.failed : !f.url || !f.dims)) ? 3000 : false,
+      q.state.data?.files.some((f) => !f.failed && (isVideo(f.type) ? !f.hls : !f.url || !f.dims)) ? 3000 : false,
   });
   const editable = new Map((editor.data?.files ?? []).map((f) => [f.name, f]));
   // The post's poster and hover preview, cut from one of its videos.
@@ -375,6 +375,24 @@ function MediaEditor({
   useEffect(() => {
     if (queue.blocked) toastMediaError(queue.blocked, "Uploads paused");
   }, [queue.blocked]);
+  // A file the processor refuses after upload (an encode or image job) is toasted when it happens.
+  const known = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const files = editor.data?.files;
+    if (!files) return;
+    const failed = files.filter((f) => f.failed && f.name).map((f) => ({ f, key: `${f.name}:${f.failed}` }));
+    if (!known.current) {
+      known.current = new Set(failed.map((x) => x.key));
+      return;
+    }
+    for (const { f, key } of failed) {
+      if (known.current.has(key)) continue;
+      known.current.add(key);
+      const title = `${displayName(f.name!)} couldn't be processed`;
+      if (isVideo(f.type)) toast.error(title, { description: failureMessage(f.failed!) });
+      else toastMediaError({ code: f.failed_code ?? "internal_error", message: f.failed, details: f.failed_details, refusal: !!f.failed_code }, title);
+    }
+  }, [editor.data]);
   const busy = queue.items.length > 0 || committing || edit.isPending;
   useEffect(() => onBusy?.(busy), [busy, onBusy]);
 
@@ -440,9 +458,17 @@ function MediaEditor({
                 </Badge>
               )}
               {video && e && !e.hls && !e.failed && <div className="media-encode"><EncodeProgress progress={e.progress} /></div>}
-              {e?.failed && (
+              {e?.failed && video && (
                 <Badge variant="destructive" title={failureMessage(e.failed)}>
                   Can't play
+                </Badge>
+              )}
+              {e?.failed && !video && (
+                <Badge
+                  variant="destructive"
+                  title={mediaMessage({ code: e.failed_code, message: e.failed, details: e.failed_details, refusal: true })}
+                >
+                  Not processed
                 </Badge>
               )}
               {teaser?.original === f.original && (

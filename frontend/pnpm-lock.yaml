@@ -33,8 +33,8 @@ importers:
         specifier: https://github.com/open-rails/openrails/releases/download/v0.181.0/openrails-billing-ui-0.181.0.tgz
         version: https://github.com/open-rails/openrails/releases/download/v0.181.0/openrails-billing-ui-0.181.0.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@openrails/contentkit-upload':
-        specifier: https://github.com/open-rails/contentkit/releases/download/v0.38.0/openrails-contentkit-upload-0.38.0.tgz
-        version: https://github.com/open-rails/contentkit/releases/download/v0.38.0/openrails-contentkit-upload-0.38.0.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+        specifier: https://github.com/open-rails/contentkit/releases/download/v0.39.0/openrails-contentkit-upload-0.39.0.tgz
+        version: https://github.com/open-rails/contentkit/releases/download/v0.39.0/openrails-contentkit-upload-0.39.0.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@tanstack/react-query':
         specifier: ^5.100.11
         version: 5.103.2(react@19.3.0)
@@ -475,9 +475,9 @@ packages:
       react: '>=19 <20'
       react-dom: '>=19 <20'
 
-  '@openrails/contentkit-upload@https://github.com/open-rails/contentkit/releases/download/v0.38.0/openrails-contentkit-upload-0.38.0.tgz':
-    resolution: {integrity: sha512-BPkCXtuUAGtD69FaJ2YMDm885rwP5oSN47C84y5xCmRS7kZZLfpS/7Lmou5/wAV1UY1Vd7A1N2lvj+fFbLbsHA==, tarball: https://github.com/open-rails/contentkit/releases/download/v0.38.0/openrails-contentkit-upload-0.38.0.tgz}
-    version: 0.38.0
+  '@openrails/contentkit-upload@https://github.com/open-rails/contentkit/releases/download/v0.39.0/openrails-contentkit-upload-0.39.0.tgz':
+    resolution: {integrity: sha512-vqP43GYBLBCpUN2iNB1NlGzs2pH+3fVzjfM3ECIkRlT5LzK5tN7tAOJOkgSC5ZCPHo7uQqSJLiQW+56vuRbClA==, tarball: https://github.com/open-rails/contentkit/releases/download/v0.39.0/openrails-contentkit-upload-0.39.0.tgz}
+    version: 0.39.0
     engines: {node: '>=22.12.0'}
     peerDependencies:
       react: '>=19 <20'
@@ -2866,7 +2866,7 @@ snapshots:
       - '@types/react'
       - date-fns
 
-  '@openrails/contentkit-upload@https://github.com/open-rails/contentkit/releases/download/v0.38.0/openrails-contentkit-upload-0.38.0.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
+  '@openrails/contentkit-upload@https://github.com/open-rails/contentkit/releases/download/v0.39.0/openrails-contentkit-upload-0.39.0.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:
       '@base-ui/react': 1.8.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@hugeicons/core-free-icons': 4.3.5
