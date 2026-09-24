@@ -6,6 +6,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails"
+	"log"
 	"regexp"
 	"strconv"
 	"strings"
@@ -172,6 +173,7 @@ func (api *channelAPI) membership(c fiber.Ctx) error {
 		return clientError(c, 404, "channel not found")
 	}
 	if err = api.billing.setOffer(c.Context(), id, membershipResource(id), group.DisplayName+" membership", &price, true, false); err != nil {
+		log.Printf("channel %s membership offer: %v", id, err)
 		return clientError(c, 400, "membership offer could not be saved")
 	}
 	v, err := api.view(c, id, true)

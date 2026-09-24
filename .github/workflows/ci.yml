@@ -33,8 +33,8 @@ jobs:
       - run: go vet ./...
       - run: go build -tags smoke -o /tmp/demo-smoke .
 
-  media:
-    name: media end-to-end
+  e2e:
+    name: end-to-end
     runs-on: ubuntu-latest
     env:
       GOFLAGS: -mod=readonly
@@ -63,3 +63,16 @@ jobs:
           for i in $(seq 60); do curl -fs http://127.0.0.1:9000/minio/health/live && exit 0; sleep 1; done; exit 1
       - run: go build -o /tmp/media-access github.com/open-rails/contentkit/cmd/media-access
       - run: go test -run TestMediaEndToEnd -count=1 -v -p 2 .
+      - name: Smoke
+        env:
+          SMOKE_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
+          MEDIA_S3_ENDPOINT: http://127.0.0.1:9000
+          MEDIA_S3_ACCESS_KEY_ID: minioadmin
+          MEDIA_S3_SECRET_ACCESS_KEY: minioadmin
+          MEDIA_URL: http://127.0.0.1:9
+          MEDIA_DELIVERY: url
+          MEDIA_TOKEN_KEY: smoke:c21va2Utb25seS1ub3QtYS1zZWNyZXQtMzItYnl0ZXM=
+        run: |
+          docker run --rm --network host --entrypoint sh quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z \
+            -c 'mc alias set local http://127.0.0.1:9000 minioadmin minioadmin && mc mb -p local/onlydemo-media'
+          go run -tags smoke .

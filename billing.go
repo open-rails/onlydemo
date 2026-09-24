@@ -56,6 +56,9 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 	if auth == nil {
 		return nil, errors.New("billing customer routes require AuthKit")
 	}
+	if cfg.MembershipHours < 1 {
+		return nil, errors.New("membership period must be at least 1 hour")
+	}
 	identity, err := billingauth.NewIntegration(billingauth.IntegrationOptions{Verifier: auth.runtime.Verifier(), Customer: billingauth.SubjectCustomerID})
 	if err != nil {
 		return nil, err
