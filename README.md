@@ -60,6 +60,10 @@ saved cards, an inline new card (always saved), one Pay button.
 Declared PSP settings seed a new database; an existing PSP row keeps its stored
 settings.
 
+The local sandbox has OpenRails's destructive-action switch armed, so terminal dunning
+cancels, revocations and provider-schedule cancels execute; an operator disables them
+with `UPDATE billing.destructive_action_switch SET enabled=false, updated_by='<you>', reason='<why>', updated_at=now();`.
+
 Webhooks go to `/billing/v1/webhooks/<rail>/<ACCOUNT_ID>`. For Stripe run
 `task stripe:listen`, copy its `whsec_...` into `STRIPE_WEBHOOK_SIGNING_SECRET` and
 keep it running (it finds `stripe` on PATH, then `.runtime/bin/stripe`; restricted
