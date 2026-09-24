@@ -1155,6 +1155,14 @@
     bottom: 2px;
     cursor: pointer;
   }
+  [data-ckui="slot-edit"][data-busy] svg {
+    animation: slot-busy 1s linear infinite;
+  }
+  @keyframes slot-busy {
+    to {
+      transform: rotate(360deg);
+    }
+  }
   .post-gallery {
     display: flex;
     flex-direction: column;

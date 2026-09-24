@@ -64,8 +64,8 @@ import { Avatar, Cover, PostCard } from "../components/cards";
 import { membershipOffer } from "../channels";
 import { PostEditor } from "../components/post-editor";
 import { ChannelTeam } from "../components/channel-team";
-import { SlotEdit } from "../components/slot-edit";
-import { channelRef, useSlot } from "../media";
+import { SlotEditError, SlotEditMenu, SlotEditor } from "@openrails/contentkit-upload/ui";
+import { channelRef, useSlot, useSlotSaved } from "../media";
 import { subscribeLabel, usePay } from "../components/pay";
 import { channelsPath, channelPath } from "../paths";
 
@@ -101,6 +101,7 @@ export function ChannelPage() {
   const manage = !!channel.data?.can_manage;
   const avatar = useSlot(channelRef(id), "avatar", channel.data?.avatar, manage);
   const cover = useSlot(channelRef(id), "cover", channel.data?.cover, manage);
+  const saved = useSlotSaved();
   const canonical = channel.data?.slug;
   useEffect(() => {
     // A former slug still resolves; show the current URL.
@@ -133,18 +134,28 @@ export function ChannelPage() {
             </small>
           </div>
           {current.can_manage && (
-            <SlotEdit
+            <SlotEditor
               item={channelRef(current.id)}
               slot="cover"
               manifest={cover}
               aspect={3}
               targetWidth={3000}
-              label="Edit cover"
-              className={cn(
-                buttonVariants({ variant: "secondary", size: "sm" }),
-                "cover-edit rounded-full border-white/20 bg-black/55 text-white backdrop-blur-md hover:bg-black/70",
-              )}
-            />
+              onChange={(m) => saved(channelRef(current.id), "cover", m)}
+            >
+              <SlotEditMenu
+                label="Edit cover"
+                render={
+                  <button
+                    type="button"
+                    className={cn(
+                      buttonVariants({ variant: "secondary", size: "sm" }),
+                      "cover-edit rounded-full border-white/20 bg-black/55 text-white backdrop-blur-md hover:bg-black/70",
+                    )}
+                  />
+                }
+              />
+              <SlotEditError className="slot-error" />
+            </SlotEditor>
           )}
         </Cover>
         <div className="profile-body">
@@ -158,19 +169,29 @@ export function ChannelPage() {
                 className="avatar-xl"
               />
               {current.can_manage && (
-                <SlotEdit
+                <SlotEditor
                   item={channelRef(current.id)}
                   slot="avatar"
                   manifest={avatar}
                   aspect={1}
                   targetWidth={512}
-                  label="Change avatar"
-                  iconOnly
-                  className={cn(
-                    buttonVariants({ variant: "secondary", size: "icon-sm" }),
-                    "avatar-edit rounded-full border-2 border-card shadow-sm",
-                  )}
-                />
+                  onChange={(m) => saved(channelRef(current.id), "avatar", m)}
+                >
+                  <SlotEditMenu
+                    label="Change avatar"
+                    iconOnly
+                    render={
+                      <button
+                        type="button"
+                        className={cn(
+                          buttonVariants({ variant: "secondary", size: "icon-sm" }),
+                          "avatar-edit rounded-full border-2 border-card shadow-sm",
+                        )}
+                      />
+                    }
+                  />
+                  <SlotEditError className="slot-error" />
+                </SlotEditor>
               )}
             </span>
             <div className="inline-actions">

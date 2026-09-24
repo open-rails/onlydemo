@@ -150,14 +150,15 @@ and commits (`/api/v1/media/upload/*`).
   them videos; images up to 25 MiB, videos up to 20 GiB (multipart, 4K sources); 409 `too_many_files`. `channel`: public `avatar` (1:1, 128/256/512 px) and
   `cover` (3:1, 1500/3000 px) slots; `user`: `avatar`.
 - **Slots.** The SDK UI crops before saving (`AvatarUpload` on the account
-  page; `useSlotCrop` + `ImageCropDialog` in the channel header): the original
+  page; `SlotEditor` + `SlotEditMenu` over the channel header): the original
   is kept, EXIF orientation applied, and ContentKit renders every width up to
   the crop (never upscaled). "Edit crop" re-renders the kept original
   (`edit-slot`); "Use as channel avatar/cover" on a post image copies it
   (`commit-slot-from-file` with `from`; the manager must be allowed to upload to
-  both). The `SlotEncoded` hook records each slot's version and widths in
-  `media_slots`, so API listings return manifests whose `?v=` URLs are
-  immutable, and the frontend renders `SlotImage` with `srcset`/`sizes`.
+  both). The `SlotEncoded` hook stores each slot's `SlotStamp` in
+  `media_slots.stamp`; listings rebuild every output with
+  `Reader.SlotOutputs(ref, slot, stamp)` (immutable `?v=` URLs, no bucket
+  reads), and the frontend renders `SlotImage` with `srcset`/`sizes`.
 - **Edits.** Crop and rotate are ContentKit's non-destructive file edits
   (commit op `edit`): variants re-derive from the untouched original. The
   post image cropper (react-easy-crop with the SDK's `useCrop`) draws the `Unedited`,

@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"log/slog"
-	"slices"
-	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/contentkit/contentref"
@@ -12,8 +10,8 @@ import (
 )
 
 // Public slots: each kind's slots render at several widths so a CSS box
-// ships 2x/3x pixels. Listings read the current version and widths from
-// media_slots; URLs carry ?v= and are immutable per version.
+// ships 2x/3x pixels. Listings read each slot's stamp from media_slots; URLs
+// carry ?v= and are immutable per version.
 const (
 	slotAvatar = "avatar"
 	slotCover  = "cover"
@@ -26,25 +24,19 @@ var (
 
 type slotKey struct{ ID, Slot string }
 
-// slotEncoded is Hooks.SlotEncoded: it records the slot's current outputs.
-func (m *mediaService) slotEncoded(ctx context.Context, ref contentref.ContentRef, slot, _ string) {
-	man, err := m.manifests.SlotManifest(ctx, m.cfg.URL, ref, slot)
-	if err == nil && man.Version != "" {
-		widths := make([]int32, len(man.Outputs))
-		for i, o := range man.Outputs {
-			widths[i] = int32(o.W)
-		}
-		_, err = m.pool.Exec(ctx, `INSERT INTO `+m.slotTable+` (kind, item_id, slot, version, widths) VALUES ($1,$2,$3,$4,$5)
-			ON CONFLICT (kind, item_id, slot) DO UPDATE SET version=EXCLUDED.version, widths=EXCLUDED.widths, updated_at=NOW()`,
-			ref.ContentKind, ref.ContentID, slot, man.Version, widths)
-	}
+// slotEncoded is Hooks.SlotEncoded: it stores the slot's stamp, the one value
+// listings need to render every output.
+func (m *mediaService) slotEncoded(ctx context.Context, ref contentref.ContentRef, slot string, stamp media.SlotStamp) {
+	_, err := m.pool.Exec(ctx, `INSERT INTO `+m.slotTable+` (kind, item_id, slot, stamp) VALUES ($1,$2,$3,$4)
+		ON CONFLICT (kind, item_id, slot) DO UPDATE SET stamp=EXCLUDED.stamp, updated_at=NOW()`,
+		ref.ContentKind, ref.ContentID, slot, string(stamp))
 	if err != nil {
-		slog.Warn("record slot version", "ref", ref.String(), "slot", slot, "err", err)
+		slog.Warn("record slot stamp", "ref", ref.String(), "slot", slot, "err", err)
 	}
 }
 
-// slots returns the manifests of the named slots of kind's items; a slot never
-// set is absent.
+// slots returns the manifests of the named slots of kind's items, built from
+// their stamps without bucket reads; a slot never set is absent.
 func (m *mediaService) slots(ctx context.Context, kind string, ids []string, names ...string) (map[slotKey]*media.SlotManifest, error) {
 	out := map[slotKey]*media.SlotManifest{}
 	if len(ids) == 0 {
@@ -54,32 +46,26 @@ func (m *mediaService) slots(ctx context.Context, kind string, ids []string, nam
 	if err != nil {
 		return nil, err
 	}
-	rows, err := m.pool.Query(ctx, `SELECT item_id, slot, version, widths FROM `+m.slotTable+` WHERE kind=$1 AND item_id=ANY($2) AND slot=ANY($3)`, kind, ids, names)
+	rows, err := m.pool.Query(ctx, `SELECT item_id, slot, stamp FROM `+m.slotTable+` WHERE kind=$1 AND item_id=ANY($2) AND slot=ANY($3)`, kind, ids, names)
 	if err != nil {
 		return nil, err
 	}
-	var id, slot, version string
-	var widths []int32
-	_, err = pgx.ForEachRow(rows, []any{&id, &slot, &version, &widths}, func() error {
+	var id, slot, stamp string
+	_, err = pgx.ForEachRow(rows, []any{&id, &slot, &stamp}, func() error {
 		spec, ok := k.Slots[slot]
-		item, err := m.kinds.Item(m.ref(kind, id))
-		if !ok || err != nil {
+		if !ok {
+			return nil
+		}
+		version, _, err := media.SlotStamp(stamp).Parse()
+		if err != nil {
 			return err
 		}
-		man := &media.SlotManifest{Aspect: spec.Aspect, Version: version, Outputs: []media.SlotImage{}}
-		for _, w := range widths {
-			if !slices.Contains(spec.Widths, int(w)) {
-				continue
-			}
-			key, err := item.SlotOutput(slot, int(w))
-			if err != nil {
-				return err
-			}
-			man.Outputs = append(man.Outputs, media.SlotImage{Name: media.SlotOutput(slot, int(w)), W: int(w), H: spec.Height(int(w)),
-				URL: strings.TrimRight(m.cfg.URL, "/") + "/" + key + "?" + media.SlotVersionParam + "=" + version})
+		outs, err := m.reader.SlotOutputs(m.ref(kind, id), slot, media.SlotStamp(stamp))
+		if err != nil {
+			return err
 		}
-		if len(man.Outputs) > 0 {
-			out[slotKey{id, slot}] = man
+		if len(outs) > 0 {
+			out[slotKey{id, slot}] = &media.SlotManifest{Aspect: spec.Aspect, Version: version, Outputs: outs}
 		}
 		return nil
 	})
