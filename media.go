@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"path"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -24,31 +26,48 @@ import (
 	mediaS3 "github.com/open-rails/contentkit/media/s3"
 	"github.com/open-rails/contentkit/media/tiered"
 	"github.com/open-rails/contentkit/media/token"
+	"github.com/open-rails/contentkit/media/video"
 	"github.com/open-rails/contentkit/migrations"
 )
 
-// Media kinds. Post folders hold ordered images plus an optional blurred
-// teaser; channel and user folders hold only public slots.
+// Media kinds. Post folders hold ordered images and videos plus an optional
+// blurred image teaser; channel and user folders hold only public slots.
 const (
 	kindPost    = "post"
 	kindChannel = "channel"
 )
 
+// Post ceilings (teaser included in the file count).
+const (
+	maxImageBytes = 25 << 20
+	maxVideoBytes = 2 << 30
+	maxPostFiles  = 50
+	maxPostVideos = 10
+)
+
 var (
 	imageTypes = []string{"image/jpeg", "image/png", "image/webp", "image/gif"}
+	videoTypes = []string{"video/mp4", "video/webm", "video/quicktime", "video/x-matroska"}
+	// editorSpec is the whole source, ignoring crop/rotate, for the cropper.
+	editorSpec = media.Spec{Width: 1200, Height: 1200, Fit: media.FitInside, Quality: 80, Unedited: true}
 	postSpecs  = map[string]media.Spec{
-		"large": {Width: 1600, Height: 1600, Fit: media.FitInside, Quality: 85},
-		"thumb": {Width: 480, Height: 480, Fit: media.FitCover, Quality: 80},
+		"large":  {Width: 1600, Height: 1600, Fit: media.FitInside, Quality: 85},
+		"thumb":  {Width: 480, Height: 480, Fit: media.FitCover, Quality: 80},
+		"editor": editorSpec,
 	}
 	teaserSpecs = map[string]media.Spec{
 		"blurred": {Width: 960, Height: 960, Fit: media.FitInside, Quality: 70, Blur: 24},
 	}
 	mediaKinds = []media.Kind{
-		{Name: kindPost, Types: imageTypes, MaxBytes: 25 << 20, Specs: postSpecs},
-		{Name: kindChannel, Types: imageTypes, MaxBytes: 10 << 20, Slots: map[string]media.Slot{
-			"avatar": {Outputs: map[string]media.Spec{"avatar": {Width: 256, Height: 256, Fit: media.FitCover, Quality: 85}}},
-			"banner": {Outputs: map[string]media.Spec{"banner": {Width: 1500, Height: 500, Fit: media.FitCover, Quality: 85}}},
-		}},
+		{Name: kindPost, Types: append(append([]string{}, imageTypes...), videoTypes...), MaxBytes: maxVideoBytes, MaxFiles: maxPostFiles,
+			TypeLimits: map[string]media.Limit{"image": {MaxBytes: maxImageBytes}, "video": {MaxFiles: maxPostVideos}},
+			Specs:      postSpecs, Video: true},
+		// A channel's files are the sources its avatar and banner are cropped from.
+		{Name: kindChannel, Types: imageTypes, MaxBytes: maxImageBytes, MaxFiles: 2, Specs: map[string]media.Spec{"editor": editorSpec},
+			Slots: map[string]media.Slot{
+				"avatar": {Aspect: 1, Outputs: map[string]media.Spec{"avatar": {Width: 256, Height: 256, Fit: media.FitCover, Quality: 85}}},
+				"banner": {Aspect: 3, Outputs: map[string]media.Spec{"banner": {Width: 1500, Height: 500, Fit: media.FitCover, Quality: 85}}},
+			}},
 		{Name: media.UserKind, Types: imageTypes, MaxBytes: 10 << 20, Slots: map[string]media.Slot{
 			"avatar": {Outputs: map[string]media.Spec{
 				"avatar_80":  {Width: 80, Height: 80, Fit: media.FitCover, Quality: 85},
@@ -113,8 +132,8 @@ func loadMediaConfig(get func(string) string) (mediaConfig, error) {
 		return n
 	}
 	c.FilesPerHour = int(num("media_upload_files_per_hour", 60))
-	c.BytesPerDay = num("media_upload_bytes_per_day", 2<<30)
-	c.ChannelQuota = num("media_channel_quota_bytes", 5<<30)
+	c.BytesPerDay = num("media_upload_bytes_per_day", 10<<30)
+	c.ChannelQuota = num("media_channel_quota_bytes", 20<<30)
 	if err != nil {
 		return c, err
 	}
@@ -131,6 +150,7 @@ func loadMediaConfig(get func(string) string) (mediaConfig, error) {
 // the post access policy decides reads, OpenRails holds the entitlements.
 type mediaService struct {
 	cfg       mediaConfig
+	store     media.Store
 	kinds     *media.Registry
 	manifests *media.Manifests
 	jobs      *media.Jobs
@@ -144,11 +164,15 @@ type mediaService struct {
 }
 
 // applyContentMigrations installs ContentKit's baseline (the upload limiter's
-// counters) in its own schema.
+// counters) in its own schema and the video queue (River schema
+// media_worker, drained by cmd/media-worker).
 func applyContentMigrations(ctx context.Context, pool *pgxpool.Pool, cfg Config) error {
 	db := stdlib.OpenDBFromPool(pool)
 	defer db.Close()
-	return migrations.ApplyPostgres(ctx, db, contentSchema(cfg))
+	if err := migrations.ApplyPostgres(ctx, db, contentSchema(cfg)); err != nil {
+		return err
+	}
+	return video.Migrate(ctx, pool)
 }
 
 func newMedia(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth, billing *billingService, channels *channelAPI, posts *postAPI) (*mediaService, error) {
@@ -175,7 +199,7 @@ func newMedia(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth
 		return nil, fmt.Errorf("MEDIA_TOKEN_KEY: %w", err)
 	}
 	signing, _ := token.ParseKey(mc.TokenKey)
-	m := &mediaService{cfg: mc, kinds: kinds, auth: auth, billing: billing, channels: channels, posts: posts}
+	m := &mediaService{cfg: mc, store: store, kinds: kinds, auth: auth, billing: billing, channels: channels, posts: posts}
 	m.limiter, err = media.NewPGLimiter(pool, contentSchema(cfg), media.PGLimits{
 		FilesPerHour: mc.FilesPerHour, BytesPerDay: mc.BytesPerDay,
 		Quota: func(_ context.Context, _, owner string) (int64, error) {
@@ -194,7 +218,7 @@ func newMedia(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth
 	if m.manifests, err = media.NewManifests(store, kinds, media.ManifestOptions{Locker: media.PGLocker(pool), Jobs: m.jobs}); err != nil {
 		return nil, err
 	}
-	hooks := media.Hooks{Failed: func(_ context.Context, ref contentref.ContentRef, file string, err error) {
+	hooks := media.Hooks{DownloadName: m.downloadName, Failed: func(_ context.Context, ref contentref.ContentRef, file string, err error) {
 		slog.Warn("media file cannot be derived", "ref", ref.String(), "file", file, "err", err)
 	}}
 	proc, err := image.New(image.Config{Store: store, Kinds: kinds, Manifests: m.manifests, Hooks: hooks,
@@ -208,6 +232,13 @@ func newMedia(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth
 		return nil, err
 	}
 	if err = m.jobs.AddProcessor(proc.Process); err != nil {
+		return nil, err
+	}
+	videos, err := video.NewEnqueuer(pool, kinds)
+	if err != nil {
+		return nil, err
+	}
+	if err = m.jobs.AddProcessor(videos.Processor()); err != nil {
 		return nil, err
 	}
 	if m.uploads, err = media.NewUploads(media.UploadOptions{Store: store, Kinds: kinds, Manifests: m.manifests,
@@ -284,8 +315,13 @@ func (m *mediaService) Resolve(ctx context.Context, ref contentref.ContentRef, a
 		}
 		return access.Resolution{Visible: true, Accessible: ok}, err
 	case kindChannel:
+		// Only managers read the slot sources; slots themselves are public.
 		ok, err := m.channels.active(ctx, ref.ContentID)
-		return access.Resolution{Visible: ok, Accessible: ok}, err
+		if err != nil || !ok || actor.ID == "" {
+			return access.Resolution{Visible: ok}, err
+		}
+		manage, err := m.channels.allowed(ctx, actor.ID, ref.ContentID, "channel:settings:manage")
+		return access.Resolution{Visible: true, Accessible: manage}, err
 	}
 	return access.Resolution{}, nil
 }
@@ -345,7 +381,7 @@ func (m *mediaService) mount(app fiber.Router, optional fiber.Handler) {
 			return a, !a.Anonymous
 		}})
 	read := m.reader.Handler(media.HandlerOptions{Tenant: m.cfg.Tenant, Identity: m})
-	app.Post("/api/v1/media/upload/*", optional, adaptor.HTTPHandlerWithContext(withMediaActor(http.StripPrefix("/api/v1/media/upload", upload))))
+	app.Post("/api/v1/media/upload/*", optional, adaptor.HTTPHandlerWithContext(withMediaActor(http.StripPrefix("/api/v1/media/upload", m.imageTeasers(upload)))))
 	app.Get("/api/v1/posts/:id/media", optional, m.files)
 	app.Get("/api/v1/media/*", optional, adaptor.HTTPHandlerWithContext(withMediaActor(http.StripPrefix("/api/v1/media", read))))
 }
@@ -419,4 +455,23 @@ func (m *mediaService) eraseUser(ctx context.Context, user string) error {
 	return pgx.BeginFunc(ctx, m.posts.pool, func(tx pgx.Tx) error {
 		return m.jobs.EraseUserTx(ctx, tx, m.cfg.Tenant, user)
 	})
+}
+
+var qualityKey = regexp.MustCompile(`^(.+)-(\d+p)$`)
+
+// downloadName saves a post's video download as "{post-slug}-{file}-{720p}.mp4".
+func (m *mediaService) downloadName(ctx context.Context, ref contentref.ContentRef, key string, d media.Download) (string, error) {
+	id, err := strconv.ParseInt(ref.ContentID, 10, 64)
+	if err != nil || ref.ContentKind != kindPost {
+		return ref.ContentID + "-" + key, nil
+	}
+	p, err := m.posts.visible(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	q := qualityKey.FindStringSubmatch(key)
+	if q == nil || d.Type != "video/mp4" {
+		return p.Slug + "-" + key, nil
+	}
+	return p.Slug + "-" + strings.TrimSuffix(q[1], path.Ext(q[1])) + "-" + q[2] + ".mp4", nil
 }

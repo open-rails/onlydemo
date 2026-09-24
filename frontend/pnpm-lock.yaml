@@ -18,8 +18,8 @@ importers:
         specifier: ^1.1.10
         version: 1.1.10(react@19.3.0)
       '@open-rails/contentkit-upload':
-        specifier: file:vendor/open-rails-contentkit-upload-0.0.0-6a512d6.tgz
-        version: file:vendor/open-rails-contentkit-upload-0.0.0-6a512d6.tgz(react@19.3.0)
+        specifier: file:vendor/open-rails-contentkit-upload-0.17.0.tgz
+        version: file:vendor/open-rails-contentkit-upload-0.17.0.tgz(react@19.3.0)
       '@openrails/auth-ui':
         specifier: https://github.com/open-rails/auth-ui/releases/download/v0.3.1/openrails-auth-ui-0.3.1.tgz
         version: https://github.com/open-rails/auth-ui/releases/download/v0.3.1/openrails-auth-ui-0.3.1.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -35,12 +35,18 @@ importers:
       cn:
         specifier: 0.4.0
         version: 0.4.0
+      hls.js:
+        specifier: ^1.7.3
+        version: 1.7.3
       react:
         specifier: ^19.2.6
         version: 19.3.0
       react-dom:
         specifier: ^19.2.6
         version: 19.3.0(react@19.3.0)
+      react-easy-crop:
+        specifier: ^6.2.3
+        version: 6.2.3(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       react-router-dom:
         specifier: ^7.18.4
         version: 7.18.4(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -415,9 +421,9 @@ packages:
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
 
-  '@open-rails/contentkit-upload@file:vendor/open-rails-contentkit-upload-0.0.0-6a512d6.tgz':
-    resolution: {integrity: sha512-Po5Zhmx1wgkG60ozrWrNNf4FlHTXPguCdLHSfdTuWOlpldLoLT3rqe4W1is2Kr/r2/nTH27ESaPxe0sHZLVbQw==, tarball: file:vendor/open-rails-contentkit-upload-0.0.0-6a512d6.tgz}
-    version: 0.0.0-6a512d6
+  '@open-rails/contentkit-upload@file:vendor/open-rails-contentkit-upload-0.17.0.tgz':
+    resolution: {integrity: sha512-VaDlKP8LHiy2w6xxLLQ4SuqbSvzM6ESCm8LYbpUD79YflLUfkz4VMWht3oDjNzbEWZBR+nmGiH215h/6bye5PQ==, tarball: file:vendor/open-rails-contentkit-upload-0.17.0.tgz}
+    version: 0.0.0
     engines: {node: '>=22'}
     peerDependencies:
       react: '>=18'
@@ -1318,6 +1324,9 @@ packages:
   hermes-parser@0.25.1:
     resolution: {integrity: sha512-6pEjquH3rqaI6cYAXYPcz9MS4rY6R4ngRgrgfDshRptUZIc3lw0MCIJIGDj9++mfySOuPTHB4nrSW99BCvOPIA==}
 
+  hls.js@1.7.3:
+    resolution: {integrity: sha512-MsPlx6yVW4Qv4C7mEVou4/gk/5cN2dVxOTnrNjPSmyH2f0Ln+/UkG10Ax1PE6OvrmTVPKgQYozTtBaPOuCzq7A==}
+
   hono@4.13.8:
     resolution: {integrity: sha512-/Gng7NfoykZl2pjukW5Z6+8Yxm3BPRf86GTbQnt0SbySkvax4fyL4H3HhY1cCpBGmiW9XDRFzRV+CXK2W8QudQ==}
     engines: {node: '>=16.9.0'}
@@ -1767,6 +1776,9 @@ packages:
     resolution: {integrity: sha512-x0InOIyzgdk+eyaWaRJFH5snEtiImgBgblZ2CyPrLmqqcuMQkEvcDPHbzqbD8eDsSeJbVOjn+crzyzHaM4D+/A==}
     engines: {node: '>=18'}
 
+  normalize-wheel@1.0.1:
+    resolution: {integrity: sha512-1OnlAPZ3zgrk8B91HyRj+eVv+kS5u+Z0SCsak6Xil/kmgEia50ga7zfkumayonZrImffAxPU/5WcyGhzetHNPA==}
+
   npm-run-path@4.0.1:
     resolution: {integrity: sha512-S48WzZW777zhNIrn7gxOlISNAqi9ZC/uQFnRdbeIHhZhCA6UqpkOT8T1G7BvfdgP4Er8gF4sUbaS0i7QvIfCWw==}
     engines: {node: '>=8'}
@@ -1960,6 +1972,12 @@ packages:
     resolution: {integrity: sha512-JDk8dgif51OjFoDE70+OT9ICyYr+69HlmihNwp1+Nsfbna3t5sIiCa9ZJktDmQ4/1b/rn26hIAR2uYXDMr5r0Q==}
     peerDependencies:
       react: ^19.3.0
+
+  react-easy-crop@6.2.3:
+    resolution: {integrity: sha512-ebimG3OGlzizjxEZ77Cj9CVLcg5vDZ6QVz8ud1rx4WmsCDWHIROEhgMi0GpJ/jKAuwHrH0M+QZUK4hyvxbYhOA==}
+    peerDependencies:
+      react: '>=16.4.0'
+      react-dom: '>=16.4.0'
 
   react-is@16.13.1:
     resolution: {integrity: sha512-24e6ynE2H+OKt4kqsOvNd8kBpV65zoxbA4BVsEOB3ARVWQki/DHzaUoC5KuON/BiccDaCCTZBuOcfZs70kR8bQ==}
@@ -2744,7 +2762,7 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.3
 
-  '@open-rails/contentkit-upload@file:vendor/open-rails-contentkit-upload-0.0.0-6a512d6.tgz(react@19.3.0)':
+  '@open-rails/contentkit-upload@file:vendor/open-rails-contentkit-upload-0.17.0.tgz(react@19.3.0)':
     dependencies:
       '@noble/hashes': 2.4.0
     optionalDependencies:
@@ -3601,6 +3619,8 @@ snapshots:
     dependencies:
       hermes-estree: 0.25.1
 
+  hls.js@1.7.3: {}
+
   hono@4.13.8: {}
 
   hookified@1.15.1: {}
@@ -3913,6 +3933,8 @@ snapshots:
 
   node-releases@2.0.56: {}
 
+  normalize-wheel@1.0.1: {}
+
   npm-run-path@4.0.1:
     dependencies:
       path-key: 3.1.1
@@ -4102,6 +4124,12 @@ snapshots:
     dependencies:
       react: 19.3.0
       scheduler: 0.28.0
+
+  react-easy-crop@6.2.3(react-dom@19.3.0(react@19.3.0))(react@19.3.0):
+    dependencies:
+      normalize-wheel: 1.0.1
+      react: 19.3.0
+      react-dom: 19.3.0(react@19.3.0)
 
   react-is@16.13.1: {}
 

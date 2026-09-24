@@ -2,13 +2,16 @@ package main
 
 // End-to-end media proof on real services: PostgreSQL (app, AuthKit,
 // OpenRails, River), an S3 backend (MinIO in CI), the real ContentKit upload
-// and read handlers, the libvips image job and the media-access binary. Only
-// the Stripe API is replaced, by a closed local fake.
+// and read handlers, the libvips image job, the media-worker video encode
+// (ffmpeg) and the media-access binary. Only the Stripe API is replaced, by a
+// closed local fake.
 //
 //	DEMO_TEST_DATABASE_URL   loopback PostgreSQL admin URL; a database is created and dropped
 //	DEMO_TEST_S3_ENDPOINT    e.g. http://127.0.0.1:9000; a bucket is created and emptied
 //	DEMO_TEST_S3_ACCESS_KEY, DEMO_TEST_S3_SECRET_KEY
 //	DEMO_TEST_MEDIA_ACCESS   media-access binary; built from the pinned ContentKit when unset
+//	DEMO_TEST_MEDIA_WORKER   media-worker binary; built likewise when unset
+//	DEMO_TEST_FFMPEG=1       fail instead of skipping the video proof without ffmpeg (CI)
 
 import (
 	"bytes"
@@ -193,6 +196,159 @@ func TestMediaEndToEnd(t *testing.T) {
 		h.waitPublic(t, me["user"].(map[string]any)["avatar_url"].(string))
 	})
 
+	t.Run("mixed images and videos", func(t *testing.T) {
+		body := map[string]any{"channel_id": channelID, "slug": "p-mixed", "title": "mixed", "body": "text", "access_policy": "membership", "price": price}
+		id := int64(owner.call("POST", "/api/v1/posts", body, "", 201)["id"].(float64))
+		ref := postRefBody(id)
+
+		// ContentKit's per-type caps: images keep their own byte cap.
+		big := make([]byte, maxImageBytes+1)
+		admin.presign(ref, "", big, "image/png", 413, media.CodeTooLarge)
+		admin.presign(ref, "", big, "video/mp4", 200, "")
+		if !h.video {
+			t.Skip("ffmpeg not installed")
+		}
+
+		img := owner.upload(ref, "", testPNG(t, 640, 360, color.RGBA{10, 120, 90, 255}), "image/png", 200)
+		clip := owner.upload(ref, "", testVideo(t), "video/mp4", 200)
+		commit := func(ops []media.Op, status int) map[string]any {
+			return owner.call("POST", "/api/v1/media/upload/commit", map[string]any{"ref": ref, "ops": ops}, "", status)
+		}
+		if out := commit([]media.Op{{Op: media.OpInsert, Name: "teaser", Original: clip, Meta: map[string]any{"teaser": true}}}, 400); out["code"] != media.CodeInvalid {
+			t.Fatalf("video teaser: %v", out)
+		}
+		var many []media.Op
+		for i := range maxPostFiles + 1 {
+			many = append(many, media.Op{Op: media.OpInsert, Name: fmt.Sprintf("img%02d.png", i), Original: img})
+		}
+		if out := commit(many, 409); out["code"] != media.CodeTooManyFiles {
+			t.Fatalf("file ceiling: %v", out)
+		}
+		many = many[:0]
+		for i := range maxPostVideos + 1 {
+			many = append(many, media.Op{Op: media.OpInsert, Name: fmt.Sprintf("clip%02d.mp4", i), Original: clip})
+		}
+		if out := commit(many, 409); out["code"] != media.CodeTooManyFiles {
+			t.Fatalf("video ceiling: %v", out)
+		}
+		commit([]media.Op{
+			{Op: media.OpInsert, Name: "teaser", Original: img, Meta: map[string]any{"teaser": true}},
+			{Op: media.OpInsert, Name: "still.png", Original: img},
+			{Op: media.OpInsert, Name: "clip.mp4", Original: clip},
+		}, 200)
+		h.waitDerived(owner, id)
+
+		// Entitled: the master and media playlists come from the read API, the
+		// byte ranges from media-access under the folder cookie.
+		r := h.read(member, id)
+		v := r.res.Files[2]
+		if r.res.Access != media.AccessFull || v.Name != "clip.mp4" || !v.HLS || v.Type != "video/mp4" || v.Duration <= 0 {
+			t.Fatalf("member read %+v", r.res)
+		}
+		base := fmt.Sprintf("/api/v1/media/post/%d/hls/clip.mp4/", id)
+		master := h.playlist(member, base+"master.m3u8", 200)
+		var variants []string
+		for _, line := range strings.Split(master, "\n") {
+			if line != "" && !strings.HasPrefix(line, "#") {
+				variants = append(variants, line)
+			}
+		}
+		if len(variants) != 1 || variants[0] != "video/240.m3u8" || !strings.Contains(master, `TYPE=AUDIO`) {
+			t.Fatalf("master playlist:\n%s", master)
+		}
+		rendition := h.playlist(member, base+variants[0], 200)
+		blob, first := "", ""
+		for _, line := range strings.Split(rendition, "\n") {
+			if rng, ok := strings.CutPrefix(line, "#EXT-X-BYTERANGE:"); ok && first == "" {
+				first = rng
+			} else if strings.HasPrefix(line, "http") {
+				blob = line
+			}
+		}
+		if blob == "" || first == "" || !strings.HasPrefix(blob, h.cfg.Media.URL) || strings.Contains(blob, "?t=") {
+			t.Fatalf("media playlist:\n%s", rendition)
+		}
+		length, offset, _ := strings.Cut(first, "@")
+		n, _ := strconv.ParseInt(length, 10, 64)
+		o, _ := strconv.ParseInt(offset, 10, 64)
+		h.expectRange(t, blob, r.cookie, o, n, 206)
+		h.expectRange(t, blob, "", o, n, 403)
+
+		// Downloads: one per quality, saved under the post's name.
+		if len(r.res.Downloads) != 1 || r.res.Downloads[0].Key != "clip.mp4-240p" || r.res.Downloads[0].Name != "p-mixed-clip-240p.mp4" {
+			t.Fatalf("downloads %+v", r.res.Downloads)
+		}
+		res, _ := member.do("GET", fmt.Sprintf("/api/v1/media/post/%d/download/clip.mp4-240p", id), nil, "")
+		if res.StatusCode != 200 || res.Header.Get("Content-Type") != "video/mp4" ||
+			!strings.Contains(res.Header.Get("Content-Disposition"), "p-mixed-clip-240p.mp4") {
+			t.Fatalf("download: %d %v", res.StatusCode, res.Header)
+		}
+
+		// Locked: teaser only, "3 items locked" includes the video, no playlist.
+		l := h.read(stranger, id)
+		if l.res.Access != media.AccessNone || !l.res.Files[0].Teaser || !l.res.Files[1].Locked || !l.res.Files[2].Locked ||
+			l.res.Files[2].Name != "" || len(l.res.Downloads) != 0 {
+			t.Fatalf("stranger read %+v", l.res)
+		}
+		h.playlist(stranger, base+"master.m3u8", 404)
+		h.playlist(stranger, base+variants[0], 404)
+		if res, _ := stranger.do("GET", fmt.Sprintf("/api/v1/media/post/%d/download/clip.mp4-240p", id), nil, ""); res.StatusCode != 404 {
+			t.Fatalf("stranger download %d", res.StatusCode)
+		}
+	})
+
+	t.Run("image edits", func(t *testing.T) {
+		id := posts["public"]
+		ref := postRefBody(id)
+		edit := map[string]any{"crop": map[string]int{"x": 0, "y": 0, "w": 320, "h": 240}, "rotate": 90}
+		stranger.call("POST", "/api/v1/media/upload/commit", map[string]any{"ref": ref, "ops": []any{map[string]any{"op": "edit", "name": "a.png", "edit": edit}}}, "", 403)
+		before := h.read(owner, id).res.Files[0]
+		owner.call("POST", "/api/v1/media/upload/commit", map[string]any{"ref": ref, "ops": []any{map[string]any{"op": "edit", "name": "a.png", "edit": edit}}}, "", 200)
+		// Variants re-derive through crop then rotate; dims stay the source's.
+		eventually(t, "edited variant", func() bool {
+			f := h.read(owner, id).res.Files[0]
+			return f.URL != "" && f.URL != before.URL && f.Width == 240 && f.Height == 320
+		})
+		f := h.read(owner, id).res.Files[0]
+		if f.Edit == nil || f.Edit.Rotate != 90 || f.Edit.Crop.W != 320 || f.Dims == nil || f.Dims.W != 640 || f.Dims.H != 480 {
+			t.Fatalf("edited file %+v", f)
+		}
+		h.expectFetch(t, f.URL, h.read(owner, id).cookie, 200)
+		res, raw := owner.do("GET", fmt.Sprintf("/api/v1/media/post/%d?variant=editor", id), nil, "")
+		var ed media.ReadResult
+		if res.StatusCode != 200 || json.Unmarshal(raw, &ed) != nil || ed.Files[0].Variant != "editor" {
+			t.Fatalf("editor variant: %d %s", res.StatusCode, raw)
+		}
+	})
+
+	t.Run("channel slot from a cropped file", func(t *testing.T) {
+		chRef := map[string]string{"kind": kindChannel, "id": channelID}
+		src := owner.upload(chRef, "", testPNG(t, 900, 600, color.RGBA{200, 120, 0, 255}), "image/png", 200)
+		owner.call("POST", "/api/v1/media/upload/commit", map[string]any{"ref": chRef, "ops": []media.Op{{Op: media.OpInsert, Name: "banner-source", Original: src}}}, "", 200)
+		slot := map[string]any{"ref": chRef, "slot": "banner", "file": "banner-source", "edit": map[string]any{"crop": map[string]int{"x": 0, "y": 150, "w": 900}}}
+		editor.call("POST", "/api/v1/media/upload/commit-slot-from-file", slot, "", 403)
+		owner.call("POST", "/api/v1/media/upload/commit-slot-from-file", slot, "", 204)
+		// Slot.Aspect 3 derives the crop height; the slot job re-encodes through it.
+		item, err := h.srv.media.kinds.Item(h.srv.media.ref(kindChannel, channelID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		key, _ := item.SlotOriginal("banner")
+		obj, err := h.srv.media.store.Head(ctx, key)
+		if err != nil || !strings.Contains(obj.Metadata[media.SlotEditMeta], `"h":300`) {
+			t.Fatalf("banner original %+v %v", obj.Metadata, err)
+		}
+		h.waitPublic(t, anon.call("GET", "/api/v1/channels/"+channelID, nil, "", 200)["banner_url"].(string))
+		// Slot sources are for managers; everyone else sees them locked.
+		eventually(t, "banner source dims", func() bool {
+			r := h.read2(owner, "channel", channelID)
+			return r.Access == media.AccessFull && r.Files[0].Dims != nil && r.Files[0].Dims.W == 900 && r.Files[0].URL != ""
+		})
+		if r := h.read2(stranger, "channel", channelID); r.Access != media.AccessNone || !r.Files[0].Locked {
+			t.Fatalf("stranger channel read %+v", r)
+		}
+	})
+
 	t.Run("post deletion erases its folder and releases quota", func(t *testing.T) {
 		id := posts["ppv"]
 		used, _, err := h.srv.media.limiter.Usage(ctx, h.cfg.Media.Tenant, channelOwner(channelID))
@@ -221,6 +377,7 @@ type mediaHarness struct {
 	stripe *fakeStripe
 	hook   string
 	owner  peer
+	video  bool // ffmpeg present: media-worker runs
 }
 
 func newMediaHarness(t *testing.T) *mediaHarness {
@@ -263,6 +420,9 @@ func newMediaHarness(t *testing.T) *mediaHarness {
 			TokenKey: tokenKey, FilesPerHour: testFilesPerHour, BytesPerDay: 1 << 30, ChannelQuota: testQuota}}
 	if err = initializeDatabase(ctx, h.cfg, pool); err != nil {
 		t.Fatal(err)
+	}
+	if h.video = hasFFmpeg(t); h.video {
+		startMediaWorker(t, h.cfg.DatabaseURL, endpoint, h.bucket, access, secret)
 	}
 	if h.srv, err = startServer(ctx, h.cfg, pool, billingOptions{Test: func(o *openrailsembed.Options) { o.StripeTransport = h.stripe }}); err != nil {
 		t.Fatal(err)
@@ -342,6 +502,56 @@ func startMediaAccess(t *testing.T, endpoint, bucket, access, secret, tokenKey s
 		return err == nil && res.StatusCode == 200
 	})
 	return base
+}
+
+func hasFFmpeg(t *testing.T) bool {
+	for _, tool := range []string{"ffmpeg", "ffprobe"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			if os.Getenv("DEMO_TEST_FFMPEG") == "1" {
+				t.Fatalf("%s is required: %v", tool, err)
+			}
+			t.Logf("%s not found; the video proof is skipped", tool)
+			return false
+		}
+	}
+	return true
+}
+
+// startMediaWorker runs ContentKit's video encode worker on the test database.
+func startMediaWorker(t *testing.T, dbURL, endpoint, bucket, access, secret string) {
+	bin := os.Getenv("DEMO_TEST_MEDIA_WORKER")
+	if bin == "" {
+		bin = filepath.Join(t.TempDir(), "media-worker")
+		out, err := exec.Command("go", "build", "-o", bin, "github.com/open-rails/contentkit/cmd/media-worker").CombinedOutput()
+		if err != nil {
+			t.Fatalf("build media-worker: %v\n%s", err, out)
+		}
+	}
+	cmd := exec.Command(bin)
+	cmd.Env = append(os.Environ(), "DATABASE_URL="+dbURL, "MEDIA_S3_ENDPOINT="+endpoint, "MEDIA_S3_BUCKET="+bucket,
+		"MEDIA_S3_ACCESS_KEY_ID="+access, "MEDIA_S3_SECRET_ACCESS_KEY="+secret, "MEDIA_WORKER_THREADS=2",
+		"MEDIA_WORKER_TMP="+t.TempDir(), "MEDIA_WORKER_SHUTDOWN_GRACE=1s")
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+}
+
+// testVideo is a 2 s 320x240 H.264/AAC MP4.
+func testVideo(t *testing.T) []byte {
+	out := filepath.Join(t.TempDir(), "clip.mp4")
+	b, err := exec.Command("ffmpeg", "-v", "error", "-nostdin", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=10:duration=2",
+		"-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+		"-threads", "1", "-c:a", "aac", "-shortest", "-y", out).CombinedOutput()
+	if err != nil {
+		t.Fatalf("video fixture: %v: %s", err, b)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }
 
 func (h *mediaHarness) removeBucket() {
@@ -499,6 +709,16 @@ func (p peer) upload(ref map[string]string, slot string, data []byte, typ string
 	return plan["name"].(string)
 }
 
+func (h *mediaHarness) read2(p peer, kind, id string) media.ReadResult {
+	h.t.Helper()
+	res, raw := p.do("GET", "/api/v1/media/"+kind+"/"+id+"?variant=editor", nil, "")
+	var out media.ReadResult
+	if res.StatusCode != 200 || json.Unmarshal(raw, &out) != nil {
+		h.t.Fatalf("%s read %s/%s: %d %s", p.name, kind, id, res.StatusCode, raw)
+	}
+	return out
+}
+
 type readResult struct {
 	res    media.ReadResult
 	cookie string
@@ -522,12 +742,13 @@ func (h *mediaHarness) read(p peer, id int64) readResult {
 	return out
 }
 
-// waitDerived waits for the image job to fill every file's variant.
+// waitDerived waits for the image job to fill every image's variant and the
+// media-worker to encode every video.
 func (h *mediaHarness) waitDerived(p peer, id int64) {
 	eventually(h.t, fmt.Sprintf("variants of post %d", id), func() bool {
 		r := h.read(p, id)
 		for _, f := range r.res.Files {
-			if f.URL == "" {
+			if isVideoType(f.Type) && !f.HLS || !isVideoType(f.Type) && f.URL == "" {
 				return false
 			}
 		}
@@ -578,6 +799,41 @@ func (h *mediaHarness) expectRead(t *testing.T, p peer, id int64, level string) 
 			// The creator's plain URL and folder cookie are no use to this viewer.
 			h.expectFetch(t, owner.res.Files[i].URL, "", 403)
 		}
+	}
+}
+
+// playlist fetches an HLS playlist from the read API.
+func (h *mediaHarness) playlist(p peer, path string, status int) string {
+	h.t.Helper()
+	res, raw := p.do("GET", path, nil, "")
+	if res.StatusCode != status {
+		h.t.Fatalf("%s GET %s = %d, want %d: %s", p.name, path, res.StatusCode, status, raw)
+	}
+	if status == 200 && res.Header.Get("Content-Type") != media.HLSContentType {
+		h.t.Fatalf("GET %s served %s", path, res.Header.Get("Content-Type"))
+	}
+	return string(raw)
+}
+
+// expectRange fetches one HLS byte range from media-access.
+func (h *mediaHarness) expectRange(t *testing.T, u, cookie string, offset, length int64, status int) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(h.ctx, "GET", u, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", offset, offset+length-1))
+	if cookie != "" {
+		req.AddCookie(&http.Cookie{Name: media.CookieName, Value: cookie})
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != status || status == 206 && int64(len(body)) != length {
+		t.Fatalf("GET %s range %d@%d = %d (%d bytes), want %d", u, length, offset, res.StatusCode, len(body), status)
 	}
 }
 
