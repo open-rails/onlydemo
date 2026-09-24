@@ -190,7 +190,7 @@ function paySource(
     throw new Error("The offer changed. Reload the page before paying.");
   const generation = sessionKey();
   const scope = `pay:${target.kind}:${buyer}:${target.id}:${target.offer.price_id}`;
-  const rails = checkoutRails(document.options, document.psps);
+  const rails = checkoutRails(document.options);
   const path =
     target.kind === "post"
       ? `/api/v1/posts/${target.id}/checkout`

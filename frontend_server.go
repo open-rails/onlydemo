@@ -100,20 +100,7 @@ func checkoutOptions(b *billingService) fiber.Handler {
 		if err != nil {
 			return checkoutError(c, err)
 		}
-		config, err := b.client.GetCheckoutConfig(c.Context())
-		if err != nil {
-			return billingUnavailable(c)
-		}
-		psps := []openrails.CheckoutPSPConfig{}
-		for _, psp := range config.PSPs {
-			for _, option := range options {
-				if option.PSPID == psp.PSPID {
-					psps = append(psps, psp)
-					break
-				}
-			}
-		}
 		c.Set("Cache-Control", "no-store")
-		return c.JSON(fiber.Map{"plan": plan, "options": options, "psps": psps, "price_id": price.ID, "product_id": product.ID})
+		return c.JSON(fiber.Map{"plan": plan, "options": options, "price_id": price.ID, "product_id": product.ID})
 	}
 }

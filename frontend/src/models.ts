@@ -100,16 +100,10 @@ export interface PaymentMethod {
   };
   health?: { active: boolean };
 }
-export interface ProviderOption {
-  selector: string;
-  psp_id: string;
-  rail: string;
-  mode: string;
-}
 export interface PaymentOptionsDocument {
   plan: import("@openrails/billing-ui").CheckoutPlan;
-  options: ProviderOption[];
-  psps: PspConfig[];
+  /** OpenRails' advertised checkout options, passed through (openrails#1078). */
+  options: import("@openrails/billing-ui").CheckoutRailOffer[];
   price_id: string;
   product_id: string;
 }
