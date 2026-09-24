@@ -1,46 +1,10 @@
-import { createAuthClient, readAuthKitError } from "@openrails/auth-ui/client";
+import { createAuthClient } from "@openrails/auth-ui/client";
 import { createBillingClient } from "@openrails/billing-ui/client";
-import { sessionIdentity } from "@openrails/auth-ui/react";
+import { sessionIdentity, sessionUser } from "@openrails/auth-ui/react";
 
-export type UnprovenContact = { identifier: string; channel: string };
-type ProveContact = (contact: UnprovenContact) => Promise<boolean>;
-let proveContact: ProveContact | null = null;
-export function onUnprovenContact(handler: ProveContact) {
-  proveContact = handler;
-  return () => {
-    if (proveContact === handler) proveContact = null;
-  };
-}
-
-// AuthKit refuses new sign-in methods (2FA, passkeys, providers, wallets)
-// while no address is proven. Ask the user to prove it, then retry once.
-async function authkitFetch(input: RequestInfo | URL, init?: RequestInit) {
-  const response = await fetch(input, init);
-  if (response.status !== 403 || !proveContact || input instanceof Request)
-    return response;
-  const error = await readAuthKitError(response.clone()).catch(() => null);
-  const contact = error?.metadata;
-  if (
-    error?.code !== "verification_required" ||
-    contact?.reason !== "contact_unproven" ||
-    typeof contact.identifier !== "string"
-  )
-    return response;
-  const proven = await proveContact({
-    identifier: contact.identifier,
-    channel: String(contact.channel ?? "email"),
-  });
-  if (!proven) return response;
-  const headers = new Headers(init?.headers);
-  const token = auth.getAccessToken();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-  return fetch(input, { ...init, headers });
-}
-
-export const auth = createAuthClient({
-  baseUrl: "/auth/v1",
-  fetch: authkitFetch,
-});
+// auth-ui owns the session: cookie restore, the signed-in hint, tab sync and
+// AuthKit's contact-proof refusals (ContactProofDialog in auth.tsx).
+export const auth = createAuthClient({ baseUrl: "/auth/v1" });
 export const billing = createBillingClient({
   baseUrl: "/billing/v1",
   fetch: auth.authFetch,
@@ -96,7 +60,10 @@ export async function request<T>(
   authenticated = true,
   inspectHeaders?: (headers: Headers) => void,
 ): Promise<T> {
-  const expected = sessionKey();
+  // A request made while the session restores carries the restored session.
+  if (authenticated) await auth.ready();
+  const signedInAs = () => sessionUser(auth.getSnapshot());
+  const before = signedInAs();
   const headers = new Headers(init.headers);
   if (init.body && !headers.has("Content-Type"))
     headers.set("Content-Type", "application/json");
@@ -104,7 +71,10 @@ export async function request<T>(
     ? await auth.authFetch(path, { ...init, headers })
     : await fetch(path, { ...init, headers });
   const body = await readResponse<T>(response);
-  if (authenticated && sessionKey() !== expected)
+  // Only a different signed-in user invalidates the answer: signing out, a
+  // failed restore or a same-user session rotation does not.
+  const after = signedInAs();
+  if (authenticated && before && after && before !== after)
     throw new APIError(
       "Your account changed while this request was running. Review its status before trying again.",
       409,

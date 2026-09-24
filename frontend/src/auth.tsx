@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   AuthUiProvider,
+  ContactProofDialog,
   LoginForm,
   SignInDialog,
   StepUpProvider,
@@ -19,12 +20,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { AuthSession } from "@openrails/auth-ui/client";
 import { auth } from "./api";
 import { BillingHost } from "./billing";
-import { Loading } from "./components/states";
 import { SignInContext, type SignInMode } from "./session";
-import { ContactVerificationHost } from "./verify";
 
 // AuthKit here soft-deletes: accounts are restorable for 30 days.
 const messages = {
@@ -40,18 +38,13 @@ const messages = {
   },
 };
 
-const userOf = (session: AuthSession) =>
-  session.status === "authenticated" ? session.userId : null;
-
 export function AuthHost({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   return (
     <AuthProvider
       client={auth}
-      onSessionChange={(next, previous) => {
-        // A same-user session rotation (e.g. proving an address) keeps data.
-        if (userOf(next) !== userOf(previous)) void queryClient.resetQueries();
-      }}
+      // Not on a same-user session rotation (e.g. proving an address).
+      onUserChange={() => void queryClient.resetQueries()}
     >
       <AuthUiProvider appearance={{ theme: "inherit" }} messages={messages}>
         <StepUpProvider>
@@ -65,17 +58,12 @@ export function AuthHost({ children }: { children: ReactNode }) {
 }
 
 function SignInHost({ children }: { children: ReactNode }) {
-  const session = useSession();
   const navigate = useNavigate();
   const location = useLocation();
   const [mode, setMode] = useState<SignInMode | null>(null);
   return (
     <SignInContext.Provider value={setMode}>
-      {session.status === "loading" ? (
-        <Loading label="Loading your account…" />
-      ) : (
-        children
-      )}
+      {children}
       <SignInDialog
         open={!!mode}
         onOpenChange={(open) => {
@@ -87,7 +75,15 @@ function SignInHost({ children }: { children: ReactNode }) {
         onSignedIn={() => setMode(null)}
       />
       <SessionContinuation />
-      <ContactVerificationHost />
+      <ContactProofDialog
+        description={
+          <>
+            New sign-in methods need a verified address. We’ll send a code,
+            then finish what you started. Sandbox: OnlyDemo sends no email;
+            the code is in the server log.
+          </>
+        }
+      />
     </SignInContext.Provider>
   );
 }
