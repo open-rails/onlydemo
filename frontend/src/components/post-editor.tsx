@@ -29,6 +29,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { FormError } from "./states";
+import { MemberStar } from "./policy-badge";
 
 const policies: Array<{ value: AccessPolicy; title: string; detail: string }> =
   [
@@ -205,7 +206,12 @@ function EditorForm({
               <FieldLabel htmlFor={`policy-${choice.value}`} key={choice.value}>
                 <Field orientation="horizontal">
                   <FieldContent>
-                    <FieldTitle>{choice.title}</FieldTitle>
+                    <FieldTitle>
+                      {membershipPolicies.includes(choice.value) && (
+                        <MemberStar className="size-3.5 text-amber-500 dark:text-amber-300" />
+                      )}
+                      {choice.title}
+                    </FieldTitle>
                     <FieldDescription>{choice.detail}</FieldDescription>
                   </FieldContent>
                   <RadioGroupItem

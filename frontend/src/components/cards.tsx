@@ -12,6 +12,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { money, date, duration } from "../format";
 import { Badge } from "@/components/ui/badge";
+import { PolicyBadge } from "./policy-badge";
 import { Button } from "@/components/ui/button";
 import {
   policyLabels,
@@ -96,7 +97,10 @@ export function PostCard({
             {handle && <small>@{handle}</small>}
           </span>
         </Link>
-        <span className="feed-date">{date(post.created_at)}</span>
+        <span className="feed-date">
+          <PolicyBadge policy={policy} offer={price} />{" "}
+          {date(post.created_at)}
+        </span>
       </header>
       <div className="feed-text">
         <h3>

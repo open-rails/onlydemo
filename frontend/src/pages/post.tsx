@@ -29,6 +29,7 @@ import {
   Wallet01Icon,
 } from "@hugeicons/core-free-icons";
 import { Badge } from "@/components/ui/badge";
+import { PolicyBadge } from "../components/policy-badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -151,6 +152,7 @@ export function PostPage() {
               </span>
             </Link>
             <span className="feed-date">
+              <PolicyBadge policy={policy} offer={offer} />{" "}
               {item.purchased && (
                 <Badge className="bg-success/10 text-success">Purchased</Badge>
               )}{" "}

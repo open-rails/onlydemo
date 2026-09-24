@@ -204,8 +204,9 @@ func (api *postAPI) list(c fiber.Ctx) error {
 		posts = posts[:limit]
 		c.Set("X-Next-Cursor", strconv.FormatInt(posts[len(posts)-1].ID, 10))
 	}
-	// Feed access is one bounded grant lookup; offer discovery is only on detail.
-	if err = api.decorate(c, posts, false); err != nil {
+	// Feed access is one bounded grant lookup; paid posts carry their offers
+	// so cards can show prices.
+	if err = api.decorate(c, posts, true); err != nil {
 		return billingUnavailable(c)
 	}
 	c.Set("Cache-Control", "no-store")
