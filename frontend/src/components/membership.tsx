@@ -87,6 +87,9 @@ export function MembershipDialog({
           </DialogDescription>
         </DialogHeader>
         {open && (
+          channel.membership.free ? (
+            <FreeJoin channel={channel} onClose={onClose} />
+          ) : (
           <AccountBillingScope>
             <MembershipFlow
               key={`${auth.user?.id}:${sessionKey()}:${channel.id}`}
@@ -94,6 +97,7 @@ export function MembershipDialog({
               onClose={onClose}
             />
           </AccountBillingScope>
+          )
         )}
       </DialogContent>
     </Dialog>
@@ -108,7 +112,7 @@ function MembershipFlow({
 }) {
   const auth = useAuth();
   const client = useQueryClient();
-  const offers = channel.offers.filter((offer) => offer.auto_renew);
+  const offers = channel.membership.offer ? [channel.membership.offer] : [];
   const [price, setPrice] = useState(offers[0]?.price_id || "");
   const [method, setMethod] = useState("");
   const [providerID, setProviderID] = useState("");
@@ -370,6 +374,47 @@ function MembershipFlow({
           This channel does not currently offer a membership.
         </p>
       )}
+    </div>
+  );
+}
+function FreeJoin({
+  channel,
+  onClose,
+}: {
+  channel: Channel;
+  onClose: () => void;
+}) {
+  const auth = useAuth();
+  const client = useQueryClient();
+  const join = useMutation({
+    mutationFn: () =>
+      request(`/api/v1/channels/${channel.id}/join`, { method: "POST" }),
+    onSuccess: async () => {
+      await client.invalidateQueries();
+      onClose();
+    },
+  });
+  if (!auth.user)
+    return (
+      <Button
+        onClick={() => {
+          onClose();
+          auth.openLogin();
+        }}
+      >
+        Sign in to join
+      </Button>
+    );
+  if (channel.membership.status !== "open")
+    return <p className="muted">Membership is closed to new members.</p>;
+  return (
+    <div className="flex flex-col gap-4">
+      <p>This membership is free. No card is needed.</p>
+      <FormError>{join.error?.message}</FormError>
+      <Button disabled={join.isPending} onClick={() => join.mutate()}>
+        {join.isPending && <Spinner data-icon="inline-start" />}
+        Join free
+      </Button>
     </div>
   );
 }

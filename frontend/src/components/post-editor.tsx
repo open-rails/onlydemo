@@ -40,7 +40,7 @@ const policies: Array<{ value: AccessPolicy; title: string; detail: string }> =
     {
       value: "membership",
       title: "Included with membership",
-      detail: "Current and future members get access while subscribed.",
+      detail: "Current and future members get access while they are members.",
     },
     {
       value: "members_ppv",
@@ -53,13 +53,16 @@ const policies: Array<{ value: AccessPolicy; title: string; detail: string }> =
       detail: "A one-time purchase grants permanent access.",
     },
   ];
+const membershipPolicies: AccessPolicy[] = ["membership", "members_ppv"];
 export function PostEditor({
   channelID,
+  hasMembership,
   post,
   open,
   onClose,
 }: {
   channelID: string;
+  hasMembership: boolean;
   post?: Post;
   open: boolean;
   onClose: () => void;
@@ -83,6 +86,7 @@ export function PostEditor({
         <EditorForm
           key={post?.id || "new"}
           channelID={channelID}
+          hasMembership={hasMembership}
           post={post}
           onClose={onClose}
         />
@@ -93,10 +97,12 @@ export function PostEditor({
 }
 function EditorForm({
   channelID,
+  hasMembership,
   post,
   onClose,
 }: {
   channelID: string;
+  hasMembership: boolean;
   post?: Post;
   onClose: () => void;
 }) {
@@ -188,7 +194,14 @@ function EditorForm({
             value={policy}
             onValueChange={(value) => setPolicy(value as AccessPolicy)}
           >
-            {policies.map((choice) => (
+            {policies
+              .filter(
+                (choice) =>
+                  hasMembership ||
+                  choice.value === policy ||
+                  !membershipPolicies.includes(choice.value),
+              )
+              .map((choice) => (
               <FieldLabel htmlFor={`policy-${choice.value}`} key={choice.value}>
                 <Field orientation="horizontal">
                   <FieldContent>
@@ -201,8 +214,14 @@ function EditorForm({
                   />
                 </Field>
               </FieldLabel>
-            ))}
+              ))}
           </RadioGroup>
+          {!hasMembership && (
+            <FieldDescription>
+              Create a membership in channel settings to publish posts for
+              members.
+            </FieldDescription>
+          )}
         </FieldSet>
         {["ppv", "members_ppv"].includes(policy) && (
           <Field>

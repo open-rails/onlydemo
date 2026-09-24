@@ -15,6 +15,7 @@ const seedPassword = "OnlyDemo-seed-42!"
 
 type seedPost struct{ slug, title, body, policy, price string }
 
+// membership is "" for none, "free", or a paid price in micro-units.
 type seedCreator struct {
 	username, channel, name, membership string
 	posts                               []seedPost
@@ -36,6 +37,15 @@ var seedCreators = []seedCreator{
 		{"kai-12-week-plan", "12-week strength plan", "Progressive overload plan with three full-body sessions each week.", "membership", ""},
 		{"kai-nutrition-guide", "Nutrition guide", "Macros, meal timing and a two-week sample menu.", "ppv", "9990000"},
 	}},
+	{"inksketch", "inksketch", "Ink & Sketch", "free", []seedPost{
+		{"ink-hello", "Sketchbook tour", "A flip through this year's sketchbook, page by page.", "public", ""},
+		{"ink-line-weight", "Line weight exercises", "Six drills for confident, varied line weight. Free for members.", "membership", ""},
+		{"ink-brush-pack", "Brush pack and process", "My custom brush pack with a full process write-up.", "members_ppv", "2990000"},
+	}},
+	{"cityhiker", "cityhiker", "City Hiker", "", []seedPost{
+		{"hiker-routes", "Five urban walking routes", "Five routes through the old town, each under two hours.", "public", ""},
+		{"hiker-guidebook", "The complete city guidebook", "Every route, café and viewpoint I've mapped, in one guide.", "ppv", "5990000"},
+	}},
 }
 
 // seed populates display data through the running server's public API, so
@@ -56,8 +66,14 @@ func seed(ctx context.Context, base string, out io.Writer) error {
 		if err != nil {
 			return fmt.Errorf("%s channel: %w", creator.channel, err)
 		}
-		if err = client.call(ctx, "PUT", "/api/v1/channels/"+channelID+"/membership", token, map[string]any{"unit_amount": creator.membership, "currency": "USD"}, nil); err != nil {
-			return fmt.Errorf("%s membership: %w", creator.channel, err)
+		if creator.membership != "" {
+			var price any
+			if creator.membership != "free" {
+				price = map[string]any{"unit_amount": creator.membership, "currency": "USD"}
+			}
+			if err = client.call(ctx, "PUT", "/api/v1/channels/"+channelID+"/membership", token, map[string]any{"enabled": true, "price": price}, nil); err != nil {
+				return fmt.Errorf("%s membership: %w", creator.channel, err)
+			}
 		}
 		var existing []struct{ Slug string }
 		if err = client.call(ctx, "GET", "/api/v1/posts?limit=50&channel_id="+channelID, token, nil, &existing); err != nil {

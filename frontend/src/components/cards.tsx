@@ -184,8 +184,8 @@ export function ChannelCard({ channel }: { channel: Channel }) {
         <div className="creator-card-footer">
           {channel.can_manage || channel.can_edit ? (
             <Badge>{channel.can_manage ? "Owner" : "Editor"}</Badge>
-          ) : channel.has_membership ? (
-            <Badge className="bg-success/10 text-success">Subscribed</Badge>
+          ) : channel.membership.member ? (
+            <Badge className="bg-success/10 text-success">Member</Badge>
           ) : (
             channel.post_count != null && (
               <span className="muted">
@@ -199,9 +199,13 @@ export function ChannelCard({ channel }: { channel: Channel }) {
             nativeButton={false}
             render={<Link to={`/channels/${channel.slug}`} />}
           >
-            {offer && !channel.has_membership
-              ? `${money(offer.unit_amount, offer.currency)} ${duration(offer.access_duration_hours).replace("every ", "/ ")}`
-              : "View profile"}
+            {channel.membership.member
+              ? "View profile"
+              : offer
+                ? `${money(offer.unit_amount, offer.currency)} ${duration(offer.access_duration_hours).replace("every ", "/ ")}`
+                : channel.membership.status === "open" && channel.membership.free
+                  ? "Join free"
+                  : "View profile"}
           </Button>
         </div>
       </div>

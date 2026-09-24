@@ -192,6 +192,7 @@ func (api *channelAPI) RiverJobs() riverkit.Contribution {
 			cfg.Workers = river.NewWorkers()
 		}
 		river.AddWorker(cfg.Workers, &channelDeleteWorker{api: api})
+		river.AddWorker(cfg.Workers, &membershipSyncWorker{api: api})
 		if cfg.Queues == nil {
 			cfg.Queues = map[string]river.QueueConfig{}
 		}

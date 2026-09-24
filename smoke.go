@@ -219,6 +219,19 @@ func smoke() error {
 	if acceptedReplay["id"] != checkout["id"] {
 		return fmt.Errorf("reprice changed accepted checkout")
 	}
+	gatedPost := map[string]any{"channel_id": ch["id"], "slug": "members-extra", "title": "Members buy separately", "body": "Extra permanent purchase", "access_policy": "members_ppv", "price": map[string]any{"unit_amount": "4990000", "currency": "USD"}}
+	if _, err = owner.call("POST", "/api/v1/posts", ownerToken, gatedPost, "", 400); err != nil {
+		return fmt.Errorf("members-only post without a membership: %w", err)
+	}
+	channelID := ch["id"].(string)
+	membershipPath := "/api/v1/channels/" + channelID + "/membership"
+	if _, err = owner.call("PUT", membershipPath, ownerToken, map[string]any{"enabled": true, "price": map[string]any{"unit_amount": "990000", "currency": "USD"}}, "", 400); err != nil {
+		return fmt.Errorf("membership below 1.00: %w", err)
+	}
+	membership, err := owner.call("PUT", membershipPath, ownerToken, map[string]any{"enabled": true, "price": map[string]any{"unit_amount": "9990000", "currency": "USD"}}, "", 200)
+	if err != nil {
+		return err
+	}
 	gated, err := owner.call("POST", "/api/v1/posts", ownerToken, map[string]any{"channel_id": ch["id"], "slug": "members-extra", "title": "Members buy separately", "body": "Extra permanent purchase", "access_policy": "members_ppv", "price": map[string]any{"unit_amount": "4990000", "currency": "USD"}}, "", 201)
 	if err != nil {
 		return err
@@ -234,16 +247,11 @@ func smoke() error {
 	if _, err = buyer.call("POST", "/billing/v1/me/checkout", buyerToken, map[string]any{"price_id": gatedPrice}, "bypass-refusal", 404); err != nil {
 		return err
 	}
-	channelID := ch["id"].(string)
-	membership, err := owner.call("PUT", "/api/v1/channels/"+channelID+"/membership", ownerToken, map[string]any{"unit_amount": "9990000", "currency": "USD"}, "", 200)
-	if err != nil {
-		return err
-	}
-	membershipOffers := membership["offers"].([]any)
-	if len(membershipOffers) == 0 {
+	membershipOffer, _ := membership["membership"].(map[string]any)["offer"].(map[string]any)
+	if membershipOffer == nil {
 		return fmt.Errorf("membership offer missing")
 	}
-	membershipPrice := membershipOffers[0].(map[string]any)["price_id"].(string)
+	membershipPrice := membershipOffer["price_id"].(string)
 	rails, err := billing.client.ListCheckoutRailOptions(ctx, membershipPrice)
 	if err != nil || len(rails) == 0 {
 		return fmt.Errorf("membership rails unavailable: %w", err)
@@ -307,6 +315,9 @@ func smoke() error {
 	}
 	if gatedRead["can_read"] != false {
 		return fmt.Errorf("membership incorrectly granted separately priced post")
+	}
+	if err = smokeMembershipSettings(owner, ownerToken, buyer, buyerToken, smokePeer(base, "127.0.0.5"), channelID, membershipPrice, includedPath); err != nil {
+		return fmt.Errorf("membership settings: %w", err)
 	}
 	user, err := auth.client.GetUserByUsername(ctx, "smokebuyer")
 	if err != nil {
@@ -433,7 +444,7 @@ func smoke() error {
 	if _, err = owner.call("DELETE", "/auth/v1/user", ownerToken, map[string]any{"password": "Manual-smoke-password-42!"}, "", 204); err != nil {
 		return fmt.Errorf("retired channel still blocked owner account deletion: %w", err)
 	}
-	fmt.Println("Manual smoke passed: native auth, resource offers/reprice replay, permanent paid access, members-only purchase refusal, native saved-card membership/quote/confirmation/cancellation, future included posts, separate publishing roles, post soft deletion with archived product, retained channel soft deletion and owner account deletion. Zero real provider requests.")
+	fmt.Println("Manual smoke passed: native auth, resource offers/reprice replay, permanent paid access, members-only purchase refusal, native saved-card membership/quote/confirmation/cancellation, membership close/free/join/leave/paid transitions, future included posts, separate publishing roles, post soft deletion with archived product, retained channel soft deletion and owner account deletion. Zero real provider requests.")
 	return nil
 }
 
@@ -442,6 +453,95 @@ var stripeRail = map[string]string{"rail": "stripe"}
 type smokeClient struct {
 	base   string
 	client *http.Client
+}
+
+// smokeMembershipSettings walks close, paid-to-free, free join/leave and
+// free-to-paid on a channel whose buyer holds a paid subscription.
+func smokeMembershipSettings(owner smokeClient, ownerToken string, buyer smokeClient, buyerToken string, joiner smokeClient, channelID, paidPrice, includedPath string) error {
+	settings := "/api/v1/channels/" + channelID + "/membership"
+	readable := func(peer smokeClient, token, path string) (bool, error) {
+		post, err := peer.call("GET", path, token, nil, "", 200)
+		return post["can_read"] == true, err
+	}
+	membership := func(peer smokeClient, token string) (map[string]any, error) {
+		view, err := peer.call("GET", "/api/v1/channels/"+channelID, token, nil, "", 200)
+		if err != nil {
+			return nil, err
+		}
+		return view["membership"].(map[string]any), nil
+	}
+	joinerToken, err := joiner.register("smokejoiner")
+	if err != nil {
+		return err
+	}
+	if _, err = owner.call("PUT", settings, ownerToken, map[string]any{"enabled": false, "price": nil}, "", 200); err != nil {
+		return err
+	}
+	closedPost, err := owner.call("POST", "/api/v1/posts", ownerToken, map[string]any{"channel_id": channelID, "slug": "after-close", "title": "For existing members", "body": "Still published", "access_policy": "membership"}, "", 201)
+	if err != nil {
+		return err
+	}
+	closedPath := fmt.Sprintf("/api/v1/posts/%.0f", closedPost["id"].(float64))
+	for _, path := range []string{includedPath, closedPath} {
+		if ok, err := readable(buyer, buyerToken, path); err != nil || !ok {
+			return fmt.Errorf("closing removed a member's access to %s: %v", path, err)
+		}
+	}
+	if _, err = joiner.call("POST", "/api/v1/channels/"+channelID+"/subscribe", joinerToken, map[string]any{"price_id": paidPrice, "payment": map[string]any{"rail": "stripe"}}, "closed-join", 409); err != nil {
+		return fmt.Errorf("closed membership sold: %w", err)
+	}
+	if _, err = joiner.call("POST", "/api/v1/channels/"+channelID+"/join", joinerToken, nil, "", 409); err != nil {
+		return fmt.Errorf("closed paid membership joined free: %w", err)
+	}
+	if _, err = owner.call("PUT", settings, ownerToken, map[string]any{"enabled": true, "price": nil}, "", 200); err != nil {
+		return err
+	}
+	view, err := membership(buyer, buyerToken)
+	if err != nil {
+		return err
+	}
+	if view["sync"] != "active" || view["member"] != true || view["free_member"] != true {
+		return fmt.Errorf("paid member was not moved to a free grant: %v", view)
+	}
+	subscriptions, err := buyer.call("GET", "/api/v1/me", buyerToken, nil, "", 200)
+	if err != nil {
+		return err
+	}
+	for _, raw := range subscriptions["subscriptions"].([]any) {
+		sub := raw.(map[string]any)
+		if sub["status"] != "cancelled" && sub["cancel_scheduled"] != true {
+			return fmt.Errorf("paid subscription still renews after going free: %v", sub["status"])
+		}
+	}
+	if ok, err := readable(joiner, joinerToken, includedPath); err != nil || ok {
+		return fmt.Errorf("non-member read a membership post: %v", err)
+	}
+	if _, err = joiner.call("POST", "/api/v1/channels/"+channelID+"/join", joinerToken, nil, "", 200); err != nil {
+		return err
+	}
+	if ok, err := readable(joiner, joinerToken, includedPath); err != nil || !ok {
+		return fmt.Errorf("free member cannot read: %v", err)
+	}
+	if _, err = joiner.call("POST", "/api/v1/channels/"+channelID+"/leave", joinerToken, nil, "", 200); err != nil {
+		return err
+	}
+	if ok, err := readable(joiner, joinerToken, includedPath); err != nil || ok {
+		return fmt.Errorf("left member still reads: %v", err)
+	}
+	if _, err = joiner.call("POST", "/api/v1/channels/"+channelID+"/join", joinerToken, nil, "", 200); err != nil {
+		return err
+	}
+	if _, err = owner.call("PUT", settings, ownerToken, map[string]any{"enabled": true, "price": map[string]any{"unit_amount": "1000000", "currency": "USD"}}, "", 200); err != nil {
+		return err
+	}
+	view, err = membership(joiner, joinerToken)
+	if err != nil {
+		return err
+	}
+	if view["free"] != false || view["offer"] == nil || view["member"] != true {
+		return fmt.Errorf("free member lost access when membership became paid: %v", view)
+	}
+	return nil
 }
 
 func smokePeer(base, address string) smokeClient {

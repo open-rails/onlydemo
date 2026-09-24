@@ -53,7 +53,7 @@ import {
 import { PostEditor } from "../components/post-editor";
 import { PostGallery, PostMediaEditor } from "../components/post-media";
 import { Avatar } from "../components/cards";
-import { hue } from "../channels";
+import { canJoin, hue } from "../channels";
 import { MembershipDialog } from "../components/membership";
 const PurchaseCheckout = lazy(() =>
   import("../components/purchase-checkout").then((module) => ({
@@ -114,7 +114,8 @@ export function PostPage() {
   const policy = item.access_policy;
   const mustJoin =
     policy === "membership" ||
-    (policy === "members_ppv" && !channel.data?.has_membership);
+    (policy === "members_ppv" && !channel.data?.membership.member);
+  const joinable = canJoin(channel.data);
   const canEdit = item.can_edit || channel.data?.can_edit;
   const pricePending = item.offer_status === "pending" && !mustJoin;
   const creator = channel.data?.name || item.channel_name || "Creator";
@@ -202,13 +203,17 @@ export function PostPage() {
                   <Button size="lg" className="w-full" disabled>
                     Price pending
                   </Button>
+                ) : mustJoin && channel.data && !joinable ? (
+                  <p>Membership is closed to new members.</p>
                 ) : offer || mustJoin ? (
                   <Button size="lg" className="w-full" onClick={action}>
                     <HugeiconsIcon icon={SquareLock02Icon} data-icon="inline-start" />
                     {!auth.user
                       ? "Sign in to unlock"
                       : mustJoin
-                        ? "Subscribe to unlock"
+                        ? channel.data?.membership.free
+                          ? "Join free to unlock"
+                          : "Subscribe to unlock"
                         : `Unlock for ${money(offer.unit_amount, offer.currency)}`}
                   </Button>
                 ) : (
@@ -253,14 +258,14 @@ export function PostPage() {
             <Button
               size="lg"
               className="w-full"
-              disabled={
-                mustJoin &&
-                (!channel.data ||
-                  !channel.data.offers?.some((value) => value.auto_renew))
-              }
+              disabled={mustJoin && !joinable}
               onClick={action}
             >
-              {mustJoin ? "View subscription" : "Review purchase"}
+              {mustJoin
+                ? joinable
+                  ? "View membership"
+                  : "Membership closed"
+                : "Review purchase"}
             </Button>
           )}
           <div className="purchase-note">
@@ -323,6 +328,7 @@ export function PostPage() {
       <PostEditor
         post={item}
         channelID={item.channel_id}
+        hasMembership={channel.data?.membership.status !== "none"}
         open={editor}
         onClose={() => setEditor(false)}
       />

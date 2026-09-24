@@ -77,6 +77,7 @@ func TestMediaEndToEnd(t *testing.T) {
 	ch := owner.call("POST", "/api/v1/channels", map[string]any{"slug": "studio", "name": "Studio"}, "", 201)
 	channelID := ch["id"].(string)
 	owner.call("POST", "/api/v1/channels/"+channelID+"/members", map[string]any{"username": "editor", "role": "editor"}, "", 201)
+	owner.call("PUT", "/api/v1/channels/"+channelID+"/membership", map[string]any{"enabled": true, "price": nil}, "", 200)
 
 	price := map[string]any{"unit_amount": "4990000", "currency": "USD"}
 	posts := map[string]int64{}

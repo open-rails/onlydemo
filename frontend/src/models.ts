@@ -21,11 +21,20 @@ export interface Channel {
   role?: "owner" | "editor";
   can_manage: boolean;
   can_edit: boolean;
-  has_membership: boolean;
   avatar_url?: string;
   banner_url?: string;
-  offers: Offer[];
+  membership: ChannelMembership;
   deleted_at?: string | null;
+}
+// A channel optionally sells one membership: "none" until created, then
+// "open" (free or paid) or "closed" to new joins. Existing members keep access.
+export interface ChannelMembership {
+  status: "none" | "open" | "closed";
+  free: boolean;
+  sync: "none" | "pending" | "active" | "failed";
+  offer: Offer | null;
+  member: boolean;
+  free_member: boolean;
 }
 export interface Post {
   id: number;

@@ -29,4 +29,12 @@ export function hue(seed: string | number) {
   return h;
 }
 export const membershipOffer = (channel?: Channel) =>
-  channel?.offers?.find((offer) => offer.auto_renew);
+  channel?.membership.status === "open" && !channel.membership.free
+    ? channel.membership.offer || undefined
+    : undefined;
+// Whether a non-member can join now: a free or priced open membership.
+export const canJoin = (channel?: Channel) =>
+  !!channel &&
+  !channel.membership.member &&
+  channel.membership.status === "open" &&
+  (channel.membership.free || !!channel.membership.offer);

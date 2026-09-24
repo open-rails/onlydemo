@@ -58,9 +58,12 @@ func (b *billingService) offers(ctx context.Context, key string, recurring bool)
 	return page.Data, nil
 }
 
-func checkPrice(price *offerPrice) (string, error) {
-	if price == nil || price.UnitAmount < 500000 || price.UnitAmount > 999999990000 {
-		return "", errors.New("price must be between 0.50 and 999999.99 in native currency")
+// Amounts are in micro-units; posts start at 0.50 and memberships at 1.00.
+const minPostPrice int64 = 500_000
+
+func checkPrice(price *offerPrice, min int64) (string, error) {
+	if price == nil || price.UnitAmount < min || price.UnitAmount > 999999990000 {
+		return "", fmt.Errorf("price must be between %d.%02d and 999999.99 in native currency", min/1_000_000, min%1_000_000/10_000)
 	}
 	currency := strings.ToUpper(strings.TrimSpace(price.Currency))
 	if currency == "" {
@@ -81,7 +84,11 @@ func (b *billingService) setOffer(ctx context.Context, channelID, resource, titl
 	}
 	product := openrails.CatalogApplyProduct{Key: resource, Archived: openrails.CatalogValue(archived)}
 	if !archived {
-		currency, err := checkPrice(price)
+		floor := minPostPrice
+		if recurring {
+			floor = minMembershipPrice
+		}
+		currency, err := checkPrice(price, floor)
 		if err != nil {
 			return err
 		}

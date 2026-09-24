@@ -41,10 +41,16 @@ import {
 } from "@/components/ui/dialog";
 import {
   Field,
+  FieldContent,
   FieldDescription,
   FieldGroup,
   FieldLabel,
+  FieldLegend,
+  FieldSet,
+  FieldTitle,
 } from "@/components/ui/field";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -101,7 +107,6 @@ export function ChannelPage() {
       />
     );
   const current = channel.data;
-  const offer = membershipOffer(current);
   const target = { kind: "channel", id: current.id };
   const postCount = current.post_count ?? posts.data?.length ?? 0;
   return (
@@ -179,35 +184,14 @@ export function ChannelPage() {
           {current.description && (
             <p className="profile-bio">{current.description}</p>
           )}
-          {!current.can_edit && (
-            <div className="subscribe-box">
-              <span className="subscribe-label">Subscription</span>
-              {current.has_membership ? (
-                <Button
-                  variant="secondary"
-                  size="lg"
-                  className="w-full rounded-full text-success"
-                  disabled
-                >
-                  <HugeiconsIcon icon={Tick02Icon} data-icon="inline-start" />
-                  Subscribed
-                </Button>
-              ) : offer ? (
-                <Button
-                  size="lg"
-                  className="h-12 w-full justify-between rounded-full px-6 uppercase"
-                  onClick={() => setMembership(true)}
-                >
-                  <span>Subscribe</span>
-                  <span>
-                    {money(offer.unit_amount, offer.currency)}{" "}
-                    {duration(offer.access_duration_hours).replace("every ", "/ ")}
-                  </span>
-                </Button>
-              ) : (
-                <p className="muted">This creator has no subscription yet.</p>
-              )}
-            </div>
+          {!current.can_edit && current.membership.status !== "none" && (
+            <MembershipBox
+              channel={current}
+              onSubscribe={() => setMembership(true)}
+              onChanged={() =>
+                void client.invalidateQueries({ queryKey: ["channel", slug] })
+              }
+            />
           )}
         </div>
       </section>
@@ -275,9 +259,9 @@ export function ChannelPage() {
               "A creator on OnlyDemo."}
           </p>
           <p className="muted">
-            Membership includes posts marked “Included with membership” while
-            subscribed. Some posts are sold separately. Every purchased post
-            keeps permanent access, even after membership ends.
+            Members read posts marked “Included with membership”. Some posts
+            are sold separately. Every purchased post keeps permanent access,
+            even after membership ends.
           </p>
           <p className="muted">
             Channel owners and editors manage publication. Paying readers do not
@@ -298,6 +282,7 @@ export function ChannelPage() {
       <PostEditor
         open={editor}
         channelID={id}
+        hasMembership={current.membership.status !== "none"}
         onClose={() => setEditor(false)}
       />
       <MembershipDialog
@@ -308,6 +293,235 @@ export function ChannelPage() {
     </>
   );
 }
+function MembershipBox({
+  channel,
+  onSubscribe,
+  onChanged,
+}: {
+  channel: Channel;
+  onSubscribe: () => void;
+  onChanged: () => void;
+}) {
+  const auth = useAuth();
+  const membership = channel.membership;
+  const offer = membershipOffer(channel);
+  const change = useMutation({
+    mutationFn: (action: "join" | "leave") =>
+      request(`/api/v1/channels/${channel.id}/${action}`, { method: "POST" }),
+    onSuccess: onChanged,
+  });
+  const pill = "h-12 w-full rounded-full px-6";
+  return (
+    <div className="subscribe-box">
+      <span className="subscribe-label">Membership</span>
+      {membership.member ? (
+        <>
+          <Button variant="secondary" size="lg" className={cn(pill, "text-success")} disabled>
+            <HugeiconsIcon icon={Tick02Icon} data-icon="inline-start" />
+            You're a member
+          </Button>
+          {membership.free_member && (
+            <Button
+              variant="link"
+              size="sm"
+              disabled={change.isPending}
+              onClick={() => change.mutate("leave")}
+            >
+              Leave membership
+            </Button>
+          )}
+        </>
+      ) : membership.status === "closed" ? (
+        <Button variant="secondary" size="lg" className={pill} disabled>
+          Membership closed
+        </Button>
+      ) : membership.free ? (
+        <Button
+          size="lg"
+          className={cn(pill, "uppercase")}
+          disabled={change.isPending}
+          onClick={() => (auth.user ? change.mutate("join") : auth.openLogin())}
+        >
+          {change.isPending && <Spinner data-icon="inline-start" />}
+          Join free
+        </Button>
+      ) : offer ? (
+        <Button
+          size="lg"
+          className={cn(pill, "justify-between uppercase")}
+          onClick={onSubscribe}
+        >
+          <span>Subscribe</span>
+          <span>
+            {money(offer.unit_amount, offer.currency)}{" "}
+            {duration(offer.access_duration_hours).replace("every ", "/ ")}
+          </span>
+        </Button>
+      ) : (
+        <Button variant="secondary" size="lg" className={pill} disabled>
+          Price pending
+        </Button>
+      )}
+      <FormError>{change.error?.message}</FormError>
+    </div>
+  );
+}
+function MembershipSettings({
+  channel,
+  onUpdated,
+}: {
+  channel: Channel;
+  onUpdated: () => void;
+}) {
+  const membership = channel.membership;
+  const offer = membershipOffer(channel);
+  const [enabled, setEnabled] = useState(membership.status === "open");
+  const [free, setFree] = useState(
+    membership.status === "none" ? false : membership.free,
+  );
+  const [amount, setAmount] = useState(
+    offer ? (Number(offer.unit_amount) / 1_000_000).toFixed(2) : "",
+  );
+  const [error, setError] = useState("");
+  const save = useMutation({
+    mutationFn: (body: object) =>
+      request(`/api/v1/channels/${channel.id}/membership`, {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: onUpdated,
+  });
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError("");
+    if (!enabled) return save.mutate({ enabled: false, price: null });
+    if (free) return save.mutate({ enabled: true, price: null });
+    try {
+      const unit_amount = micros(amount.trim());
+      if (BigInt(unit_amount) < 1_000_000n)
+        throw new Error("A paid membership costs at least $1.00.");
+      save.mutate({ enabled: true, price: { unit_amount, currency: "USD" } });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Invalid price.");
+    }
+  };
+  const status =
+    membership.status === "none"
+      ? "This channel has no membership. Posts can be free or sold individually."
+      : membership.status === "closed"
+        ? "Closed to new members. Existing members keep access and renew at the price they accepted."
+        : membership.free
+          ? "Open: anyone can join free."
+          : offer
+            ? `Open: ${money(offer.unit_amount, offer.currency)} ${duration(offer.access_duration_hours)}.`
+            : "Open: price pending.";
+  const paidToFree =
+    enabled && free && membership.status !== "none" && !membership.free;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Channel membership</CardTitle>
+        <CardDescription>{status}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={submit}>
+          <FieldGroup>
+            <Field orientation="horizontal">
+              <Switch
+                id="membership-enabled"
+                checked={enabled}
+                onCheckedChange={setEnabled}
+              />
+              <FieldContent>
+                <FieldLabel htmlFor="membership-enabled">
+                  Accept new members
+                </FieldLabel>
+                <FieldDescription>
+                  Turning this off stops new joins. Existing members keep
+                  access and see new membership posts.
+                </FieldDescription>
+              </FieldContent>
+            </Field>
+            {enabled && (
+              <FieldSet>
+                <FieldLegend variant="label">Price</FieldLegend>
+                <RadioGroup
+                  className="grid gap-3 sm:grid-cols-2"
+                  value={free ? "free" : "paid"}
+                  onValueChange={(value) => setFree(value === "free")}
+                >
+                  <FieldLabel htmlFor="membership-free">
+                    <Field orientation="horizontal">
+                      <FieldContent>
+                        <FieldTitle>Free</FieldTitle>
+                        <FieldDescription>Join without a card.</FieldDescription>
+                      </FieldContent>
+                      <RadioGroupItem value="free" id="membership-free" />
+                    </Field>
+                  </FieldLabel>
+                  <FieldLabel htmlFor="membership-paid">
+                    <Field orientation="horizontal">
+                      <FieldContent>
+                        <FieldTitle>Paid</FieldTitle>
+                        <FieldDescription>Renews automatically.</FieldDescription>
+                      </FieldContent>
+                      <RadioGroupItem value="paid" id="membership-paid" />
+                    </Field>
+                  </FieldLabel>
+                </RadioGroup>
+              </FieldSet>
+            )}
+            {enabled && !free && (
+              <Field>
+                <FieldLabel htmlFor="membership-amount">
+                  Price {duration(offer?.access_duration_hours ?? 720)} (USD)
+                </FieldLabel>
+                <Input
+                  id="membership-amount"
+                  required
+                  inputMode="decimal"
+                  pattern="[0-9]+(\.[0-9]{1,2})?"
+                  value={amount}
+                  onChange={(event) => setAmount(event.target.value)}
+                  placeholder="5.00"
+                />
+                <FieldDescription>
+                  Minimum $1.00. New members pay the new price; existing
+                  members keep the price they accepted.
+                </FieldDescription>
+              </Field>
+            )}
+            {paidToFree && (
+              <Alert>
+                <AlertDescription>
+                  Paid members keep access for free; their subscriptions stop
+                  renewing at the end of the current paid period.
+                </AlertDescription>
+              </Alert>
+            )}
+            <FormError>{error || save.error?.message}</FormError>
+            {save.isSuccess && (
+              <Alert role="status">
+                <HugeiconsIcon icon={Tick02Icon} />
+                <AlertDescription>Membership saved.</AlertDescription>
+              </Alert>
+            )}
+            <Button
+              type="submit"
+              className="self-start"
+              disabled={
+                save.isPending || (!enabled && membership.status !== "open")
+              }
+            >
+              {save.isPending && <Spinner data-icon="inline-start" />}
+              {membership.status === "none" ? "Create membership" : "Save membership"}
+            </Button>
+          </FieldGroup>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
 function ChannelSettings({
   channel,
   onUpdated,
@@ -316,79 +530,16 @@ function ChannelSettings({
   onUpdated: () => void;
 }) {
   const navigate = useNavigate();
-  const [error, setError] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [confirmation, setConfirmation] = useState("");
-  const offer = channel.offers.find((item) => item.auto_renew);
-  const save = useMutation({
-    mutationFn: (unit_amount: string) =>
-      request(`/api/v1/channels/${channel.id}/membership`, {
-        method: "PUT",
-        body: JSON.stringify({ unit_amount, currency: "USD" }),
-      }),
-    onSuccess: onUpdated,
-  });
   const remove = useMutation({
     mutationFn: () =>
       request(`/api/v1/channels/${channel.id}`, { method: "DELETE" }),
     onSuccess: () => navigate("/me?tab=channels"),
   });
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setError("");
-    try {
-      save.mutate(
-        micros(String(new FormData(event.currentTarget).get("amount"))),
-      );
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Invalid price.");
-    }
-  };
   return (
     <div className="flex flex-col gap-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>Channel membership</CardTitle>
-          <CardDescription>
-            Set a USD subscription price for a fixed 30-day access period.
-            Included posts grant access to current and future members.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={submit}>
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="membership-amount">
-                  Price every 30 days (USD)
-                </FieldLabel>
-                <Input
-                  id="membership-amount"
-                  name="amount"
-                  required
-                  inputMode="decimal"
-                  defaultValue={
-                    offer
-                      ? (Number(offer.unit_amount) / 1_000_000).toFixed(2)
-                      : ""
-                  }
-                  placeholder="5.00"
-                />
-              </Field>
-              <FormError>{error || save.error?.message}</FormError>
-              {save.isSuccess && (
-                <Alert role="status">
-                  <HugeiconsIcon icon={Tick02Icon} />
-                  <AlertDescription>Membership offer saved.</AlertDescription>
-                </Alert>
-              )}
-              <Button type="submit" className="self-start" disabled={save.isPending}>
-                {save.isPending && <Spinner data-icon="inline-start" />}
-                Save membership offer
-              </Button>
-            </FieldGroup>
-          </form>
-        </CardContent>
-      </Card>
+      <MembershipSettings channel={channel} onUpdated={onUpdated} />
       <Card>
         <CardHeader>
           <CardTitle>Delete channel</CardTitle>

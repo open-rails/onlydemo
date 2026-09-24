@@ -6,7 +6,6 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails"
-	"log"
 	"regexp"
 	"strconv"
 	"strings"
@@ -21,10 +20,9 @@ type channelView struct {
 	Role          string                   `json:"role,omitempty"`
 	CanManage     bool                     `json:"can_manage"`
 	CanEdit       bool                     `json:"can_edit"`
-	HasMembership bool                     `json:"has_membership"`
 	AvatarURL     string                   `json:"avatar_url"`
 	BannerURL     string                   `json:"banner_url"`
-	Offers        []openrails.CatalogOffer `json:"offers"`
+	Membership    channelMembership        `json:"membership"`
 }
 
 func (api *channelAPI) view(c fiber.Ctx, id string, offers bool) (channelView, error) {
@@ -42,7 +40,11 @@ func (api *channelAPI) view(c fiber.Ctx, id string, offers bool) (channelView, e
 	if group.DeletedAt != nil {
 		return channelView{}, authkit.ErrGroupNotFound
 	}
-	v := channelView{ID: id, Slug: group.InstanceSlug, Name: group.DisplayName, Offers: []openrails.CatalogOffer{},
+	state, err := api.membershipState(c.Context(), api.pool, id)
+	if err != nil {
+		return channelView{}, err
+	}
+	v := channelView{ID: id, Slug: group.InstanceSlug, Name: group.DisplayName, Membership: channelMembership{Status: state.Status, Free: state.Free, Sync: state.Sync},
 		AvatarURL: api.media.publicURL(kindChannel, id, "avatar"), BannerURL: api.media.publicURL(kindChannel, id, "banner")}
 	user := viewer(c)
 	if user != "" {
@@ -63,12 +65,25 @@ func (api *channelAPI) view(c fiber.Ctx, id string, offers bool) (channelView, e
 		if e != nil {
 			return v, e
 		}
-		v.HasMembership = access[membershipResource(id)]
+		v.Membership.Member = access[membershipResource(id)]
+		if v.Membership.Member && offers {
+			grants, e := api.billing.freeGrants(c.Context(), user, id)
+			if e != nil {
+				return v, e
+			}
+			v.Membership.FreeMember = len(grants) > 0
+		}
 	}
-	if offers {
-		v.Offers, err = api.billing.offers(c.Context(), membershipResource(id), true)
+	if offers && state.Status == membershipOpen && !state.Free {
+		list, e := api.billing.offers(c.Context(), membershipResource(id), true)
+		if e != nil {
+			return v, e
+		}
+		if len(list) > 0 {
+			v.Membership.Offer = &list[0]
+		}
 	}
-	return v, err
+	return v, nil
 }
 func (api *channelAPI) list(c fiber.Ctx) error {
 	cursor := c.Query("cursor")
@@ -142,44 +157,6 @@ func (api *channelAPI) publicGet(c fiber.Ctx) error {
 		return billingUnavailable(c)
 	}
 	c.Set("Cache-Control", "no-store")
-	return c.JSON(v)
-}
-func (api *channelAPI) membership(c fiber.Ctx) error {
-	if viewer(c) == "" {
-		return clientError(c, 401, "a user access token is required")
-	}
-	id, err := channelID(c.Params("id"))
-	if err != nil {
-		return clientError(c, 400, "invalid channel id")
-	}
-	release, err := api.lock(c.Context(), id)
-	if err != nil {
-		return databaseError(c, err)
-	}
-	defer release()
-	allowed, err := api.allowed(c.Context(), viewer(c), id, "channel:settings:manage")
-	if err != nil {
-		return billingUnavailable(c)
-	}
-	if !allowed {
-		return clientError(c, 404, "channel not found")
-	}
-	var price offerPrice
-	if err = c.Bind().Body(&price); err != nil {
-		return clientError(c, 400, "invalid price")
-	}
-	group, err := api.auth.client.GroupInstanceByID(c.Context(), id)
-	if err != nil {
-		return clientError(c, 404, "channel not found")
-	}
-	if err = api.billing.setOffer(c.Context(), id, membershipResource(id), group.DisplayName+" membership", &price, true, false); err != nil {
-		log.Printf("channel %s membership offer: %v", id, err)
-		return clientError(c, 400, "membership offer could not be saved")
-	}
-	v, err := api.view(c, id, true)
-	if err != nil {
-		return billingUnavailable(c)
-	}
 	return c.JSON(v)
 }
 func (api *channelAPI) members(c fiber.Ctx) error {

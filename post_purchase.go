@@ -147,12 +147,15 @@ func (api *channelAPI) subscribe(c fiber.Ctx, publicURL string) error {
 		return databaseError(c, err)
 	}
 	defer release()
-	active, err := api.active(c.Context(), id)
+	state, err := api.membershipState(c.Context(), api.pool, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return clientError(c, 404, "channel not found")
+	}
 	if err != nil {
 		return databaseError(c, err)
 	}
-	if !active {
-		return clientError(c, 404, "channel not found")
+	if state.Status != membershipOpen || state.Free {
+		return clientError(c, 409, "this channel has no paid membership open to join")
 	}
 	editorial, err := api.allowed(c.Context(), viewer(c), id, channelReadPermission)
 	if err != nil {

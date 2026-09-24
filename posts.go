@@ -243,6 +243,8 @@ func validatePost(p post) error {
 	}
 	return errors.New("invalid access_policy")
 }
+const noMembership = "create a channel membership before publishing membership posts"
+
 func (api *postAPI) create(c fiber.Ctx) error {
 	if viewer(c) == "" {
 		return clientError(c, 401, "a user access token is required")
@@ -267,7 +269,7 @@ func (api *postAPI) create(c fiber.Ctx) error {
 	}
 	var job *postOfferArgs
 	if paidPolicy(p.AccessPolicy) {
-		if _, err = checkPrice(in.Price); err != nil {
+		if _, err = checkPrice(in.Price, minPostPrice); err != nil {
 			return clientError(c, 400, err.Error())
 		}
 		p.OfferStatus, p.OfferRevision = "pending", 1
@@ -284,6 +286,12 @@ func (api *postAPI) create(c fiber.Ctx) error {
 	}
 	if !allowed {
 		return clientError(c, 404, "channel not found")
+	}
+	if ok, err := api.channels.requireMembership(c.Context(), id, p.AccessPolicy); err != nil || !ok {
+		if err != nil {
+			return databaseError(c, err)
+		}
+		return clientError(c, 400, noMembership)
 	}
 	err = api.inTx(c, func(tx pgx.Tx) error {
 		p, err = scanPost(tx.QueryRow(c.Context(), `INSERT INTO `+api.table+`(author_id,channel_id,billing_key,slug,title,body,access_policy,offer_status,offer_revision) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING `+postColumns, p.AuthorID, id, p.BillingKey, p.Slug, p.Title, p.Body, p.AccessPolicy, p.OfferStatus, p.OfferRevision))
@@ -315,7 +323,7 @@ func (api *postAPI) update(c fiber.Ctx) error {
 		return clientError(c, 400, "channel_id is immutable")
 	}
 	if in.Price != nil {
-		if _, err = checkPrice(in.Price); err != nil {
+		if _, err = checkPrice(in.Price, minPostPrice); err != nil {
 			return clientError(c, 400, err.Error())
 		}
 	}
@@ -361,6 +369,12 @@ func (api *postAPI) update(c fiber.Ctx) error {
 	}
 	if err = validatePost(p); err != nil {
 		return clientError(c, 400, err.Error())
+	}
+	if ok, err := api.channels.requireMembership(c.Context(), p.ChannelID, p.AccessPolicy); in.AccessPolicy != nil && (err != nil || !ok) {
+		if err != nil {
+			return databaseError(c, err)
+		}
+		return clientError(c, 400, noMembership)
 	}
 	var job *postOfferArgs
 	switch isPaid := paidPolicy(p.AccessPolicy); {
