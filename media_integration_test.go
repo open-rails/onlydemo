@@ -37,6 +37,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -644,6 +645,10 @@ func TestMediaEndToEnd(t *testing.T) {
 		}
 	})
 
+	t.Run("listings cost the same for any number of items", func(t *testing.T) {
+		h.testListingCost(t, posts["ppv"], buyer)
+	})
+
 	t.Run("post deletion erases its folder and releases quota", func(t *testing.T) {
 		id := posts["ppv"]
 		used, _, err := h.srv.media.limiter.Usage(ctx, h.cfg.Media.Tenant, channelOwner(channelID))
@@ -673,6 +678,7 @@ type mediaHarness struct {
 	hook   string
 	owner  peer
 	video  bool // ffmpeg present: media-worker runs
+	calls  struct{ auth, billing atomic.Int64 }
 }
 
 func newMediaHarness(t *testing.T) *mediaHarness {
@@ -723,6 +729,8 @@ func newMediaHarness(t *testing.T) *mediaHarness {
 		t.Fatal(err)
 	}
 	t.Cleanup(h.srv.Close)
+	h.srv.auth.client = countingAuth{Client: h.srv.auth.client, n: &h.calls.auth}
+	h.srv.billing.reads = countingReads{entitlementReads: h.srv.billing.reads, n: &h.calls.billing}
 	go func() { _ = h.srv.app.Listener(listener) }()
 	t.Cleanup(func() { _ = h.srv.app.Shutdown() })
 	for _, route := range h.srv.app.GetRoutes(true) {
@@ -756,7 +764,12 @@ func testDatabase(t *testing.T, ctx context.Context, adminURL string) *pgxpool.P
 	})
 	u, _ := url.Parse(adminURL)
 	u.Path = "/" + name
-	pool, err := pgxpool.New(ctx, u.String())
+	poolConfig, err := pgxpool.ParseConfig(u.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	poolConfig.ConnConfig.Tracer = queryTracer{}
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -101,27 +100,19 @@ func viewer(c fiber.Ctx) string {
 	}
 	return ""
 }
+
+// decorate fills posts' channel, access and (withOffers) purchase offers for
+// the viewer from one page load and one offer lookup.
 func (api *postAPI) decorate(c fiber.Ctx, posts []post, withOffers bool) error {
-	user := viewer(c)
-	keys := make([]string, 0, len(posts)*2)
-	seen := map[string]bool{}
-	for _, p := range posts {
-		for _, key := range []string{postResource(p.BillingKey), membershipResource(p.ChannelID)} {
-			if !seen[key] {
-				seen[key] = true
-				keys = append(keys, key)
-			}
+	ctx, user := c.Context(), viewer(c)
+	channels, keys := make([]string, len(posts)), []string{}
+	for i, p := range posts {
+		channels[i] = p.ChannelID
+		if user != "" {
+			keys = append(keys, postResource(p.BillingKey), membershipResource(p.ChannelID))
 		}
 	}
-	access, err := api.billing.access(c.Context(), user, keys)
-	if err != nil {
-		return err
-	}
-	admin, err := api.canModerate(c, user, postReadPermission)
-	if err != nil {
-		return err
-	}
-	editAdmin, err := api.canModerate(c, user, postEditPermission)
+	pg, err := api.channels.loadPage(ctx, user, channels, nil, keys, slotAvatar)
 	if err != nil {
 		return err
 	}
@@ -129,57 +120,39 @@ func (api *postAPI) decorate(c fiber.Ctx, posts []post, withOffers bool) error {
 	for i, p := range posts {
 		policies[i] = postPolicy(p)
 	}
-	held := tiered.CheckerFunc(func(context.Context, string, []string) (map[string]bool, error) { return access, nil })
-	readable, err := tiered.DecideAll(c.Context(), held, actorFor(user), policies)
+	held := tiered.CheckerFunc(func(context.Context, string, []string) (map[string]bool, error) { return pg.access, nil })
+	readable, err := tiered.DecideAll(ctx, held, actorFor(user), policies)
 	if err != nil {
 		return err
 	}
-	channelIDs := make([]string, 0, len(posts))
-	for _, p := range posts {
-		if !slices.Contains(channelIDs, p.ChannelID) {
-			channelIDs = append(channelIDs, p.ChannelID)
-		}
-	}
-	avatars, err := api.media.slots(c.Context(), kindChannel, channelIDs, slotAvatar)
-	if err != nil {
+	if err = api.media.videoImages(ctx, posts); err != nil {
 		return err
 	}
-	if err = api.media.videoImages(c.Context(), posts); err != nil {
-		return err
-	}
-	publishing := map[string]bool{}
-	editing := map[string]bool{}
-	groups := map[string]authkit.GroupInstance{}
+	selling := []string{}
 	for i := range posts {
 		p := &posts[i]
-		if _, ok := publishing[p.ChannelID]; !ok {
-			if groups[p.ChannelID], err = api.auth.client.GroupInstanceByID(c.Context(), p.ChannelID); err != nil && !errors.Is(err, authkit.ErrGroupNotFound) {
-				return err
-			}
-			publishing[p.ChannelID], err = api.channels.allowed(c.Context(), user, p.ChannelID, channelReadPermission)
-			if err != nil {
-				return err
-			}
-			editing[p.ChannelID], err = api.channels.allowed(c.Context(), user, p.ChannelID, channelEditPermission)
-			if err != nil {
-				return err
-			}
-		}
-		p.ChannelSlug, p.ChannelName = groups[p.ChannelID].InstanceSlug, groups[p.ChannelID].DisplayName
-		p.Purchased = access[postResource(p.BillingKey)]
-		p.SubscriptionActive = access[membershipResource(p.ChannelID)]
-		p.CanEdit = editing[p.ChannelID] || editAdmin
-		p.CanRead = readable[i] || publishing[p.ChannelID] || admin
-		p.ChannelAvatar = avatars[slotKey{p.ChannelID, slotAvatar}]
+		g := pg.groups[p.ChannelID]
+		p.ChannelSlug, p.ChannelName = g.InstanceSlug, g.DisplayName
+		p.Purchased = pg.access[postResource(p.BillingKey)]
+		p.SubscriptionActive = pg.access[membershipResource(p.ChannelID)]
+		// Channel grants include the viewer's site-wide (root) grants.
+		p.CanEdit = pg.can(p.ChannelID, channelEditPermission) || pg.can(p.ChannelID, postEditPermission)
+		p.CanRead = readable[i] || pg.can(p.ChannelID, channelReadPermission) || pg.can(p.ChannelID, postReadPermission)
+		p.ChannelAvatar = pg.slots[slotKey{p.ChannelID, slotAvatar}]
 		if !p.CanRead {
 			p.Body = ""
 		}
-		p.Offers = []openrails.CatalogOffer{}
 		if withOffers && paidPolicy(p.AccessPolicy) && p.OfferStatus == "active" {
-			p.Offers, err = api.billing.offers(c.Context(), postResource(p.BillingKey), false)
-			if err != nil {
-				return err
-			}
+			selling = append(selling, postResource(p.BillingKey))
+		}
+	}
+	offers, err := api.billing.offers(ctx, openrails.OfferPermanent, selling, 100)
+	if err != nil {
+		return err
+	}
+	for i := range posts {
+		if posts[i].Offers = offers[postResource(posts[i].BillingKey)]; posts[i].Offers == nil {
+			posts[i].Offers = []openrails.CatalogOffer{}
 		}
 	}
 	return nil
@@ -655,8 +628,8 @@ func (api *postAPI) settled(c fiber.Ctx, status int, id int64, job *postOfferArg
 		p.ChannelSlug, p.ChannelName = g.InstanceSlug, g.DisplayName
 	}
 	if paidPolicy(p.AccessPolicy) && p.OfferStatus == "active" {
-		if offers, e := api.billing.offers(c.Context(), postResource(p.BillingKey), false); e == nil {
-			p.Offers = offers
+		if offers, e := api.billing.offers(c.Context(), openrails.OfferPermanent, []string{postResource(p.BillingKey)}, 100); e == nil && offers[postResource(p.BillingKey)] != nil {
+			p.Offers = offers[postResource(p.BillingKey)]
 		}
 	}
 	return c.Status(status).JSON(p)
