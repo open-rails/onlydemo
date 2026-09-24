@@ -506,8 +506,8 @@ export function NewChannelPage() {
                   placeholder="my-channel"
                 />
                 <FieldDescription>
-                  Lowercase letters, numbers, and dashes. AuthKit reserves and
-                  manages channel names.
+                  Lowercase letters, numbers, and dashes. Channel names are
+                  unique, and some are reserved.
                 </FieldDescription>
               </Field>
               <FormError>{error}</FormError>

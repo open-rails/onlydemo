@@ -55,7 +55,7 @@ func homepage(app *fiber.App) fiber.Handler {
 		sections := []routeSection{
 			{ID: "application", Name: "Application routes", Description: "Routes registered by this demo, including the homepage, channel and post API.", Routes: sortedRoutes(appRoutes)},
 			{ID: "openrails", Name: "OpenRails routes", Description: "Routes enabled by the billing runtime configuration, including verified provider callbacks.", Routes: sortedRoutes(mountedBillingRoutes)},
-			{ID: "authkit", Name: "AuthKit routes", Description: "Routes enabled by the current AuthKit configuration. Disabled features are omitted.", Routes: sortedRoutes(mountedAuthRoutes)},
+			{ID: "auth", Name: "Authentication routes", Description: "Sign-in, registration and account routes enabled by the current configuration. Disabled features are omitted.", Routes: sortedRoutes(mountedAuthRoutes)},
 		}
 		var body bytes.Buffer
 		if err := homepageTemplate.Execute(&body, sections); err != nil {
