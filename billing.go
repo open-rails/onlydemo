@@ -27,6 +27,8 @@ const (
 type billingService struct {
 	runtime *openrailsembed.Runtime
 	client  *openrails.Client
+	// reads are the viewer lookups behind every page (the client; tests count them).
+	reads entitlementReads
 	// psps are the enabled PSPs every offer price declares.
 	psps         []string
 	postDeletion postDeletionPolicy
@@ -103,7 +105,13 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 	}
 	// This assignment precedes shared-fleet startup and HTTP publication.
 	auth.billing = client
-	return &billingService{runtime: runtime, client: client, psps: slices.Sorted(maps.Keys(cfg.PSPs)), postDeletion: cfg.PostDeletion, membershipHours: cfg.MembershipHours}, nil
+	return &billingService{runtime: runtime, client: client, reads: client, psps: slices.Sorted(maps.Keys(cfg.PSPs)), postDeletion: cfg.PostDeletion, membershipHours: cfg.MembershipHours}, nil
+}
+
+type entitlementReads interface {
+	CheckEntitlements(ctx context.Context, customerID string, entitlements []string, at time.Time, options ...openrails.RequestOption) (map[string]bool, error)
+	ListEntitlements(ctx context.Context, subject string, at time.Time, options ...openrails.RequestOption) ([]openrails.EntitlementRecord, error)
+	ListOffersForEntitlements(ctx context.Context, entitlements []string, params openrails.OfferListParams, options ...openrails.RequestOption) (map[string]openrails.OfferList, error)
 }
 
 // routeCheckoutsTo makes psp OpenRails's only checkout candidate, so new

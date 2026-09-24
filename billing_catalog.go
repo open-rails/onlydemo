@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -26,16 +28,12 @@ func (b *billingService) access(ctx context.Context, user string, keys []string)
 	if user == "" {
 		return result, nil
 	}
-	for len(keys) > 0 {
-		n := min(100, len(keys))
-		page, err := b.client.CheckEntitlements(ctx, user, keys[:n], time.Time{})
+	for chunk := range slices.Chunk(unique(keys), openrails.MaxEntitlementChecks) {
+		page, err := b.reads.CheckEntitlements(ctx, user, chunk, time.Time{})
 		if err != nil {
 			return nil, err
 		}
-		for k, v := range page {
-			result[k] = v
-		}
-		keys = keys[n:]
+		maps.Copy(result, page)
 	}
 	return result, nil
 }
@@ -44,19 +42,23 @@ func (b *billingService) access(ctx context.Context, user string, keys []string)
 func (b *billingService) checker() tiered.Checker {
 	return tiered.CheckerFunc(b.access)
 }
-func (b *billingService) offers(ctx context.Context, key string, recurring bool) ([]openrails.CatalogOffer, error) {
-	kind := openrails.OfferPermanent
-	if recurring {
-		kind = openrails.OfferRecurring
+
+// offers lists each key's active offers, preferred currency first; limit
+// bounds each key's list.
+func (b *billingService) offers(ctx context.Context, kind openrails.OfferKind, keys []string, limit int) (map[string][]openrails.CatalogOffer, error) {
+	out := map[string][]openrails.CatalogOffer{}
+	for chunk := range slices.Chunk(unique(keys), openrails.MaxEntitlementChecks) {
+		lists, err := b.reads.ListOffersForEntitlements(ctx, chunk, openrails.OfferListParams{Kind: kind, PreferredCurrency: "USD", Limit: limit})
+		if err != nil {
+			return nil, err
+		}
+		for key, list := range lists {
+			if list.Data != nil {
+				out[key] = list.Data
+			}
+		}
 	}
-	page, err := b.client.ListOffersForEntitlement(ctx, key, openrails.OfferListParams{Kind: kind, PreferredCurrency: "USD", Limit: 100})
-	if err != nil {
-		return nil, err
-	}
-	if page.Data == nil {
-		return []openrails.CatalogOffer{}, nil
-	}
-	return page.Data, nil
+	return out, nil
 }
 
 // Amounts are in micro-units; posts start at 0.50 and memberships at 1.00.
@@ -177,4 +179,3 @@ func checkoutRequest(user, resource, key, priceID string, payment openrails.Chec
 	digest := sha256.Sum256([]byte(user + "\x00" + resource + "\x00" + key))
 	return openrails.CreateCheckoutSessionRequest{OfferKind: kind, Customer: openrails.CheckoutCustomerIdentity{ID: user}, Entitlement: resource, PriceID: priceID, IdempotencyKey: "demo-" + hex.EncodeToString(digest[:]), PaymentOptions: payment, SuccessURL: publicURL + "/me?tab=library", CancelURL: publicURL + "/me?tab=library", Metadata: map[string]string{"resource": resource}}
 }
-

@@ -19,7 +19,12 @@ func openDatabase(ctx context.Context) (Config, *pgxpool.Pool, error) {
 		return Config{}, nil, fmt.Errorf("load configuration: %w", err)
 	}
 
-	pool, err := pgxpool.New(ctx, config.DatabaseURL)
+	poolConfig, err := pgxpool.ParseConfig(config.DatabaseURL)
+	if err != nil {
+		return Config{}, nil, fmt.Errorf("parse database URL: %w", err)
+	}
+	poolConfig.ConnConfig.Tracer = queryTracer{}
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		return Config{}, nil, fmt.Errorf("create database pool: %w", err)
 	}
@@ -168,6 +173,7 @@ func startServer(ctx context.Context, config Config, pool *pgxpool.Pool, opts bi
 
 func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, cfg Config, channels *channelAPI, posts *postAPI, media *mediaService) (*fiber.App, error) {
 	app := fiber.New()
+	app.Use(countQueries)
 
 	app.Get("/dev/routes", homepage(app))
 

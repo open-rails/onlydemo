@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -278,99 +279,99 @@ func actorFor(user string) access.Actor {
 	return access.Actor{ID: user, Kind: "user", Anonymous: user == ""}
 }
 
-// editorial reports channel editors and site admins, who read everything.
-func (m *mediaService) editorial(ctx context.Context, user, channel string) (bool, error) {
+// grants reads user's grants on a channel, root grants included, in one call.
+func (m *mediaService) grants(ctx context.Context, user, channel string) (grants, error) {
 	if user == "" {
-		return false, nil
+		return nil, nil
 	}
-	if ok, err := m.channels.allowed(ctx, user, channel, channelReadPermission); err != nil || ok {
-		return ok, err
+	perms, err := m.auth.client.EffectivePermissionsForGroups(ctx, authkit.UserSubject(user), []string{channel})
+	return perms[channel], err
+}
+
+type grants []authkit.Perm
+
+func (g grants) can(perm authkit.Perm) bool { return slices.ContainsFunc(g, perm.Matches) }
+
+// postAccess loads a live post (found false otherwise) and the actor's upload
+// grant and grants on its channel.
+func (m *mediaService) postAccess(ctx context.Context, actor access.Actor, contentID string) (p post, up media.UploadGrant, g grants, found bool, err error) {
+	id, err := strconv.ParseInt(contentID, 10, 64)
+	if err != nil {
+		return p, up, nil, false, nil
 	}
-	return m.auth.client.Can(ctx, authkit.UserSubject(user), authkit.RootGroup(), authkit.Perm(postReadPermission))
+	p, err = m.posts.visible(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return p, up, nil, false, nil
+	} else if err != nil {
+		return p, up, nil, false, err
+	}
+	if g, err = m.grants(ctx, actor.ID, p.ChannelID); err != nil {
+		return p, up, nil, false, err
+	}
+	admin := g.can(postEditPermission)
+	up = media.UploadGrant{Owner: channelOwner(p.ChannelID), Exempt: admin,
+		Allowed: admin || (!p.Draft || p.AuthorID == actor.ID) && g.can(channelCreatePermission)}
+	return p, up, g, true, nil
 }
 
 // Resolve is the one read decision for media: the same rule as the post API.
-// Editors are whoever may upload to the item: they alone get the uncropped
-// editor variant and the files' edits and source dims.
+// Channel editors and site admins read everything. Editors are whoever may
+// upload to the item: they alone get the uncropped editor variant and the
+// files' edits and source dims.
 func (m *mediaService) Resolve(ctx context.Context, ref contentref.ContentRef, actor access.Actor) (access.Resolution, error) {
-	r, err := m.resolve(ctx, ref, actor)
-	if err != nil || !r.Visible || actor.ID == "" {
-		return r, err
-	}
-	g, err := m.CanUpload(ctx, actor, ref)
-	r.Editor = g.Allowed
-	return r, err
-}
-
-func (m *mediaService) resolve(ctx context.Context, ref contentref.ContentRef, actor access.Actor) (access.Resolution, error) {
 	switch ref.ContentKind {
 	case kindPost:
-		id, err := strconv.ParseInt(ref.ContentID, 10, 64)
-		if err != nil {
-			return access.Resolution{}, nil
-		}
-		p, err := m.posts.visible(ctx, id)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return access.Resolution{}, nil
-		} else if err != nil {
+		p, up, g, found, err := m.postAccess(ctx, actor, ref.ContentID)
+		if err != nil || !found {
 			return access.Resolution{}, err
 		}
 		if p.Draft {
-			// Only its author (or a site admin) sees a draft; Resolve then makes them its editor.
-			g, err := m.CanUpload(ctx, actor, ref)
-			return access.Resolution{Visible: g.Allowed, Accessible: g.Allowed}, err
+			// Only its author (or a site admin) sees a draft.
+			return access.Resolution{Visible: up.Allowed, Accessible: up.Allowed, Editor: up.Allowed}, nil
 		}
-		ok, err := m.editorial(ctx, actor.ID, p.ChannelID)
-		if err == nil && !ok {
+		ok := g.can(channelReadPermission) || g.can(postReadPermission)
+		if !ok {
 			ok, err = tiered.Decide(ctx, m.billing.checker(), actor, postPolicy(p))
 		}
-		return access.Resolution{Visible: true, Accessible: ok}, err
+		return access.Resolution{Visible: true, Accessible: ok, Editor: up.Allowed}, err
 	case kindChannel, media.UserKind:
-		return access.Resolution{Visible: true, Accessible: true}, nil // public avatars and covers
+		// Public avatars and covers.
+		r := access.Resolution{Visible: true, Accessible: true}
+		if actor.ID == "" {
+			return r, nil
+		}
+		up, err := m.CanUpload(ctx, actor, ref)
+		r.Editor = up.Allowed
+		return r, err
 	}
 	return access.Resolution{}, nil
 }
 
 // CanUpload: post media needs channel:posts:create (a draft: its author), channel slots need
 // channel:settings:manage, a user uploads only their own avatar. Site admins
-// may upload anywhere and are exempt from the UploadLimiter. The channel owns
+// may upload to any post or channel and are exempt from the UploadLimiter. The channel owns
 // the quota of its posts.
 func (m *mediaService) CanUpload(ctx context.Context, actor access.Actor, ref contentref.ContentRef) (media.UploadGrant, error) {
 	user := actor.ID
 	if actor.Anonymous || user == "" {
 		return media.UploadGrant{}, nil
 	}
-	admin, err := m.auth.client.Can(ctx, authkit.UserSubject(user), authkit.RootGroup(), authkit.Perm(postEditPermission))
-	if err != nil {
-		return media.UploadGrant{}, err
-	}
-	g := media.UploadGrant{Allowed: admin, Exempt: admin}
 	switch ref.ContentKind {
 	case kindPost:
-		id, err := strconv.ParseInt(ref.ContentID, 10, 64)
-		if err != nil {
-			return media.UploadGrant{}, nil
-		}
-		p, err := m.posts.visible(ctx, id)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return media.UploadGrant{}, nil
-		} else if err != nil {
-			return g, err
-		}
-		g.Owner = channelOwner(p.ChannelID)
-		if !g.Allowed && (!p.Draft || p.AuthorID == user) {
-			g.Allowed, err = m.channels.allowed(ctx, user, p.ChannelID, channelCreatePermission)
-		}
-		return g, err
+		_, up, _, _, err := m.postAccess(ctx, actor, ref.ContentID)
+		return up, err
 	case kindChannel:
-		g.Owner = channelOwner(ref.ContentID)
-		if !g.Allowed {
-			g.Allowed, err = m.channels.allowed(ctx, user, ref.ContentID, "channel:settings:manage")
+		active, err := m.channels.active(ctx, ref.ContentID)
+		if err != nil || !active {
+			return media.UploadGrant{}, err
 		}
-		return g, err
+		g, err := m.grants(ctx, user, ref.ContentID)
+		admin := g.can(postEditPermission)
+		return media.UploadGrant{Owner: channelOwner(ref.ContentID), Exempt: admin, Allowed: admin || g.can("channel:settings:manage")}, err
 	case media.UserKind:
-		g.Allowed = user == ref.ContentID
-		return g, nil
+		root, err := m.auth.client.ListEffectivePermissions(ctx, authkit.UserSubject(user), authkit.RootGroup())
+		admin := grants(root).can(postEditPermission)
+		return media.UploadGrant{Exempt: admin, Allowed: user == ref.ContentID}, err
 	}
 	return media.UploadGrant{}, nil
 }

@@ -3,13 +3,17 @@ package main
 import (
 	"context"
 	"errors"
-	"github.com/gofiber/fiber/v3"
-	"github.com/open-rails/authkit"
-	"github.com/open-rails/contentkit/media"
-	"github.com/open-rails/openrails"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/authkit"
+	"github.com/open-rails/contentkit/media"
+	"github.com/open-rails/openrails"
 )
 
 var channelSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,99}$`)
@@ -26,70 +30,72 @@ type channelView struct {
 	Membership channelMembership   `json:"membership"`
 }
 
-func (api *channelAPI) view(c fiber.Ctx, id string, offers bool) (channelView, error) {
-	active, err := api.active(c.Context(), id)
+// view renders one live channel for the viewer, with their free grant.
+func (api *channelAPI) view(c fiber.Ctx, id string) (channelView, error) {
+	views, err := api.views(c.Context(), viewer(c), []string{id}, nil, true)
 	if err != nil {
 		return channelView{}, err
 	}
-	if !active {
+	if len(views) == 0 {
 		return channelView{}, authkit.ErrGroupNotFound
 	}
-	group, err := api.auth.client.GroupInstanceByID(c.Context(), id)
-	if err != nil {
-		return channelView{}, err
-	}
-	if group.DeletedAt != nil {
-		return channelView{}, authkit.ErrGroupNotFound
-	}
-	state, err := api.membershipState(c.Context(), api.pool, id)
-	if err != nil {
-		return channelView{}, err
-	}
-	slots, err := api.media.slots(c.Context(), kindChannel, []string{id}, slotAvatar, slotCover)
-	if err != nil {
-		return channelView{}, err
-	}
-	v := channelView{ID: id, Slug: group.InstanceSlug, Name: group.DisplayName, Membership: channelMembership{Status: state.Status, Free: state.Free, Sync: state.Sync},
-		Avatar: slots[slotKey{id, slotAvatar}], Cover: slots[slotKey{id, slotCover}]}
-	user := viewer(c)
+	return views[0], nil
+}
+
+// views renders the live channels among ids, in order, from one page load;
+// known carries groups the caller already read. grants reports free
+// memberships, which costs one entitlement listing.
+func (api *channelAPI) views(ctx context.Context, user string, ids []string, known map[string]authkit.GroupInstance, grants bool) ([]channelView, error) {
+	keys := []string{}
 	if user != "" {
-		v.CanManage, err = api.allowed(c.Context(), user, id, "channel:settings:manage")
-		if err != nil {
-			return v, err
+		for _, id := range ids {
+			keys = append(keys, membershipResource(id))
 		}
-		v.CanEdit, err = api.allowed(c.Context(), user, id, channelEditPermission)
-		if err != nil {
-			return v, err
+	}
+	pg, err := api.loadPage(ctx, user, ids, known, keys, slotAvatar, slotCover)
+	if err != nil {
+		return nil, err
+	}
+	out, selling := []channelView{}, []string{}
+	for _, id := range unique(ids) {
+		if !pg.live(id) {
+			continue
 		}
+		g, s, key := pg.groups[id], pg.states[id], membershipResource(id)
+		v := channelView{ID: id, Slug: g.InstanceSlug, Name: g.DisplayName, CanManage: pg.can(id, "channel:settings:manage"), CanEdit: pg.can(id, channelEditPermission),
+			Avatar: pg.slots[slotKey{id, slotAvatar}], Cover: pg.slots[slotKey{id, slotCover}],
+			Membership: channelMembership{Status: s.Status, Free: s.Free, Sync: s.Sync, Member: pg.access[key]}}
 		if v.CanManage {
 			v.Role = "owner"
 		} else if v.CanEdit {
 			v.Role = "editor"
 		}
-		access, e := api.billing.access(c.Context(), user, []string{membershipResource(id)})
-		if e != nil {
-			return v, e
+		// The price shows wherever the channel does, so joining is one click.
+		if s.Status == membershipOpen && !s.Free {
+			selling = append(selling, key)
 		}
-		v.Membership.Member = access[membershipResource(id)]
-		if v.Membership.Member && offers {
-			grants, e := api.billing.freeGrants(c.Context(), user, id)
-			if e != nil {
-				return v, e
-			}
-			v.Membership.FreeMember = len(grants) > 0
+		out = append(out, v)
+	}
+	offers, err := api.billing.offers(ctx, openrails.OfferRecurring, selling, 1)
+	if err != nil {
+		return nil, err
+	}
+	var held []openrails.EntitlementRecord
+	if grants && user != "" && len(out) > 0 {
+		if held, err = api.billing.reads.ListEntitlements(ctx, user, time.Time{}); err != nil {
+			return nil, err
 		}
 	}
-	if offers && state.Status == membershipOpen && !state.Free {
-		list, e := api.billing.offers(c.Context(), membershipResource(id), true)
-		if e != nil {
-			return v, e
-		}
-		if len(list) > 0 {
+	for i := range out {
+		v := &out[i]
+		if list := offers[membershipResource(v.ID)]; len(list) > 0 {
 			v.Membership.Offer = &list[0]
 		}
+		v.Membership.FreeMember = v.Membership.Member && len(freeGrants(held, v.ID)) > 0
 	}
-	return v, nil
+	return out, nil
 }
+
 func (api *channelAPI) list(c fiber.Ctx) error {
 	cursor := c.Query("cursor")
 	if cursor != "" {
@@ -119,22 +125,9 @@ func (api *channelAPI) list(c fiber.Ctx) error {
 	if more {
 		ids = ids[:25]
 	}
-	data := []channelView{}
-	for _, id := range ids {
-		v, e := api.view(c, id, false)
-		if errors.Is(e, authkit.ErrGroupNotFound) {
-			continue
-		}
-		if e != nil {
-			return billingUnavailable(c)
-		}
-		// Cards show the membership price so joining is one click from a list.
-		if v.Membership.Status == membershipOpen && !v.Membership.Free && !v.Membership.Member {
-			if list, e := api.billing.offers(c.Context(), membershipResource(id), true); e == nil && len(list) > 0 {
-				v.Membership.Offer = &list[0]
-			}
-		}
-		data = append(data, v)
+	data, err := api.views(c.Context(), viewer(c), ids, nil, false)
+	if err != nil {
+		return billingUnavailable(c)
 	}
 	next := ""
 	if more {
@@ -167,7 +160,7 @@ func (api *channelAPI) publicGet(c fiber.Ctx) error {
 	if err != nil {
 		return billingUnavailable(c)
 	}
-	v, err := api.view(c, id, true)
+	v, err := api.view(c, id)
 	if errors.Is(err, authkit.ErrGroupNotFound) {
 		return clientError(c, 404, "channel not found")
 	}
@@ -258,40 +251,33 @@ func (api *postAPI) me(c fiber.Ctx) error {
 	if raw := c.Query("before"); raw != "" {
 		before, _ = strconv.ParseInt(raw, 10, 64)
 	}
-	rows, err := api.pool.Query(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE deleted_at IS NULL`+published+` AND ($1::bigint=0 OR id<$1) AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL) ORDER BY id DESC LIMIT 51`, before)
+	// The library is every post the viewer holds a purchase of.
+	held, err := api.billing.reads.ListEntitlements(c.Context(), user, time.Time{})
 	if err != nil {
-		return databaseError(c, err)
-	}
-	posts := []post{}
-	for rows.Next() {
-		p, e := scanPost(rows)
-		if e != nil {
-			rows.Close()
-			return databaseError(c, e)
-		}
-		posts = append(posts, p)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return databaseError(c, err)
-	}
-	more := len(posts) > 50
-	if more {
-		posts = posts[:50]
-	}
-	next := ""
-	if more {
-		next = strconv.FormatInt(posts[len(posts)-1].ID, 10)
-	}
-	if err = api.decorate(c, posts, false); err != nil {
 		return billingUnavailable(c)
 	}
-	purchased := []post{}
-	for _, p := range posts {
-		if p.Purchased {
-			purchased = append(purchased, p)
+	keys := []string{}
+	for _, e := range held {
+		if key, ok := strings.CutPrefix(e.Entitlement, postResource("")); ok && e.RevokedAt == nil && uuid.Validate(key) == nil {
+			keys = append(keys, key)
 		}
+	}
+	rows, err := api.pool.Query(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE billing_key=ANY($2::uuid[]) AND deleted_at IS NULL`+published+` AND ($1::bigint=0 OR id<$1) AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL) ORDER BY id DESC LIMIT 51`, before, keys)
+	if err != nil {
+		return databaseError(c, err)
+	}
+	purchased, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (post, error) { return scanPost(row) })
+	if err != nil {
+		return databaseError(c, err)
+	}
+	more := len(purchased) > 50
+	next := ""
+	if more {
+		purchased = purchased[:50]
+		next = strconv.FormatInt(purchased[len(purchased)-1].ID, 10)
+	}
+	if err = api.decorate(c, purchased, false); err != nil {
+		return billingUnavailable(c)
 	}
 	subscriptions, err := api.billing.client.ListSubscriptions(c.Context(), openrails.SubscriptionFilter{CustomerID: user, PageOptions: openrails.PageOptions{Limit: 50}})
 	if err != nil {
@@ -315,18 +301,19 @@ func (api *channelAPI) editable(c fiber.Ctx, user string) ([]channelView, error)
 	if err != nil {
 		return nil, err
 	}
-	out := []channelView{}
+	ids, known := []string{}, map[string]authkit.GroupInstance{}
 	for _, g := range groups {
-		if g.Persona != channelPersona {
-			continue
+		if g.Persona == channelPersona {
+			ids = append(ids, g.GroupID)
+			known[g.GroupID] = authkit.GroupInstance{ID: g.GroupID, Persona: g.Persona, InstanceSlug: g.InstanceSlug, DisplayName: g.DisplayName}
 		}
-		v, e := api.view(c, g.GroupID, false)
-		if errors.Is(e, authkit.ErrGroupNotFound) {
-			continue
-		}
-		if e != nil {
-			return nil, e
-		}
+	}
+	views, err := api.views(c.Context(), user, ids, known, false)
+	if err != nil {
+		return nil, err
+	}
+	out := []channelView{}
+	for _, v := range views {
 		if v.CanEdit {
 			out = append(out, v)
 		}
