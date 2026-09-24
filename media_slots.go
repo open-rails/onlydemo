@@ -20,7 +20,7 @@ const (
 
 var (
 	avatarSlot = media.Slot{Aspect: 1, Widths: []int{128, 256, 512}, MinWidth: 128, Quality: 85}
-	coverSlot  = media.Slot{Aspect: 3, Widths: []int{480, 720, 960, 1280, 1920, 2560, 3000}, Quality: 85}
+	coverSlot  = media.Slot{Aspect: 3, Widths: []int{600, 3000}, MinWidth: 600, Quality: 85}
 )
 
 type slotKey struct{ ID, Slot string }
