@@ -37,6 +37,13 @@ func (api billingOperatorAPI) mount(router fiber.Router, required fiber.Handler)
 	g.Post("/subscriptions/:id/takeover/abandon", api.subscription(func(c fiber.Ctx, id openrails.SubscriptionID) (any, error) {
 		return api.billing.client.AbandonEngineTakeover(c.Context(), id)
 	}))
+	g.Post("/subscriptions/:id/change-tier/preview", api.subscription(func(c fiber.Ctx, id openrails.SubscriptionID) (any, error) {
+		var request openrails.ChangeTierRequest
+		if err := bindJSON(c, &request); err != nil {
+			return nil, fmt.Errorf("%w: %v", openrails.ErrInvalid, err)
+		}
+		return api.billing.client.PreviewTierChange(c.Context(), id, request)
+	}))
 	g.Post("/subscriptions/:id/change-tier", api.subscription(func(c fiber.Ctx, id openrails.SubscriptionID) (any, error) {
 		var request openrails.ChangeTierRequest
 		if err := bindJSON(c, &request); err != nil {

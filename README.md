@@ -278,7 +278,7 @@ Site admins (`root:billing:operate`) run merchant operations on
 | `POST /provider-refresh` | `RefreshProviders` |
 | `POST /subscriptions/:id/takeover[/preview\|/abandon]`, `GET …/takeover` | `TakeOverBilling` (`Idempotency-Key`), `PreviewEngineTakeover`, `AbandonEngineTakeover`, `GetEngineTakeover` |
 | `POST /takeovers` | `TakeOverBillingBatch` |
-| `POST /subscriptions/:id/change-tier` | `ChangeTier` (`Idempotency-Key`) |
+| `POST /subscriptions/:id/change-tier[/preview]` | `ChangeTier` (`Idempotency-Key`), `PreviewTierChange` |
 | `POST /payments/:id/refunds` | `RefundPayment` (`Idempotency-Key`; `revoke_access` ends access) |
 
 ## Deletion and identity
