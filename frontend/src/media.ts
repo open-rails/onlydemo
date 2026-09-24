@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createUploadClient, UploadError } from "@openrails/contentkit-upload";
-import type { CommitFile, Edit, EncodeProgress, Op, RefBody, SlotManifest } from "@openrails/contentkit-upload";
+import type { CommitFile, Edit, EncodeProgress, Op, ReadResult, RefBody, SlotManifest, VideoImages } from "@openrails/contentkit-upload";
 import { auth, request } from "./api";
 
 // Browser uploads go straight to the bucket; the app only presigns and commits.
@@ -94,6 +94,23 @@ export function screenFiles(list: Iterable<File>, have: { files: number; videos:
   return { accepted, refused };
 }
 
+// Playlists come from the app's read API (bearer auth); byte ranges from
+// media-access, signed in the playlist (URL mode) or under the folder cookie
+// the playlist response sets (cookie mode, hence withCredentials).
+export function mediaXhr(xhr: XMLHttpRequest, url: string) {
+  xhr.open("GET", url, true);
+  if (new URL(url, location.href).origin === location.origin) {
+    const token = auth.getAccessToken();
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+  } else {
+    xhr.withCredentials = !/[?&]t=/.test(url);
+  }
+}
+
+// The public poster and hover preview (none for drafts; paid posts get the poster only).
+export const readVideoImages = (id: number | string) =>
+  request<VideoImages>(`/api/v1/media/post/${id}/video-images`);
+
 // HLS routes of the read API; relative playlists resolve under the master.
 export const hlsBase = (postID: number | string, name: string) =>
   `/api/v1/media/post/${postID}/hls/${encodeURIComponent(name)}/`;
@@ -105,7 +122,7 @@ export const readVideoProgress = (id: number | string) =>
   request<{ progress?: EncodeProgress }>(`/api/v1/media/post/${id}/video-images`);
 
 export const readPost = (id: number | string, variants: string) =>
-  request<MediaRead>(`/api/v1/media/post/${id}?variant=${variants}`);
+  request<MediaRead & ReadResult>(`/api/v1/media/post/${id}?variant=${variants}`);
 
 export const postFiles = (id: number | string) =>
   request<{ files: CommitFile[] }>(`/api/v1/posts/${id}/media`);

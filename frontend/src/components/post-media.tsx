@@ -1,11 +1,10 @@
 import { useEffect, useImperativeHandle, useRef, useState, type DragEvent, type Ref } from "react";
-import { EncodeProgress, HoverPreviewPicker, ImageCropDialog, VideoPosterPicker, useMessages } from "@openrails/contentkit-upload/ui";
+import { EncodeProgress, HoverPreviewPicker, ImageCropDialog, MediaGallery, VideoPosterPicker, useMessages } from "@openrails/contentkit-upload/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useUploadQueue, type UseUploadQueue } from "@openrails/contentkit-upload/react";
 import type { Op } from "@openrails/contentkit-upload";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  AlertCircleIcon,
   ArrowDown01Icon,
   ArrowUp01Icon,
   BlurIcon,
@@ -31,7 +30,9 @@ import {
   screenFiles,
   postRef,
   readPost,
+  readVideoImages,
   readVideoProgress,
+  mediaXhr,
   uploadMessage,
   uploads,
   videoTypes,
@@ -41,7 +42,6 @@ import {
 } from "../media";
 import { CropDialog } from "./crop-dialog";
 import { FormError } from "./states";
-import { VideoPlayer } from "./video-player";
 
 const TEASER = "teaser";
 // The editor variant is a downscaled whole source; crops stay in its original pixels.
@@ -50,14 +50,6 @@ const slotSource = (f?: MediaFile) =>
 const ready = (f: MediaFile) => (isVideo(f.type) ? !!f.hls || !!f.failed : !!f.url);
 const pending = (files?: MediaFile[]) =>
   !!files?.some((f) => !f.locked && !ready(f));
-const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
-
-function lockedLabel(files: MediaFile[]) {
-  const videos = files.filter((f) => isVideo(f.type)).length;
-  const label = plural(files.length, "item");
-  return videos ? `${label} locked (${plural(videos, "video")})` : `${label} locked`;
-}
-
 // Why a video cannot be encoded, for its editors (ContentKit's hls.error).
 function failureMessage(reason: string) {
   return /aspect/i.test(reason)
@@ -84,71 +76,49 @@ function Downloads({ name, downloads }: { name: string; downloads: MediaDownload
   );
 }
 
-// What this viewer may see, in manifest order: every image and video with
-// full access, otherwise the blurred teaser and a count of what a purchase or
-// membership unlocks.
+// What this viewer may see, in manifest order, as a carousel or grid: every
+// image and video with full access, otherwise the blurred teaser and what a
+// purchase or membership unlocks.
 export function PostGallery({ postID, viewer }: { postID: number; viewer?: string }) {
   const media = useQuery({
     queryKey: ["post-media", postID, viewer],
     queryFn: () => readPost(postID, "large,blurred"),
     refetchInterval: (q) => (pending(q.state.data?.files) ? 3000 : false),
   });
+  const art = useQuery({
+    queryKey: ["post-media-art", postID, viewer],
+    queryFn: () => readVideoImages(postID),
+    enabled: !!media.data?.files.some((f) => isVideo(f.type)),
+    retry: false,
+  });
   const data = media.data;
   if (!data || data.total === 0) return null;
-  const full = data.access === "full";
-  const shown = data.files.filter((f) => !f.locked && (full ? !f.teaser : true));
-  const locked = data.files.filter((f) => f.locked);
+  const downloads = data.downloads ?? [];
   return (
     <div className="post-gallery">
-      {shown.map((f) => {
-        if (isVideo(f.type)) {
-          if (f.failed)
-            return (
-              <figure key={f.index} className="video-failed" role="alert">
-                <HugeiconsIcon icon={AlertCircleIcon} size={20} />
-                <span>
-                  <strong>{f.name}</strong> can't be played. {failureMessage(f.failed)}
-                </span>
-              </figure>
-            );
-          if (!f.hls || !f.name)
-            return (
-              <figure key={f.index} className="video-pending">
-                <div className="video-encode">
-                  <EncodeProgress progress={f.progress} />
-                </div>
-              </figure>
-            );
-          return (
-            <figure key={f.index}>
-              <VideoPlayer base={hlsBase(postID, f.name)} width={f.w} height={f.h} />
-              {full && <Downloads name={f.name} downloads={data.downloads ?? []} />}
-            </figure>
-          );
+      <MediaGallery
+        read={data}
+        hlsBase={(f) => hlsBase(postID, f.name!)}
+        xhrSetup={mediaXhr}
+        refresh={() => media.refetch()}
+        videoImages={art.data}
+        renderLocked={() => (
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => document.querySelector(".feed-unlock")?.scrollIntoView({ behavior: "smooth", block: "center" })}
+          >
+            <HugeiconsIcon icon={SquareLock02Icon} data-icon="inline-start" />
+            Unlock
+          </Button>
+        )}
+        renderDetails={(item) =>
+          item.kind === "video" && item.file.name && data.access === "full" ? (
+            <Downloads name={item.file.name} downloads={downloads} />
+          ) : null
         }
-        if (!f.url) return null;
-        return (
-          <figure key={f.index} className={f.teaser && !full ? "teaser" : undefined}>
-            <img src={f.url} alt={f.name || ""} loading="lazy" />
-            {f.teaser && !full && locked.length > 0 && (
-              <figcaption>
-                <HugeiconsIcon icon={SquareLock02Icon} size={22} />
-                {lockedLabel(locked)}
-              </figcaption>
-            )}
-          </figure>
-        );
-      })}
-      {!shown.some((f) => f.teaser) && locked.length > 0 && (
-        <p className="muted text-sm locked-note">
-          <HugeiconsIcon icon={SquareLock02Icon} size={16} /> {lockedLabel(locked)}
-        </p>
-      )}
-      {shown.some((f) => !isVideo(f.type) && !f.url) && (
-        <p className="muted text-sm">
-          <Spinner className="inline" /> Processing images…
-        </p>
-      )}
+        label="Post media"
+      />
     </div>
   );
 }
