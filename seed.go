@@ -160,11 +160,17 @@ func (s seedClient) login(ctx context.Context, username string) (string, error) 
 	return result.AccessToken, nil
 }
 
-// Channel creation is idempotent for the channel's owner and returns its ID.
+// channel creates the creator's channel, or reuses the one they already own.
 func (s seedClient) channel(ctx context.Context, token string, creator seedCreator) (string, error) {
-	var result struct{ ID string }
+	var result struct {
+		ID        string
+		CanManage bool `json:"can_manage"`
+	}
 	if err := s.call(ctx, "POST", "/api/v1/channels", token, map[string]any{"slug": creator.channel, "name": creator.name}, &result); err != nil {
-		return "", err
+		// A taken slug is reused only when this creator already owns it.
+		if lookup := s.call(ctx, "GET", "/api/v1/channels/"+creator.channel, token, nil, &result); lookup != nil || !result.CanManage {
+			return "", err
+		}
 	}
 	if result.ID == "" {
 		return "", fmt.Errorf("channel create returned no id")
