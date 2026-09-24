@@ -204,7 +204,7 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, c
 	app.Put("/api/v1/channels/:id/membership", required, channels.setMembership)
 	app.Post("/api/v1/channels/:id/join", required, channels.join)
 	app.Post("/api/v1/channels/:id/leave", required, channels.leave)
-	app.Post("/api/v1/channels/:id/subscribe", required, func(c fiber.Ctx) error { return channels.subscribe(c, cfg.PublicURL) })
+	app.Post("/api/v1/channels/:id/subscribe", required, func(c fiber.Ctx) error { return channels.subscribe(c, returnOrigin(c, cfg.PublicURL)) })
 	app.Get("/api/v1/channels/:id/members", required, channels.members)
 	app.Get("/api/v1/channels/:channel/posts/:slug", optional, posts.getBySlug)
 	app.Post("/api/v1/channels/:id/members", required, channels.members)
@@ -219,9 +219,10 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, c
 	app.Patch("/api/v1/posts/:id", required, posts.update)
 	app.Delete("/api/v1/posts/:id", required, posts.delete)
 	app.Post("/api/v1/posts/:id/checkout", required, func(c fiber.Ctx) error {
-		return posts.checkout(c, cfg.PublicURL)
+		return posts.checkout(c, returnOrigin(c, cfg.PublicURL))
 	})
 	media.mount(app, optional)
+	billingOperatorAPI{auth: authService, billing: billing}.mount(app, required)
 	if err := billing.Mount(app.Group("/billing")); err != nil {
 		return nil, err
 	}

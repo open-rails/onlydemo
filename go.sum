@@ -235,6 +235,8 @@ github.com/open-rails/openrails v0.172.0 h1:w8I0mnjQxhaMdXmRqGtK8IDsnMN2zLbcuEyM
 github.com/open-rails/openrails v0.172.0/go.mod h1:t0W3F2+kyRaJQpGNQZisXbiO0iH+X/i1o3jz371J1h4=
 github.com/open-rails/openrails v0.173.0 h1:nfzihOK2by30nG4PO/xwl60WFpbuF9Js4EUAnxbU6MU=
 github.com/open-rails/openrails v0.173.0/go.mod h1:t0W3F2+kyRaJQpGNQZisXbiO0iH+X/i1o3jz371J1h4=
+github.com/open-rails/openrails v0.176.0 h1:TxqpZCsIrT3dyztSjsnoCPyiOKHvOfxFd8XfIyUuGWE=
+github.com/open-rails/openrails v0.176.0/go.mod h1:t0W3F2+kyRaJQpGNQZisXbiO0iH+X/i1o3jz371J1h4=
 github.com/philhofer/fwd v1.2.0 h1:e6DnBTl7vGY+Gz322/ASL4Gyp1FspeMvx1RNDoToZuM=
 github.com/philhofer/fwd v1.2.0/go.mod h1:RqIHx9QI14HlwKwm98g9Re5prTQ6LdeRQn+gXJFxsJM=
 github.com/pkg/errors v0.8.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=

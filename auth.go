@@ -53,7 +53,7 @@ func newAuth(ctx context.Context, config Config, pool *pgxpool.Pool) (*appAuth, 
 		HTTP:   authhttp.Config{DirectPeerIP: true, Mount: authhttp.MountOptions{APIPrefix: "/auth/v1", RefreshCookie: true}},
 		RBAC: []embedded.PersonaDef{embedded.IntrinsicRootPersona(embedded.RoleDef{
 			Name:        "admin",
-			Permissions: []string{postReadPermission, postEditPermission, postDeletePermission},
+			Permissions: []string{postReadPermission, postEditPermission, postDeletePermission, billingOperatePermission},
 		}), {
 			Name: channelPersona, Parent: embedded.RootPersona,
 			Catalog: []string{string(channelReadPermission), string(channelCreatePermission), string(channelEditPermission), string(channelRemovePermission)},

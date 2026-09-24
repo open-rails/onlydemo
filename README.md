@@ -76,6 +76,7 @@ results are synchronous and OpenRails reconciles from the gateway.
 | --- | --- |
 | `DATABASE_URL` | One owning PostgreSQL connection/pool for initialization, content, AuthKit, OpenRails and River |
 | `PORT`, `PUBLIC_URL` | API listener and browser return origin |
+| `RETURN_ORIGINS` | Comma-separated extra origins checkout/portal return URLs may name besides `PUBLIC_URL` (e.g. the Vite dev origin); any other return URL is refused |
 | `AUTH_ISSUER`, `AUTH_AUDIENCE` | Token issuer/audience; origin issuer matches root discovery |
 | `AUTH_KEYS_PATH` | Dev signing and TOTP key directory (default `.runtime/auth`), so sessions and authenticator apps survive restarts |
 | `AUTH_SCHEMA`, `APP_SCHEMA`, `BILLING_SCHEMA`, `RIVER_SCHEMA` | Optional independent schema names; shared `public` is supported |
@@ -264,7 +265,21 @@ A redirect is never proof of payment; the UI reads the verified session state.
 tab is `@openrails/billing-ui`'s `AccountBilling` on the embedded `/billing/v1/me`
 API: subscriptions (cancel with feedback, resume, change card), saved cards
 (add with any PSP that supports in-page card setup, remove, default) and payment history.
-No provider-owned legacy schedule is migrated by this example.
+Checkout success/cancel URLs return to the request's `Origin` (else
+`PUBLIC_URL`); OpenRails refuses any origin outside `PUBLIC_URL` + `RETURN_ORIGINS`.
+
+Site admins (`root:billing:operate`) run merchant operations on
+`/api/v1/admin/billing`, e.g. migrating a legacy NMI book
+([OpenRails runbook](https://github.com/open-rails/openrails/blob/master/docs/batch-import.md)):
+
+| Route | OpenRails call |
+| --- | --- |
+| `POST /import` | `ImportBilling` (a `DeclaredBilling` book) |
+| `POST /provider-refresh` | `RefreshProviders` |
+| `POST /subscriptions/:id/takeover[/preview\|/abandon]`, `GET …/takeover` | `TakeOverBilling` (`Idempotency-Key`), `PreviewEngineTakeover`, `AbandonEngineTakeover`, `GetEngineTakeover` |
+| `POST /takeovers` | `TakeOverBillingBatch` |
+| `POST /subscriptions/:id/change-tier` | `ChangeTier` (`Idempotency-Key`) |
+| `POST /payments/:id/refunds` | `RefundPayment` (`Idempotency-Key`; `revoke_access` ends access) |
 
 ## Deletion and identity
 

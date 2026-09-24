@@ -78,6 +78,7 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 			TestMode:            openrailsconfig.CredentialPostureSandbox,
 			ProviderWriteMode:   openrailsconfig.ProviderWriteModeFull,
 			AllowCatalogUpdates: true,
+			ReturnOrigins:       cfg.ReturnOrigins,
 			DB:                  &openrailsconfig.DBConfig{URL: cfg.DatabaseURL, Schema: cfg.BillingSchema},
 		},
 		PGXPool: pool,

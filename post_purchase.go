@@ -46,6 +46,16 @@ func checkoutError(c fiber.Ctx, err error) error {
 	}
 	return billingUnavailable(c)
 }
+
+// returnOrigin returns the buyer to the site origin they checked out from;
+// OpenRails refuses any origin outside PUBLIC_URL and RETURN_ORIGINS.
+func returnOrigin(c fiber.Ctx, publicURL string) string {
+	if origin := c.Get("Origin"); origin != "" && origin != "null" {
+		return origin
+	}
+	return publicURL
+}
+
 func (api *postAPI) checkout(c fiber.Ctx, publicURL string) error {
 	if viewer(c) == "" {
 		return clientError(c, 401, "a user access token is required")
