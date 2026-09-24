@@ -364,6 +364,9 @@ func (api *postAPI) create(c fiber.Ctx) error {
 		} else {
 			p, err = scanPost(tx.QueryRow(c.Context(), `INSERT INTO `+api.table+`(author_id,channel_id,billing_key,slug,title,body,access_policy,offer_status,offer_revision,published_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW()) RETURNING `+postColumns, p.AuthorID, id, p.BillingKey, p.Slug, p.Title, p.Body, p.AccessPolicy, p.OfferStatus, p.OfferRevision))
 		}
+		if err == nil {
+			err = api.media.publishTx(c.Context(), tx, p.ID)
+		}
 		if err != nil || job == nil {
 			return err
 		}
@@ -486,6 +489,9 @@ func (api *postAPI) update(c fiber.Ctx) error {
 	}
 	err = api.inTx(c, func(tx pgx.Tx) error {
 		p, err = scanPost(tx.QueryRow(c.Context(), `UPDATE `+api.table+` SET slug=$1,title=$2,body=$3,access_policy=$4,offer_status=$5,offer_revision=$6,updated_at=NOW() WHERE id=$7 AND updated_at=$8 AND deleted_at IS NULL RETURNING `+postColumns, p.Slug, p.Title, p.Body, p.AccessPolicy, p.OfferStatus, p.OfferRevision, id, revision))
+		if err == nil && in.AccessPolicy != nil {
+			err = api.media.publishTx(c.Context(), tx, id)
+		}
 		if err != nil || job == nil {
 			return err
 		}

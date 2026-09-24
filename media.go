@@ -206,7 +206,9 @@ func newMedia(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth
 	if err != nil {
 		return nil, err
 	}
-	if m.jobs, err = media.NewJobs(media.JobsConfig{Store: store, Kinds: kinds, Tenants: []string{mc.Tenant}, Limiter: m.limiter}); err != nil {
+	// Resolver publishes video posters and hover previews by what anonymous
+	// viewers may see: drafts nothing, public posts both, paid posts the poster.
+	if m.jobs, err = media.NewJobs(media.JobsConfig{Store: store, Kinds: kinds, Tenants: []string{mc.Tenant}, Limiter: m.limiter, Resolver: m}); err != nil {
 		return nil, err
 	}
 	if m.manifests, err = media.NewManifests(store, kinds, media.ManifestOptions{Locker: media.PGLocker(pool), Jobs: m.jobs}); err != nil {
@@ -323,6 +325,8 @@ func (m *mediaService) resolve(ctx context.Context, ref contentref.ContentRef, a
 			ok, err = tiered.Decide(ctx, m.billing.checker(), actor, postPolicy(p))
 		}
 		return access.Resolution{Visible: true, Accessible: ok}, err
+	case kindChannel, media.UserKind:
+		return access.Resolution{Visible: true, Accessible: true}, nil // public avatars and covers
 	}
 	return access.Resolution{}, nil
 }
@@ -376,7 +380,7 @@ type mediaActorKey struct{}
 // mount serves the upload API (the browser SDK) and the read API behind
 // AuthKit's optional verification.
 func (m *mediaService) mount(app fiber.Router, optional fiber.Handler) {
-	upload := media.UploadHandler(m.uploads, media.UploadHandlerOptions{Tenant: m.cfg.Tenant, PublicBaseURL: m.cfg.URL,
+	upload := media.UploadHandler(m.uploads, media.UploadHandlerOptions{Tenant: m.cfg.Tenant, Reader: m.reader,
 		Actor: func(r *http.Request) (access.Actor, bool) {
 			a, _ := r.Context().Value(mediaActorKey{}).(access.Actor)
 			return a, !a.Anonymous
@@ -437,6 +441,19 @@ func withMediaActor(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), mediaActorKey{}, a)))
 	})
+}
+
+// publishTx republishes posts' public video images after a change to what
+// anonymous viewers may see (publish, access policy).
+func (m *mediaService) publishTx(ctx context.Context, tx pgx.Tx, ids ...int64) error {
+	if m == nil {
+		return nil
+	}
+	refs := make([]contentref.ContentRef, len(ids))
+	for i, id := range ids {
+		refs[i] = m.postRef(id)
+	}
+	return m.jobs.PublishTx(ctx, tx, refs...)
 }
 
 // deletePostsTx erases post folders in the caller's delete transaction and

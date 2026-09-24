@@ -537,7 +537,26 @@ func TestMediaEndToEnd(t *testing.T) {
 			return v["hover_preview"].(map[string]any)["pending"] == false
 		})
 
+		status := func(u string) int {
+			res, err := http.Get(u)
+			if err != nil {
+				return 0
+			}
+			res.Body.Close()
+			return res.StatusCode
+		}
+		// Members-only: the poster stays public as the teaser, the hover clip goes.
+		owner.call("PATCH", fmt.Sprintf("/api/v1/posts/%d", id), map[string]any{"access_policy": "membership"}, "", 200)
+		eventually(t, "hover preview unpublished", func() bool { return status(first.HoverPreview.MP4) == 404 && status(first.HoverPreview.WebP) == 404 })
+		paid := listed()
+		if paid.HoverPreview != nil || paid.Poster == nil || len(paid.Poster.Outputs) == 0 {
+			t.Fatalf("members-only post listing %+v %+v", paid.Poster, paid.HoverPreview)
+		}
+		posterURL := paid.Poster.Outputs[0].URL
+		h.waitPublic(t, posterURL)
+
 		owner.call("DELETE", fmt.Sprintf("/api/v1/posts/%d", id), nil, "", 204)
+		eventually(t, "deleted post's poster unpublished", func() bool { return status(posterURL) == 404 })
 		var stamps int
 		if err := h.srv.posts.pool.QueryRow(ctx, `SELECT count(*) FROM `+h.srv.media.slotTable+` WHERE kind='post' AND item_id=$1`, strconv.FormatInt(id, 10)).Scan(&stamps); err != nil || stamps != 0 {
 			t.Fatalf("poster stamp after delete: %d %v", stamps, err)

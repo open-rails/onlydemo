@@ -202,7 +202,13 @@ and commits (`/api/v1/media/upload/*`).
   ffmpeg for `/frame`. `SlotEncoded` stores the poster stamp like other slots,
   so listings carry `poster` (srcset) and `hover_preview` URLs without reads,
   and feed cards (`VideoPoster`) play the preview on hover or focus unless
-  the viewer prefers reduced motion.
+  the viewer prefers reduced motion. Both render to ContentKit's token-gated
+  `editor/` area and are copied to tokenless `public/` URLs according to what
+  anonymous viewers may see (`JobsConfig.Resolver`, default `Exposure`):
+  drafts nothing, public posts poster and preview, members-only or paid
+  posts the poster alone as a teaser. Publishing a draft or changing a
+  post's access policy republishes (`PublishTx` in the same transaction),
+  and deleting a post removes both first.
 - **Uploads.** Post images need `channel:posts:create`, channel slots
   `channel:settings:manage`, a user their own avatar. The UploadLimiter
   rate-limits each uploader (429) and holds each channel's quota: presign
@@ -214,6 +220,27 @@ and commits (`/api/v1/media/upload/*`).
   registrable domain (`MEDIA_COOKIE_DOMAIN`) over HTTPS. Locally the app
   (`localhost:5173`) and worker (`localhost:8090`) share no parent domain, so
   `.env.example` uses URL tokens (`MEDIA_DELIVERY=url`).
+
+### Production media configuration
+
+- Serve `media-access` at `media.<domain>` and use cookie delivery:
+  `MEDIA_URL=https://media.<domain>`, `MEDIA_DELIVERY=cookie`,
+  `MEDIA_COOKIE_DOMAIN=<domain>`.
+- `MEDIA_ACCESS_CORS_ORIGINS` lists exactly the site origins
+  (`https://<domain>`, plus `https://www.<domain>` if it is served);
+  `MEDIA_ACCESS_HOSTS=media.<domain>`. Keep the default
+  `Cross-Origin-Resource-Policy: same-site`, which blocks other sites from
+  hotlinking media.
+- Keep the bucket private. media-access gets a read-only key limited to
+  `*/blobs/*`, `*/editor/*` and `*/public/*`.
+- A CDN may cache `public/`. Never let a shared cache store `blobs/` or
+  `editor/`: those are token-gated.
+- To rotate `MEDIA_TOKEN_KEY`, give media-access the new key as
+  `MEDIA_ACCESS_TOKEN_KEY` and the old one as `_PREVIOUS`, switch the app
+  to the new key, and drop the old key after about 5 hours (token TTL plus
+  the rounding window).
+- The read API rate-limits each viewer (ContentKit default: 2 requests/s,
+  burst 120) and logs every signed response with the viewer id.
 
 ## Buying and membership
 

@@ -84,9 +84,10 @@ type hoverPreview struct {
 	WebP string `json:"webp"`
 }
 
-// videoImages sets each post's poster from its stored stamp and, with a
-// poster, its hover preview. Preview URLs are unversioned: public/ is served
-// no-cache and the render is not reported back to the host.
+// videoImages sets each published post's poster from its stored stamp and,
+// for public posts, its hover preview: only what ContentKit publishes
+// (paid posts show the poster alone; drafts nothing). Preview URLs are
+// unversioned: public/ is served no-cache and the render is not reported back.
 func (m *mediaService) videoImages(ctx context.Context, posts []post) error {
 	ids := make([]string, len(posts))
 	for i, p := range posts {
@@ -98,10 +99,13 @@ func (m *mediaService) videoImages(ctx context.Context, posts []post) error {
 	}
 	for i := range posts {
 		poster := posters[slotKey{ids[i], media.PosterSlot}]
-		if poster == nil {
+		if poster == nil || posts[i].Draft {
 			continue
 		}
 		posts[i].Poster = poster
+		if posts[i].AccessPolicy != "public" {
+			continue
+		}
 		mp4, webp, err := m.reader.HoverPreviewURLs(m.postRef(posts[i].ID), "")
 		if err != nil {
 			return err

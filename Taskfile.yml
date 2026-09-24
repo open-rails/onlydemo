@@ -34,6 +34,7 @@ tasks:
         MEDIA_ACCESS_TOKEN_KEY="$MEDIA_TOKEN_KEY" \
         MEDIA_ACCESS_TOKEN_KEY_PREVIOUS="${MEDIA_TOKEN_KEY_PREVIOUS:-}" \
         MEDIA_ACCESS_CORS_ORIGINS="${MEDIA_ACCESS_CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}" \
+        MEDIA_ACCESS_HOSTS="${MEDIA_ACCESS_HOSTS:-localhost,127.0.0.1}" \
         go run github.com/open-rails/contentkit/cmd/media-access
 
   media:worker:
