@@ -304,7 +304,9 @@ playlists and downloads) and a refused 3:1 one, editor-only variants and edit
 data, rate and quota refusals (presign and commit), slots (upload with a crop,
 rotate, re-crop, versioned srcset widths, also from a post image) and
 post erasure. `task dev:up && task test:media`
-runs it locally; CI runs it on every push. CI also builds/vets Go and
-builds/lints the frontend. The libraries retain their full automated qualification. A real sandbox
+runs it locally. CI runs on pull requests only, by changed paths: Go, module
+or migration changes run vet, this proof and the smoke walkthrough; frontend
+changes lint and build the frontend; docs run nothing. Both workflows also
+run manually (`workflow_dispatch`). The libraries retain their full automated qualification. A real sandbox
 purchase/subscription walkthrough is a separate deliberate activity with retained
 provider receipts and idempotency keys.
