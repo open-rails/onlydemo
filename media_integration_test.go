@@ -610,16 +610,16 @@ func TestMediaEndToEnd(t *testing.T) {
 		if err := h.srv.posts.pool.QueryRow(ctx, `SELECT count(*) FROM `+h.srv.posts.table+` WHERE id=$1`, gone).Scan(&rows); err != nil || rows != 0 {
 			t.Fatalf("discarded draft row: %d %v", rows, err)
 		}
-		var left []string
+		var leftover []string
 		func() {
 			defer func() {
 				if t.Failed() {
-					t.Logf("left in the discarded draft's folder: %v", left)
+					t.Logf("left in the discarded draft's folder: %v", leftover)
 				}
 			}()
 			eventually(t, "discarded draft folder erased", func() bool {
-				left = h.keys(fmt.Sprintf("%s/post/%d/", h.cfg.Media.Tenant, gone))
-				return len(left) == 0
+				leftover = h.keys(fmt.Sprintf("%s/post/%d/", h.cfg.Media.Tenant, gone))
+				return len(leftover) == 0
 			})
 		}()
 
