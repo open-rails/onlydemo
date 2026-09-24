@@ -31,6 +31,7 @@ function usePosts() {
 }
 export function HomePage() {
   const posts = usePosts();
+  const channels = useChannels();
   const auth = useAuth();
   return (
     <>
@@ -73,7 +74,15 @@ export function HomePage() {
       ) : posts.data?.length ? (
         <div className="feed">
           {posts.data.map((post) => (
-            <PostCard key={post.id} post={post} handle={post.channel_slug} />
+            <PostCard
+              key={post.id}
+              post={post}
+              handle={post.channel_slug}
+              membership={
+                channels.data?.data.find((item) => item.id === post.channel_id)
+                  ?.membership
+              }
+            />
           ))}
         </div>
       ) : (

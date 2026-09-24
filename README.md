@@ -46,8 +46,11 @@ OpenRails's `embed.PSPFromEnv` reads `<KEY>_ACCOUNT_ID` plus the rail's secrets 
 settings (`<KEY>_RAIL` when the key is not the rail name) and refuses a missing
 required secret; startup refuses a PSP whose credentials are not sandbox. The
 browser receives OpenRails's browser-safe PSP config and `@openrails/billing-ui`
-picks each flow (hosted redirect, Collect.js, Stripe Elements); there is no
-provider-specific code here.
+picks each flow (Collect.js, Stripe Elements, hosted redirect); there is no
+provider-specific code here. `BILLING_CHECKOUT_PSP` picks the one PSP for new
+purchases and new cards (applied as OpenRails's checkout routing); the others keep
+serving their existing cards and subscriptions. Buyers see one payment modal:
+saved cards, an inline new card (always saved), one Pay button.
 
 | Provider | Variables |
 | --- | --- |
@@ -73,6 +76,8 @@ results are synchronous and OpenRails reconciles from the gateway.
 | `AUTH_KEYS_PATH` | Dev signing and TOTP key directory (default `.runtime/auth`), so sessions and authenticator apps survive restarts |
 | `AUTH_SCHEMA`, `APP_SCHEMA`, `BILLING_SCHEMA`, `RIVER_SCHEMA` | Optional independent schema names; shared `public` is supported |
 | `BILLING_PSPS` | Enabled PSP keys, e.g. `stripe,nmi`; each needs its variables (above) |
+| `BILLING_CHECKOUT_PSP` | PSP for new purchases and cards; required with several `BILLING_PSPS` |
+| `TRUSTED_COUNTRY_HEADER` | Edge header with the buyer's country (e.g. `CF-IPCountry`) to preselect the billing country; unset = never trusted, the browser locale is used |
 | `MEMBERSHIP_PERIOD` | Renewal period of membership prices set afterwards, in whole hours (default `720h`; e.g. `1h` to test rebilling) |
 | `POST_DELETION_REFUND`, `POST_DELETION_REFUND_WINDOW` | Deleting a paid post: `refund` (default), `review` or `none` for one-time purchases made within the window before deletion (default `720h`). A post that becomes free refunds nothing |
 | `CONTENT_SCHEMA` | ContentKit baseline schema (default `content`); holds the upload limiter's counters |

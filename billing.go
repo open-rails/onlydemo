@@ -98,9 +98,29 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 	if err != nil {
 		return nil, err
 	}
+	if err := routeCheckoutsTo(ctx, client, cfg.CheckoutPSP); err != nil {
+		return nil, fmt.Errorf("route new checkouts to %q: %w", cfg.CheckoutPSP, err)
+	}
 	// This assignment precedes shared-fleet startup and HTTP publication.
 	auth.billing = client
 	return &billingService{runtime: runtime, client: client, psps: slices.Sorted(maps.Keys(cfg.PSPs)), postDeletion: cfg.PostDeletion, membershipHours: cfg.MembershipHours}, nil
+}
+
+// routeCheckoutsTo makes psp OpenRails's only checkout candidate, so new
+// purchases and new cards use it while other PSPs keep their existing work.
+func routeCheckoutsTo(ctx context.Context, client *openrails.Client, psp string) error {
+	settings, err := client.GetMerchantSettings(ctx)
+	if err != nil {
+		return err
+	}
+	rules := []openrails.CheckoutRoutingRule{{Prefer: []string{psp}}}
+	if settings.CheckoutRouting != nil && slices.EqualFunc(*settings.CheckoutRouting, rules, func(a, b openrails.CheckoutRoutingRule) bool {
+		return a.Match.IsCatchAll() && slices.Equal(a.Prefer, b.Prefer)
+	}) {
+		return nil
+	}
+	settings.CheckoutRouting = &rules
+	return client.SetMerchantSettings(ctx, *settings)
 }
 
 func (b *billingService) RiverJobs() riverkit.Contribution { return b.runtime.RiverJobs() }

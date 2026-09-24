@@ -5,6 +5,7 @@ import { BillingUiProvider } from "@openrails/billing-ui";
 import { BillingProvider } from "@openrails/billing-ui/react";
 import { sessionIdentity, useSession } from "@openrails/auth-ui/react";
 import { billing } from "./api";
+import { PayHost } from "./components/pay";
 
 export function BillingHost({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
@@ -13,7 +14,7 @@ export function BillingHost({ children }: { children: ReactNode }) {
       appearance={{ theme: "inherit" }}
       navigate={(to) => navigate(to)}
     >
-      {children}
+      <PayHost>{children}</PayHost>
     </BillingUiProvider>
   );
 }

@@ -1306,4 +1306,23 @@
     align-items: center;
     gap: 6px;
   }
+  .pay-toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-radius: 999px;
+    background: var(--foreground);
+    color: var(--background);
+    font-weight: 600;
+    transform: translateX(-50%);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+  }
+  .pay-toast svg {
+    color: var(--success);
+  }
 }

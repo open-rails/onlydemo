@@ -12,7 +12,7 @@ import {
   SquareLock02Icon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
-import { money, date, duration } from "../format";
+import { date } from "../format";
 import { Badge } from "@/components/ui/badge";
 import { PolicyBadge } from "./policy-badge";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ import {
   type Post,
 } from "../models";
 import { hue, membershipOffer, useChannels } from "../channels";
+import { subscribeLabel, unlockLabel, useJoinFree, usePay } from "./pay";
 import { channelsPath, channelPath, postPath } from "../paths";
 import { userRef, useSlot } from "../media";
 
@@ -90,12 +91,24 @@ export function PostCard({
   membership?: ChannelMembership;
 }) {
   const [liked, setLiked] = useState(false);
+  const pay = usePay();
+  const joinFree = useJoinFree(post.channel_id);
   const policy = post.access_policy;
   const price = post.offers?.find((offer) => !offer.auto_renew);
   const needsMembership =
     policy === "membership" ||
     (policy === "members_ppv" && !post.has_membership);
   const name = post.channel_name || "Creator";
+  const memberOffer =
+    membership?.status === "open" && !membership.free ? membership.offer : null;
+  // Unlocking happens in place: the payment modal opens over the feed.
+  const unlock = () => {
+    if (needsMembership && membership?.free) void joinFree.join();
+    else if (needsMembership && memberOffer)
+      pay({ kind: "membership", id: post.channel_id, merchant: name, offer: memberOffer });
+    else if (!needsMembership && price && post.offer_status !== "pending")
+      pay({ kind: "post", id: post.id, merchant: name, offer: price });
+  };
   return (
     <article className="feed-card">
       <header className="feed-head">
@@ -136,31 +149,35 @@ export function PostCard({
       )}
       {!post.can_read && !(needsMembership && membership?.status === "closed") && (
         <div className="feed-unlock">
-          <Button
-            size="lg"
-            className="w-full"
-            nativeButton={false}
-            render={
-              <Link
-                to={
-                  needsMembership
-                    ? channelPath(post.channel_slug)
-                    : postPath(post)
-                }
-              />
-            }
-          >
-            <HugeiconsIcon icon={SquareLock02Icon} data-icon="inline-start" />
-            {needsMembership
-              ? membership?.free
-                ? "Join free to unlock"
-                : "Subscribe to unlock"
-              : post.offer_status === "pending"
-                ? "Price pending"
-                : price
-                ? `Unlock for ${money(price.unit_amount, price.currency)}`
-                : "Unlock post"}
-          </Button>
+          {needsMembership && !membership?.free && !memberOffer ? (
+            <Button
+              size="lg"
+              className="w-full"
+              nativeButton={false}
+              render={<Link to={channelPath(post.channel_slug)} />}
+            >
+              <HugeiconsIcon icon={SquareLock02Icon} data-icon="inline-start" />
+              Subscribe to unlock
+            </Button>
+          ) : (
+            <Button
+              size="lg"
+              className="w-full"
+              disabled={joinFree.pending || (!needsMembership && (!price || post.offer_status === "pending"))}
+              onClick={unlock}
+            >
+              <HugeiconsIcon icon={SquareLock02Icon} data-icon="inline-start" />
+              {needsMembership
+                ? membership?.free
+                  ? "Join free to unlock"
+                  : subscribeLabel(memberOffer!)
+                : post.offer_status === "pending"
+                  ? "Price pending"
+                  : price
+                    ? unlockLabel(price)
+                    : "Unlock post"}
+            </Button>
+          )}
         </div>
       )}
       <footer className="feed-actions">
@@ -200,6 +217,9 @@ export function PostCard({
 }
 export function ChannelCard({ channel }: { channel: Channel }) {
   const offer = membershipOffer(channel);
+  const pay = usePay();
+  const joinFree = useJoinFree(channel.id);
+  const joinable = !channel.membership.member && !channel.can_manage && !channel.can_edit;
   return (
     <article className="creator-card">
       <Cover seed={channel.id} image={channel.cover} />
@@ -225,19 +245,26 @@ export function ChannelCard({ channel }: { channel: Channel }) {
               </span>
             )
           )}
-          <Button
-            size="sm"
-            nativeButton={false}
-            render={<Link to={channelPath(channel.slug)} />}
-          >
-            {channel.membership.member
-              ? "View profile"
-              : offer
-                ? `${money(offer.unit_amount, offer.currency)} ${duration(offer.access_duration_hours).replace("every ", "/ ")}`
-                : channel.membership.status === "open" && channel.membership.free
-                  ? "Join free"
-                  : "View profile"}
-          </Button>
+          {joinable && offer ? (
+            <Button
+              size="sm"
+              onClick={() => pay({ kind: "membership", id: channel.id, merchant: channel.name, offer })}
+            >
+              {subscribeLabel(offer)}
+            </Button>
+          ) : joinable && channel.membership.status === "open" && channel.membership.free ? (
+            <Button size="sm" disabled={joinFree.pending} onClick={() => void joinFree.join()}>
+              Join free
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              nativeButton={false}
+              render={<Link to={channelPath(channel.slug)} />}
+            >
+              View profile
+            </Button>
+          )}
         </div>
       </div>
     </article>

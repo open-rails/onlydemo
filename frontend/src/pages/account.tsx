@@ -199,6 +199,7 @@ function Billing() {
           `${location.origin}/me?tab=billing&setup_id=${encodeURIComponent(id)}`
         }
         defaultCurrency="USD"
+        defaultCountry={config.data?.country || undefined}
       />
     </AccountBillingScope>
   );

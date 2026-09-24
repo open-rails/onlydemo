@@ -204,7 +204,7 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, c
 	app.Post("/api/v1/channels/:id/members", required, channels.members)
 	app.Delete("/api/v1/channels/:id/members/:user_id", required, channels.members)
 	app.Get("/api/v1/me", required, posts.me)
-	app.Get("/api/v1/config", publicConfiguration(billing))
+	app.Get("/api/v1/config", publicConfiguration(billing, cfg.TrustedCountryHeader))
 	app.Get("/api/v1/checkout/options", checkoutOptions(billing))
 	app.Get("/api/v1/posts", optional, posts.list)
 	app.Post("/api/v1/posts", required, posts.create)
@@ -214,7 +214,6 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, c
 	app.Post("/api/v1/posts/:id/checkout", required, func(c fiber.Ctx) error {
 		return posts.checkout(c, cfg.PublicURL)
 	})
-	app.Get("/api/v1/checkouts/:id", required, posts.getCheckout)
 	media.mount(app, optional)
 	if err := billing.Mount(app.Group("/billing")); err != nil {
 		return nil, err

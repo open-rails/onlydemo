@@ -6,8 +6,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"net/http"
-	"net/url"
-	"strconv"
 	"strings"
 )
 
@@ -30,7 +28,13 @@ func checkoutBody(c fiber.Ctx) (checkoutInput, string, error) {
 	return in, key, nil
 }
 func checkoutError(c fiber.Ctx, err error) error {
+	// A definite decline: the buyer may correct the card or use another one.
+	if failure, ok := openrails.PaymentFailureFrom(err); ok {
+		return c.Status(http.StatusPaymentRequired).JSON(fiber.Map{"error": fiber.Map{"code": openrails.CodeCardDeclined, "message": failure.Message, "metadata": fiber.Map{"failure": failure}}})
+	}
 	switch {
+	case errors.Is(err, openrails.ErrPaymentMethodStale):
+		return clientError(c, http.StatusPaymentRequired, "this saved card can no longer be used; add it again")
 	case errors.Is(err, openrails.ErrConflict), errors.Is(err, openrails.ErrIdempotencyKeyReused):
 		return clientError(c, 409, "checkout conflicts with an earlier request")
 	case errors.Is(err, openrails.ErrInvalid):
@@ -63,7 +67,7 @@ func (api *postAPI) checkout(c fiber.Ctx, publicURL string) error {
 	if err != nil {
 		return databaseError(c, err)
 	}
-	request := checkoutRequest(viewer(c), postResource(post.BillingKey), key, in.PriceID, in.Payment, openrails.OfferPermanent, publicURL, url.Values{"post": {strconv.FormatInt(id, 10)}})
+	request := checkoutRequest(viewer(c), postResource(post.BillingKey), key, in.PriceID, in.Payment, openrails.OfferPermanent, publicURL)
 	replay, err := api.billing.client.LookupCheckoutSession(c.Context(), request)
 	if err == nil {
 		if replay.Status == "created" {
@@ -130,7 +134,7 @@ func (api *channelAPI) subscribe(c fiber.Ctx, publicURL string) error {
 	if err != nil {
 		return clientError(c, 400, "invalid channel id")
 	}
-	request := checkoutRequest(viewer(c), membershipResource(id), key, in.PriceID, in.Payment, openrails.OfferRecurring, publicURL, url.Values{"channel": {id}})
+	request := checkoutRequest(viewer(c), membershipResource(id), key, in.PriceID, in.Payment, openrails.OfferRecurring, publicURL)
 	replay, err := api.billing.client.LookupCheckoutSession(c.Context(), request)
 	if err == nil {
 		if replay.Status == "created" {
@@ -174,15 +178,4 @@ func (api *channelAPI) subscribe(c fiber.Ctx, publicURL string) error {
 		return checkoutError(c, err)
 	}
 	return c.Status(201).JSON(result)
-}
-func (api *postAPI) getCheckout(c fiber.Ctx) error {
-	if viewer(c) == "" {
-		return clientError(c, 401, "a user access token is required")
-	}
-	result, err := api.billing.GetCheckout(c.Context(), viewer(c), c.Params("id"))
-	if err != nil {
-		return checkoutError(c, err)
-	}
-	c.Set("Cache-Control", "no-store")
-	return c.Status(http.StatusOK).JSON(result)
 }

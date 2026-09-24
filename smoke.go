@@ -94,7 +94,7 @@ func smoke() error {
 	if err != nil {
 		return err
 	}
-	cfg := Config{PostDeletion: postDeletion, MembershipHours: membershipHours, Media: media, DatabaseURL: databaseURL, PublicURL: base, AuthIssuer: base, AuthAudience: "demo-smoke", PSPs: fakeStripePSP(smokeWebhookSecret)}
+	cfg := Config{PostDeletion: postDeletion, MembershipHours: membershipHours, Media: media, DatabaseURL: databaseURL, PublicURL: base, AuthIssuer: base, AuthAudience: "demo-smoke", PSPs: fakeStripePSP(smokeWebhookSecret), CheckoutPSP: "stripe"}
 	if err = initializeDatabase(ctx, cfg, pool); err != nil {
 		return err
 	}
@@ -195,7 +195,7 @@ func smoke() error {
 	if err = stripe.settle(ctx, base, webhookPath); err != nil {
 		return err
 	}
-	if got, want := stripe.form.Get("success_url"), fmt.Sprintf("%s/checkout/return?post=%.0f", base, post["id"].(float64)); got != want {
+	if got, want := stripe.form.Get("success_url"), base+"/me?tab=library"; got != want {
 		return fmt.Errorf("checkout success_url %q, want %q", got, want)
 	}
 	paid, err := buyer.call("GET", path, buyerToken, nil, "", 200)

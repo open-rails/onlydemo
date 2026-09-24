@@ -78,6 +78,7 @@ export interface Checkout {
   metadata?: Record<string, string>;
   membership_quote?: { product_name: string; cycle_hours: number };
   operation?: { id: string; status: string };
+  failure?: { reason: string; message: string; field?: string };
   subscription_id?: string;
   payment_method_id?: string;
   payment_id?: string;
@@ -112,6 +113,8 @@ export interface PaymentOptionsDocument {
 export interface AppConfig {
   psps: PspConfig[];
   billing_available: boolean;
+  /** The buyer's country from a trusted edge header, else "". */
+  country: string;
 }
 export const policyLabels: Record<AccessPolicy, string> = {
   public: "Free to read",

@@ -1,9 +1,8 @@
-import type { CheckoutPlan } from "@openrails/billing-ui";
-interface Attempt {
+// One payment attempt per buyer and offer. Its idempotency key survives
+// reloads until the attempt ends; a definite decline starts a new key.
+export interface Attempt {
   key: string;
   checkoutID?: string;
-  submitted?: boolean;
-  offer?: { priceID: string; plan: CheckoutPlan };
   request?: { path: string; body: object };
 }
 const prefix = "openrails-attempt:";
@@ -36,36 +35,5 @@ export function clearAttempt(scope: string) {
     sessionStorage.removeItem(prefix + scope);
   } catch {
     /* In-memory state is cleared. */
-  }
-}
-export function rememberCheckout(checkoutID: string, scope: string) {
-  try {
-    sessionStorage.setItem("billing-ui:" + checkoutID, scope);
-  } catch {
-    /* Server status remains authoritative. */
-  }
-}
-export function finishCheckout(checkoutID: string) {
-  try {
-    const scope = sessionStorage.getItem("billing-ui:" + checkoutID);
-    if (scope) clearAttempt(scope);
-    sessionStorage.removeItem("billing-ui:" + checkoutID);
-  } catch {
-    /* Read-only confirmation remains usable. */
-  }
-}
-
-export function checkoutAttempt(checkoutID: string) {
-  try {
-    const scope = sessionStorage.getItem("billing-ui:" + checkoutID);
-    if (!scope) return null;
-    const attempt =
-      fallback.get(scope) ||
-      (JSON.parse(
-        sessionStorage.getItem(prefix + scope) || "null",
-      ) as Attempt | null);
-    return attempt?.checkoutID === checkoutID ? attempt : null;
-  } catch {
-    return null;
   }
 }

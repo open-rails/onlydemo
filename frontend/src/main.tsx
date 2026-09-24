@@ -14,7 +14,7 @@ import { uploads } from "./media";
 import { AppLayout, NotFoundPage, RequireAccount } from "./App";
 import { HomePage, ChannelsPage } from "./pages/explore";
 import { ChannelPage, NewChannelPage } from "./pages/channel";
-import { PostPage, CheckoutReturnPage } from "./pages/post";
+import { PostPage } from "./pages/post";
 import { AccountPage } from "./pages/account";
 import { InvitePage } from "./components/channel-team";
 import {
@@ -51,14 +51,6 @@ const router = createBrowserRouter([
       { path: "/reset", element: <ResetPasswordPage /> },
       { path: "/verify", element: <VerifyLinkPage /> },
       { path: "/login/callback", element: <AuthCallbackPage /> },
-      {
-        path: "/checkout/return",
-        element: (
-          <RequireAccount>
-            <CheckoutReturnPage />
-          </RequireAccount>
-        ),
-      },
       {
         path: "/invite",
         element: (

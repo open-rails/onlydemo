@@ -66,7 +66,7 @@ import { PostEditor } from "../components/post-editor";
 import { ChannelTeam } from "../components/channel-team";
 import { SlotEdit } from "../components/slot-edit";
 import { channelRef, useSlot } from "../media";
-import { MembershipDialog } from "../components/membership";
+import { subscribeLabel, usePay } from "../components/pay";
 import { channelsPath, channelPath } from "../paths";
 
 export function ChannelPage() {
@@ -75,7 +75,7 @@ export function ChannelPage() {
   const navigate = useNavigate();
   const client = useQueryClient();
   const [editor, setEditor] = useState(false);
-  const [membership, setMembership] = useState(false);
+  const pay = usePay();
   const [tab, setTab] = useState("posts");
   const channel = useQuery({
     queryKey: ["channel", slug, auth.user?.id],
@@ -202,7 +202,10 @@ export function ChannelPage() {
           {!current.can_edit && current.membership.status !== "none" && (
             <MembershipBox
               channel={current}
-              onSubscribe={() => setMembership(true)}
+              onSubscribe={() => {
+                const offer = membershipOffer(current);
+                if (offer) pay({ kind: "membership", id: current.id, merchant: current.name, offer });
+              }}
               onChanged={() => void client.invalidateQueries()}
             />
           )}
@@ -299,11 +302,6 @@ export function ChannelPage() {
         hasMembership={current.membership.status !== "none"}
         onClose={() => setEditor(false)}
       />
-      <MembershipDialog
-        open={membership}
-        channel={current}
-        onClose={() => setMembership(false)}
-      />
     </>
   );
 }
@@ -362,14 +360,10 @@ function MembershipBox({
       ) : offer ? (
         <Button
           size="lg"
-          className={cn(pill, "justify-between uppercase")}
+          className={pill}
           onClick={onSubscribe}
         >
-          <span>Subscribe</span>
-          <span>
-            {money(offer.unit_amount, offer.currency)}{" "}
-            {duration(offer.access_duration_hours).replace("every ", "/ ")}
-          </span>
+          {subscribeLabel(offer)}
         </Button>
       ) : (
         <Button variant="secondary" size="lg" className={pill} disabled>

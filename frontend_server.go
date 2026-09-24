@@ -58,15 +58,22 @@ func mountFrontend(app *fiber.App) {
 }
 
 // publicConfiguration exposes OpenRails's browser-safe PSP projection.
-func publicConfiguration(b *billingService) fiber.Handler {
+func publicConfiguration(b *billingService, countryHeader string) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		// Only an operator-named edge header is trusted for the buyer's country.
+		country := ""
+		if countryHeader != "" {
+			if value := strings.ToUpper(strings.TrimSpace(c.Get(countryHeader))); len(value) == 2 && value != "XX" && value != "T1" {
+				country = value
+			}
+		}
 		psps := []openrails.CheckoutPSPConfig{}
 		config, err := b.client.GetCheckoutConfig(c.Context())
 		if err == nil {
 			psps = config.PSPs
 		}
 		c.Set("Cache-Control", "no-store")
-		return c.JSON(fiber.Map{"billing_available": err == nil, "psps": psps})
+		return c.JSON(fiber.Map{"billing_available": err == nil, "psps": psps, "country": country})
 	}
 }
 

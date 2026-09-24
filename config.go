@@ -27,6 +27,12 @@ type Config struct {
 	BillingSchema string
 	RiverSchema   string
 	PSPs          map[string]openrailsembed.PSPConfig
+	// CheckoutPSP takes every new purchase and new card; the other PSPs stay
+	// declared for their existing cards and subscriptions.
+	CheckoutPSP string
+	// TrustedCountryHeader names the edge header carrying the buyer's country
+	// (e.g. CF-IPCountry). Unset: the header is never trusted.
+	TrustedCountryHeader string
 	ContentSchema string
 	Media         mediaConfig
 	PostDeletion  postDeletionPolicy
@@ -58,7 +64,7 @@ func loadConfig() (Config, error) {
 			case "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_KEYS_PATH", "AUTH_SCHEMA", "APP_SCHEMA", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA", "BILLING_PSPS":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
 			default:
-				if key == "CONTENT_SCHEMA" || key == "POST_DELETION_REFUND" || key == "POST_DELETION_REFUND_WINDOW" || key == "MEMBERSHIP_PERIOD" || strings.HasPrefix(key, "MEDIA_") {
+				if key == "CONTENT_SCHEMA" || key == "POST_DELETION_REFUND" || key == "POST_DELETION_REFUND_WINDOW" || key == "MEMBERSHIP_PERIOD" || key == "BILLING_CHECKOUT_PSP" || key == "TRUSTED_COUNTRY_HEADER" || strings.HasPrefix(key, "MEDIA_") {
 					return strings.ToLower(key), value
 				}
 				return "", nil
@@ -118,6 +124,11 @@ func loadConfig() (Config, error) {
 		RiverSchema:   strings.TrimSpace(k.String("river.schema")),
 		PSPs:          psps,
 		ContentSchema: strings.TrimSpace(k.String("content_schema")),
+
+		TrustedCountryHeader: strings.TrimSpace(k.String("trusted_country_header")),
+	}
+	if cfg.CheckoutPSP, err = checkoutPSP(k.String("billing_checkout_psp"), psps); err != nil {
+		return Config{}, err
 	}
 	if cfg.PostDeletion, err = parsePostDeletionPolicy(k.String("post_deletion_refund"), k.String("post_deletion_refund_window")); err != nil {
 		return Config{}, err
@@ -155,6 +166,20 @@ func loadPSPs(raw string, lookup func(string) (string, bool)) (map[string]openra
 		return nil, fmt.Errorf("BILLING_PSPS must list at least one provider")
 	}
 	return psps, nil
+}
+
+// checkoutPSP is the declared PSP new checkouts use; implied when only one is.
+func checkoutPSP(raw string, psps map[string]openrailsembed.PSPConfig) (string, error) {
+	key := strings.ToLower(strings.TrimSpace(raw))
+	if key == "" && len(psps) == 1 {
+		for only := range psps {
+			return only, nil
+		}
+	}
+	if _, ok := psps[key]; !ok {
+		return "", fmt.Errorf("BILLING_CHECKOUT_PSP must name one of BILLING_PSPS")
+	}
+	return key, nil
 }
 
 // parsePostDeletionPolicy defaults to refunding purchases from the last 30 days.

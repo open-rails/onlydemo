@@ -128,6 +128,12 @@ func (api *channelAPI) list(c fiber.Ctx) error {
 		if e != nil {
 			return billingUnavailable(c)
 		}
+		// Cards show the membership price so joining is one click from a list.
+		if v.Membership.Status == membershipOpen && !v.Membership.Free && !v.Membership.Member {
+			if list, e := api.billing.offers(c.Context(), membershipResource(id), true); e == nil && len(list) > 0 {
+				v.Membership.Offer = &list[0]
+			}
+		}
 		data = append(data, v)
 	}
 	next := ""
