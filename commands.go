@@ -53,7 +53,12 @@ func newRootCommand() *cobra.Command {
 		},
 	}
 	seedCommand.Flags().StringVar(&seedURL, "url", "http://127.0.0.1:3000", "running server base URL")
-	root.AddCommand(admin, seedCommand)
+	mediaCommand := &cobra.Command{Use: "media", Short: "Media maintenance", Args: cobra.NoArgs}
+	mediaCommand.AddCommand(&cobra.Command{
+		Use: "reprocess", Short: "Re-derive every item's media after a rendition policy change", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error { return reprocessMedia(cmd.Context(), cmd.OutOrStdout()) },
+	})
+	root.AddCommand(admin, seedCommand, mediaCommand)
 	return root
 }
 

@@ -3,10 +3,9 @@ import { EncodeProgress, HoverPreviewPicker, ImageCropDialog, MediaGallery, Vide
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useUploadQueue, type UseUploadQueue } from "@openrails/contentkit-upload/react";
 import type { Op } from "@openrails/contentkit-upload";
+import type { Post } from "../models";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  ArrowDown01Icon,
-  ArrowUp01Icon,
   BlurIcon,
   CropIcon,
   Delete02Icon,
@@ -36,11 +35,16 @@ import {
   uploadMessage,
   uploads,
   videoTypes,
+  useSlot,
   useSlotSaved,
   type MediaDownload,
   type MediaFile,
 } from "../media";
 import { CropDialog } from "./crop-dialog";
+import { SortableList } from "./sortable-list";
+import { UploadError, slotError as slotFailure } from "@openrails/contentkit-upload";
+import { toast } from "sonner";
+import { toastMediaError } from "../media-errors";
 import { FormError } from "./states";
 
 const TEASER = "teaser";
@@ -78,8 +82,9 @@ function Downloads({ name, downloads }: { name: string; downloads: MediaDownload
 
 // What this viewer may see, in manifest order, as a carousel or grid: every
 // image and video with full access, otherwise the blurred teaser and what a
-// purchase or membership unlocks.
-export function PostGallery({ postID, viewer }: { postID: number; viewer?: string }) {
+// purchase or membership unlocks. Videos show the post's cover.
+export function PostGallery({ post, viewer, unlock }: { post: Post; viewer?: string; unlock: () => void }) {
+  const postID = post.id;
   const media = useQuery({
     queryKey: ["post-media", postID, viewer],
     queryFn: () => readPost(postID, "large,blurred"),
@@ -103,11 +108,7 @@ export function PostGallery({ postID, viewer }: { postID: number; viewer?: strin
         refresh={() => media.refetch()}
         videoImages={art.data}
         renderLocked={() => (
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => document.querySelector(".feed-unlock")?.scrollIntoView({ behavior: "smooth", block: "center" })}
-          >
+          <Button size="sm" variant="secondary" onClick={unlock}>
             <HugeiconsIcon icon={SquareLock02Icon} data-icon="inline-start" />
             Unlock
           </Button>
@@ -212,11 +213,14 @@ export function DraftMediaEditor({
   initial,
   handle,
   onBusy,
+  onCount,
 }: {
   postID: number;
   initial: File[];
   handle: Ref<DraftMediaHandle>;
   onBusy: (busy: boolean) => void;
+  /** Images and videos in the draft, uploading or added. */
+  onCount?: (n: number) => void;
 }) {
   const queue = useUploadQueue(uploads, { ref: postRef(postID) });
   const seeded = useRef(false);
@@ -231,7 +235,7 @@ export function DraftMediaEditor({
       queue.pause();
     },
   }));
-  return <MediaEditor postID={postID} queue={queue} draft onBusy={onBusy} />;
+  return <MediaEditor postID={postID} queue={queue} draft onBusy={onBusy} onCount={onCount} />;
 }
 
 function MediaEditor({
@@ -240,12 +244,14 @@ function MediaEditor({
   queue,
   draft,
   onBusy,
+  onCount,
 }: {
   postID: number;
   channel?: string;
   queue: UseUploadQueue;
   draft?: boolean;
   onBusy?: (busy: boolean) => void;
+  onCount?: (n: number) => void;
 }) {
   const client = useQueryClient();
   const files = useQuery({
@@ -262,6 +268,7 @@ function MediaEditor({
   const saved = useSlotSaved();
   const messages = useMessages();
   const slotCrop = cropping?.slot && channel ? { name: cropping.name, slot: cropping.slot, ref: channelRef(channel) } : undefined;
+  const slotSpec = useSlot(slotCrop?.ref ?? channelRef(""), slotCrop?.slot ?? "", null, !!slotCrop);
   // The unedited "editor" variant, source dims and current edit per image.
   const editor = useQuery({
     queryKey: ["post-media-editor", postID],
@@ -298,7 +305,29 @@ function MediaEditor({
   const edit = useMutation({
     mutationFn: (ops: Op[]) => commit(postID, ops),
     onSuccess: refresh,
-    onError: (e) => setError(uploadMessage(e)),
+    onError: (e) => {
+      setError(uploadMessage(e));
+      toastMediaError(e, "Couldn't update the media");
+    },
+  });
+  // Drops move a file at once; the server's order replaces the guess, or a failure restores it.
+  const reorder = useMutation({
+    mutationFn: ({ name, index }: { name: string; index: number }) => commit(postID, [{ op: "move", name, index }]),
+    onMutate: async ({ name, index }) => {
+      await client.cancelQueries({ queryKey: ["post-files", postID] });
+      const prev = client.getQueryData<Awaited<ReturnType<typeof postFiles>>>(["post-files", postID]);
+      if (prev) {
+        const files = prev.files.filter((f) => f.name !== name);
+        files.splice(index, 0, prev.files.find((f) => f.name === name)!);
+        client.setQueryData(["post-files", postID], { ...prev, files });
+      }
+      return { prev };
+    },
+    onError: (e, _v, ctx) => {
+      if (ctx?.prev) client.setQueryData(["post-files", postID], ctx.prev);
+      toastMediaError(e, "Couldn't reorder the media");
+    },
+    onSettled: refresh,
   });
   // A draft commits the uploaded head of the queue, so the post keeps the order files were added in.
   const commitHead = async () => {
@@ -322,7 +351,10 @@ function MediaEditor({
       setError("");
       return refresh();
     },
-    onError: (e) => setError(uploadMessage(e)),
+    onError: (e) => {
+      setError(uploadMessage(e));
+      toastMediaError(e, "Couldn't add the media to the post");
+    },
   });
   // A draft commits each file as it finishes, so it can be cropped or picked as
   // the teaser before publishing; a live post commits on "Add to post".
@@ -331,6 +363,18 @@ function MediaEditor({
   useEffect(() => {
     if (draft && uploaded && !committing && !commitFailed) commitNow();
   }, [draft, uploaded, committing, commitFailed, commitNow]);
+  // Each failed upload and each queue-wide refusal is toasted once; the rows keep showing it.
+  const toasted = useRef(new Set<string>());
+  useEffect(() => {
+    for (const i of queue.items)
+      if (i.status === "failed" && !toasted.current.has(i.id)) {
+        toasted.current.add(i.id);
+        toastMediaError(i.error, `Couldn't upload ${i.file.name}`);
+      }
+  }, [queue.items]);
+  useEffect(() => {
+    if (queue.blocked) toastMediaError(queue.blocked, "Uploads paused");
+  }, [queue.blocked]);
   const busy = queue.items.length > 0 || committing || edit.isPending;
   useEffect(() => onBusy?.(busy), [busy, onBusy]);
 
@@ -343,6 +387,7 @@ function MediaEditor({
         images.filter((f) => isVideo(f.type)).length + queue.items.filter((i) => isVideo(i.file.type)).length,
     });
     setRefused(refused);
+    if (refused.length) toast.error(refused.length === 1 ? "A file was not added" : `${refused.length} files were not added`, { description: refused.join(" ") });
     queue.add(accepted, { name: uniqueName });
     if (queue.blocked) queue.start();
     if (commitFailed) publish.reset();
@@ -355,6 +400,8 @@ function MediaEditor({
     ]);
   const index = (name: string) => current.findIndex((f) => f.name === name);
   const empty = images.length === 0 && queue.items.length === 0;
+  const count = images.length + queue.items.length;
+  useEffect(() => onCount?.(count), [count, onCount]);
   return (
     <section className={draft ? "media-editor in-composer" : "media-editor"}>
       <header>
@@ -367,12 +414,20 @@ function MediaEditor({
         {!empty && <MediaDrop onFiles={add} />}
       </header>
       {empty && files.isSuccess && <MediaDrop empty onFiles={add} />}
-      <ol className="media-list">
-        {images.map((f, i) => {
+      <div className="grid gap-1">
+        <SortableList
+          className="media-list"
+          items={images}
+          id={(f) => f.name}
+          name={(f) => displayName(f.name)}
+          onMove={(from, to) => reorder.mutate({ name: images[from].name, index: index(images[to].name) })}
+        >
+          {(f, handle) => {
           const e = editable.get(f.name);
           const video = isVideo(f.type);
           return (
-            <li key={f.name}>
+            <>
+              {handle}
               <MediaThumb video={video} url={video && posterFile === f.name ? imagesOf?.poster.outputs[0]?.url : e?.url} />
               <span className="media-name" title={f.name}>
                 {displayName(f.name)}
@@ -381,7 +436,7 @@ function MediaEditor({
               {video && e?.hls && posterFile === f.name && (
                 <Badge variant="secondary">
                   <HugeiconsIcon icon={Image01Icon} data-icon="inline-start" />
-                  Poster
+                  Cover
                 </Badge>
               )}
               {video && e && !e.hls && !e.failed && <div className="media-encode"><EncodeProgress progress={e.progress} /></div>}
@@ -397,28 +452,10 @@ function MediaEditor({
                 </Badge>
               )}
               <span className="inline-actions">
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label="Move up"
-                  disabled={i === 0 || edit.isPending}
-                  onClick={() => edit.mutate([{ op: "move", name: f.name, index: index(images[i - 1].name) }])}
-                >
-                  <HugeiconsIcon icon={ArrowUp01Icon} />
-                </Button>
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label="Move down"
-                  disabled={i === images.length - 1 || edit.isPending}
-                  onClick={() => edit.mutate([{ op: "move", name: f.name, index: index(images[i + 1].name) }])}
-                >
-                  <HugeiconsIcon icon={ArrowDown01Icon} />
-                </Button>
                 {video && e?.hls && (
                   <>
                     <Button size="sm" variant="ghost" onClick={() => setPicking({ file: f.name, what: "poster" })}>
-                      Choose poster
+                      Set cover
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => setPicking({ file: f.name, what: "preview" })}>
                       Hover preview
@@ -476,11 +513,22 @@ function MediaEditor({
                   <HugeiconsIcon icon={Delete02Icon} />
                 </Button>
               </span>
-            </li>
+            </>
           );
-        })}
-        {queue.items.map((item, i) => (
-          <li key={item.id} className="queued" data-failed={item.status === "failed" || undefined}>
+          }}
+        </SortableList>
+        <SortableList
+          className="media-list"
+          items={queue.items}
+          id={(item) => item.id}
+          name={(item) => item.file.name}
+          disabled={draft}
+          row={(item) => ({ className: "queued", "data-failed": item.status === "failed" || undefined })}
+          onMove={(from, to) => queue.move(queue.items[from].id, to)}
+        >
+          {(item, handle) => (
+          <>
+            {!draft && handle}
             <MediaThumb video={isVideo(item.file.type)} />
             <span className="media-name" title={item.file.name}>
               {item.file.name}
@@ -498,28 +546,6 @@ function MediaEditor({
                     : item.status}
             </span>
             <span className="inline-actions">
-              {!draft && (
-                <>
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label="Move up"
-                    disabled={i === 0}
-                    onClick={() => queue.move(item.id, i - 1)}
-                  >
-                    <HugeiconsIcon icon={ArrowUp01Icon} />
-                  </Button>
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label="Move down"
-                    disabled={i === queue.items.length - 1}
-                    onClick={() => queue.move(item.id, i + 1)}
-                  >
-                    <HugeiconsIcon icon={ArrowDown01Icon} />
-                  </Button>
-                </>
-              )}
               {item.status === "failed" && (
                 <Button size="sm" variant="ghost" onClick={() => queue.retry(item.id)}>
                   Retry
@@ -529,9 +555,10 @@ function MediaEditor({
                 <HugeiconsIcon icon={Delete02Icon} />
               </Button>
             </span>
-          </li>
-        ))}
-      </ol>
+          </>
+          )}
+        </SortableList>
+      </div>
       {imagesStep && (
         <div className="media-encode media-images">
           <EncodeProgress progress={imagesStep} />
@@ -581,6 +608,7 @@ function MediaEditor({
           aspect={channelSlots[slotCrop.slot].aspect}
           round={slotCrop.slot === "avatar"}
           targetWidth={channelSlots[slotCrop.slot].target}
+          minWidth={slotSpec?.min_width}
           title={channelSlots[slotCrop.slot].label}
           busy={slotSaving}
           rendering={slotSaving}
@@ -593,12 +621,16 @@ function MediaEditor({
               .setSlotFromFile(ref, slot, name, e ?? {}, { from: postRef(postID) })
               .then((m) => (m.pending ? uploads.waitForSlot(ref, slot) : m))
               .then((m) => {
-                if (m.error) throw new Error(m.error);
+                if (m.pending) throw new UploadError("render_timeout", "the image is still rendering");
+                if (m.error) throw slotFailure(m);
                 saved(ref, slot, m);
                 setNotice(`Channel ${slot} updated.`);
                 setCropping(undefined);
               })
-              .catch((err: unknown) => setSlotError(messages.error(err)))
+              .catch((err: unknown) => {
+                setSlotError(messages.error(err));
+                toastMediaError(err, "slot.save");
+              })
               .finally(() => setSlotSaving(false));
           }}
         />

@@ -8,9 +8,9 @@ import { Spinner } from "@/components/ui/spinner";
 import { EmptyState, ErrorState, Loading } from "../components/states";
 import {
   ChannelCard,
-  PostCard,
   SuggestedCreators,
 } from "../components/cards";
+import { PostView } from "../components/post-view";
 import { useChannels } from "../channels";
 import { useAuth } from "../session";
 import { channelsPath, newChannelPath } from "../paths";
@@ -74,7 +74,7 @@ export function HomePage() {
       ) : posts.data?.length ? (
         <div className="feed">
           {posts.data.map((post) => (
-            <PostCard
+            <PostView
               key={post.id}
               post={post}
               handle={post.channel_slug}

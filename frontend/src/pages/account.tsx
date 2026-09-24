@@ -25,7 +25,8 @@ import {
 } from "../components/states";
 import { AvatarUpload } from "@openrails/contentkit-upload/ui";
 import { Card, CardContent } from "@/components/ui/card";
-import { UserAvatar, PostCard, ChannelCard } from "../components/cards";
+import { UserAvatar, ChannelCard } from "../components/cards";
+import { PostView } from "../components/post-view";
 import { userRef, useSlot, useSlotSaved } from "../media";
 import { useAuth } from "../session";
 import { channelsPath, newChannelPath } from "../paths";
@@ -162,7 +163,7 @@ function Library({
   return unique.length ? (
     <div className="feed">
       {unique.map((post) => (
-        <PostCard post={{ ...post, purchased: true }} key={post.id} />
+        <PostView post={{ ...post, purchased: true }} key={post.id} />
       ))}
     </div>
   ) : (

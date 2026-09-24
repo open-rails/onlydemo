@@ -3,14 +3,10 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { UploadUiProvider } from "@openrails/contentkit-upload/ui";
-import { de } from "@openrails/contentkit-upload/locales/de";
-import { en } from "@openrails/contentkit-upload/locales/en";
-import { es } from "@openrails/contentkit-upload/locales/es";
-import { ja } from "@openrails/contentkit-upload/locales/ja";
-import { ko } from "@openrails/contentkit-upload/locales/ko";
-import { zh } from "@openrails/contentkit-upload/locales/zh";
+import { Toaster } from "@/components/ui/sonner";
 import { AuthHost } from "./auth";
 import { uploads } from "./media";
+import { toastMediaError, uploadMessages } from "./media-errors";
 import { AppLayout, NotFoundPage, RequireAccount } from "./App";
 import { HomePage, ChannelsPage } from "./pages/explore";
 import { ChannelPage, NewChannelPage } from "./pages/channel";
@@ -31,10 +27,6 @@ const queryClient = new QueryClient({
     mutations: { retry: false },
   },
 });
-// ContentKit's upload UI follows the page's shadcn tokens, .dark class and <html lang>.
-const uploadLocales = { de, en, es, ja, ko, zh };
-const uploadMessages =
-  uploadLocales[document.documentElement.lang.slice(0, 2) as keyof typeof uploadLocales] ?? en;
 const router = createBrowserRouter([
   {
     element: (
@@ -83,8 +75,14 @@ const router = createBrowserRouter([
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <UploadUiProvider client={uploads} appearance={{ theme: "inherit" }} messages={uploadMessages}>
+      <UploadUiProvider
+        client={uploads}
+        appearance={{ theme: "inherit" }}
+        messages={uploadMessages}
+        onError={(error, { operation }) => toastMediaError(error, operation)}
+      >
         <RouterProvider router={router} />
+        <Toaster position="bottom-right" richColors closeButton />
       </UploadUiProvider>
     </QueryClientProvider>
   </StrictMode>,

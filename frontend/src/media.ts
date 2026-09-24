@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createUploadClient, UploadError } from "@openrails/contentkit-upload";
 import type { CommitFile, Edit, EncodeProgress, Op, ReadResult, RefBody, SlotManifest, VideoImages } from "@openrails/contentkit-upload";
+import { mediaMessage } from "./media-errors";
 import { auth, request } from "./api";
 
 // Browser uploads go straight to the bucket; the app only presigns and commits.
@@ -53,7 +54,7 @@ export const limits = {
   imageBytes: 25 << 20,
   videoBytes: 20 * 1024 ** 3,
 };
-export const imageTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+export const imageTypes = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"]; // keep in sync with media.go imageTypes
 export const videoTypes = ["video/mp4", "video/webm", "video/quicktime", "video/x-matroska"];
 export const isVideo = (type?: string) => !!type?.startsWith("video/");
 
@@ -131,7 +132,7 @@ export const commit = (id: number | string, ops: Op[]) =>
   uploads.commit(postRef(id), ops);
 
 export function uploadMessage(error: unknown) {
-  if (!(error instanceof UploadError)) return String(error);
+  if (!(error instanceof UploadError)) return mediaMessage(error);
   switch (error.code) {
     case "rate_limited":
       return `Upload limit reached. Try again in ${Math.ceil((error.retryAfter ?? 60) / 60)} min.`;
@@ -141,12 +142,10 @@ export function uploadMessage(error: unknown) {
       return "That file is too large (images 25 MiB, videos 20 GiB).";
     case "too_many_files":
       return `A post holds at most ${limits.files} files, ${limits.videos} of them videos.`;
-    case "type_not_allowed":
-      return "Only JPEG, PNG, WebP and GIF images and MP4, WebM, MOV and MKV videos are supported.";
     case "forbidden":
       return "You can't upload here.";
   }
-  return error.message;
+  return mediaMessage(error);
 }
 
 // Slots (avatars, covers): listings carry a manifest from the app API; a

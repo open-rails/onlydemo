@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { request } from "../api";
 import type { AccessPolicy, Channel, Post } from "../models";
 import { micros } from "../format";
@@ -32,7 +32,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { FormError } from "./states";
 import { MemberStar } from "./policy-badge";
 import { DraftMediaEditor, MediaDrop, type DraftMediaHandle } from "./post-media";
-import { screenFiles } from "../media";
+import { postFiles, screenFiles } from "../media";
 
 const policies: Array<{ value: AccessPolicy; title: string; detail: string }> =
   [
@@ -170,6 +170,12 @@ export function PostForm({
       ? "public"
       : chosen;
   const [validation, setValidation] = useState("");
+  // Text is optional once the post has an image or video.
+  const [hasText, setHasText] = useState(!!(post?.title.trim() || post?.body?.trim()));
+  const [draftMedia, setDraftMedia] = useState(0);
+  const saved = useQuery({ queryKey: ["post-files", post?.id], queryFn: () => postFiles(post!.id), enabled: !!post });
+  const hasMedia = draftMedia > 0 || !!saved.data?.files.some((f) => f.name !== "teaser");
+  const needsText = !hasMedia && !hasText;
   const offer = post?.offers?.find((value) => !value.auto_renew);
   const save = useMutation({
     mutationFn: (body: object) =>
@@ -186,6 +192,10 @@ export function PostForm({
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setValidation("");
+    if (needsText) {
+      setValidation(textRequired);
+      return;
+    }
     const data = new FormData(event.currentTarget);
     try {
       save.mutate({
@@ -211,7 +221,13 @@ export function PostForm({
     }
   };
   return (
-    <form onSubmit={submit}>
+    <form
+      onSubmit={submit}
+      onInput={(e) => {
+        const f = e.currentTarget.elements as unknown as Record<string, HTMLInputElement | undefined>;
+        setHasText(!!(f.title?.value.trim() || f.body?.value.trim()));
+      }}
+    >
       <FieldGroup>
         {channels && channels.length > 1 && (
           <Field>
@@ -246,7 +262,7 @@ export function PostForm({
             <Input
               id="post-title"
               name="title"
-              required
+              required={!hasMedia}
               maxLength={200}
               autoFocus
               defaultValue={post?.title}
@@ -257,7 +273,6 @@ export function PostForm({
             <Input
               id="post-slug"
               name="slug"
-              required
               pattern="[a-z0-9]+(-[a-z0-9]+)*"
               maxLength={120}
               defaultValue={post?.slug}
@@ -265,7 +280,7 @@ export function PostForm({
             />
             <FieldDescription>
               Unique within this channel. Lowercase letters, numbers, and
-              dashes.
+              dashes. Leave empty to make one from the title.
             </FieldDescription>
           </Field>
         </div>
@@ -275,14 +290,14 @@ export function PostForm({
             id="post-body"
             name="body"
             className="min-h-48"
-            required
             defaultValue={post?.body}
-            placeholder="Start writing…"
+            placeholder={hasMedia ? "Optional" : "Start writing…"}
           />
+          {needsText && <FieldDescription data-testid="text-required">{textRequired}</FieldDescription>}
         </Field>
         {!post &&
           (draft ? (
-            <DraftMediaEditor key={draft.id} postID={draft.id} initial={draft.files} handle={media} onBusy={onBusy} />
+            <DraftMediaEditor key={draft.id} postID={draft.id} initial={draft.files} handle={media} onBusy={onBusy} onCount={setDraftMedia} />
           ) : (
             <Field>
               <FieldLabel>Images and videos</FieldLabel>
@@ -384,7 +399,7 @@ export function PostForm({
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={save.isPending || mediaBusy || createDraft.isPending}>
+            <Button type="submit" disabled={save.isPending || mediaBusy || createDraft.isPending || needsText}>
               {(save.isPending || mediaBusy) && <Spinner data-icon="inline-start" />}
               {post ? "Save changes" : mediaBusy ? "Uploading…" : "Publish post"}
               <HugeiconsIcon icon={ArrowRight02Icon} data-icon="inline-end" />
@@ -395,6 +410,7 @@ export function PostForm({
     </form>
   );
 }
+const textRequired = "Add a title or some text, or attach an image or video.";
 function FormActions({ children }: { children: ReactNode }) {
   return <div className="form-actions">{children}</div>;
 }

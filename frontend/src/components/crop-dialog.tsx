@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
 import { FormError } from "./states";
+import { mediaMessage, toastMediaError } from "../media-errors";
 
 export interface Dims {
   w: number;
@@ -212,7 +213,8 @@ export function CropDialog({
               setError("");
               onSave(edit).then(onClose, (e: unknown) => {
                 setSaving(false);
-                setError(e instanceof Error ? e.message : String(e));
+                setError(mediaMessage(e));
+                toastMediaError(e, "Couldn't save the crop");
               });
             }}
           >

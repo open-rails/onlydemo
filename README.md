@@ -152,18 +152,21 @@ and commits (`/api/v1/media/upload/*`).
   MKV) mixed in one order, plus an optional image `teaser` derived as a
   blurred WebP (the app refuses a video teaser). ContentKit holds the caps
   (`Kind.MaxFiles`, `TypeLimits`): 50 files per post (teaser included), 10 of
-  them videos; images up to 25 MiB, videos up to 20 GiB (multipart, 4K sources); 409 `too_many_files`. `channel`: public `avatar` (1:1, 128/256/512 px) and
-  `cover` (3:1, 1500/3000 px) slots; `user`: `avatar`.
+  them videos; images up to 25 MiB, videos up to 20 GiB (multipart, 4K sources); 409 `too_many_files`. `channel`: public `avatar` (1:1, 128/512 px) and
+  `cover` (3:1, 900/3000 px, crops from 600 px) slots; `user`: `avatar`.
 - **Slots.** The SDK UI crops before saving (`AvatarUpload` on the account
   page; `SlotEditor` + `SlotEditMenu` over the channel header): the original
-  is kept, EXIF orientation applied, and ContentKit renders every width up to
-  the crop (never upscaled). "Edit crop" re-renders the kept original
+  is kept, EXIF orientation applied, and ContentKit renders the small and
+  large rendition (the large one at the crop's width when narrower; never
+  upscaled). "Edit crop" re-renders the kept original
   (`edit-slot`); "Use as channel avatar/cover" on a post image copies it
   (`commit-slot-from-file` with `from`; the manager must be allowed to upload to
   both). The `SlotEncoded` hook stores each slot's `SlotStamp` in
   `media_slots.stamp`; listings rebuild every output with
-  `Reader.SlotOutputs(ref, slot, stamp)` (immutable `?v=` URLs, no bucket
-  reads), and the frontend renders `SlotImage` with `srcset`/`sizes`.
+  `Reader.StampedSlot(ref, slot, stamp)` (immutable `?v=` URLs, no bucket
+  reads). SDK components pick the rendition for their rendered width × 2–3×
+  density. After changing widths or variant specs, run `onlydemo media
+  reprocess` (one `ProcessJob` per post, channel and user with media).
 - **Edits.** Crop and rotate are ContentKit's non-destructive file edits
   (commit op `edit`): variants re-derive from the untouched original. The
   post image cropper (react-easy-crop with the SDK's `useCrop`) draws the `Unedited`,
@@ -193,17 +196,16 @@ and commits (`/api/v1/media/upload/*`).
   in the order added; Publish sends `draft_id` and turns the draft into the
   post. Cancel deletes the draft with its folder (`DELETE /api/v1/posts/{id}`);
   drafts abandoned for 24 h are swept hourly.
-- **Posters.** Each post with a video has a 16:9 poster (480/960/1920) and a
-  silent hover-preview loop (MP4 + WebP, 320/640), cut from its HLS. The
+- **Covers.** Each post with a video has a cover at the video's native aspect
+  (`Video.PosterWidths` 640/1280/1920: the ~620 px feed column at 2–3×) and a
+  silent hover-preview loop (MP4 + WebP, 320/640, still 16:9), cut from its HLS. The
   worker picks an automatic frame and section; in the composer and the post's
-  media editor, "Choose poster" (`VideoPosterPicker`: an exact frame via
-  `GET /api/v1/media/upload/frame`, cropped, or an uploaded image) and "Hover
+  media editor, "Set cover" (`VideoPosterPicker`: an exact frame via
+  `GET /api/v1/media/upload/frame`, optionally cropped at the video's aspect, or an uploaded image) and "Hover
   preview" (`HoverPreviewPicker`) change them. Frame posters reach the app's
   image job through the worker's `MEDIA_HOST_RIVER_SCHEMA`; the app needs
   ffmpeg for `/frame`. `SlotEncoded` stores the poster stamp like other slots,
-  so listings carry `poster` (srcset) and `hover_preview` URLs without reads,
-  and feed cards (`VideoPoster`) play the preview on hover or focus unless
-  the viewer prefers reduced motion. Both render to ContentKit's token-gated
+  so listings carry `poster` and `hover_preview` URLs without reads. Both render to ContentKit's token-gated
   `editor/` area and are copied to tokenless `public/` URLs according to what
   anonymous viewers may see (`JobsConfig.Resolver`, default `Exposure`):
   drafts nothing, public posts poster and preview, members-only or paid

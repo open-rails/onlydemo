@@ -59,7 +59,8 @@ import {
   FormError,
   Loading,
 } from "../components/states";
-import { Avatar, Cover, PostCard } from "../components/cards";
+import { Avatar, Cover } from "../components/cards";
+import { PostView } from "../components/post-view";
 import { membershipOffer, myChannelsKey, rememberPostChannel } from "../channels";
 import { ChannelTeam } from "../components/channel-team";
 import { SlotEditError, SlotEditMenu, SlotEditor } from "@openrails/contentkit-upload/ui";
@@ -249,7 +250,7 @@ export function ChannelPage() {
         ) : posts.data?.length ? (
           <div className="feed">
             {posts.data.map((post) => (
-              <PostCard
+              <PostView
                 post={{ ...post, channel_name: current.name }}
                 handle={current.slug}
                 membership={current.membership}

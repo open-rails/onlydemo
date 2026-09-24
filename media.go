@@ -47,7 +47,7 @@ const (
 )
 
 var (
-	imageTypes = []string{"image/jpeg", "image/png", "image/webp", "image/gif"}
+	imageTypes = []string{"image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"}
 	videoTypes = []string{"video/mp4", "video/webm", "video/quicktime", "video/x-matroska"}
 	// editorSpec is the whole source, ignoring crop/rotate, for the cropper;
 	// only editors (Resolution.Editor) are signed it.
@@ -63,7 +63,9 @@ var (
 	mediaKinds = []media.Kind{
 		{Name: kindPost, Types: append(append([]string{}, imageTypes...), videoTypes...), MaxBytes: maxVideoBytes, MaxFiles: maxPostFiles,
 			TypeLimits: map[string]media.Limit{"image": {MaxBytes: maxImageBytes}, "video": {MaxFiles: maxPostVideos}},
-			Specs:      postSpecs, Video: &media.Video{}}, // default ladder (short sides up to 2160), aspects 1:2.4–2.4:1
+			// Default ladder (short sides up to 2160), aspects 1:2.4–2.4:1. Covers
+			// fill the ~620 px feed column at 2–3× (and a 390 px phone at 3×).
+			Specs: postSpecs, Video: &media.Video{PosterWidths: []int{640, 1280, 1920}}},
 		{Name: kindChannel, Types: imageTypes, MaxBytes: maxImageBytes, Slots: map[string]media.Slot{slotAvatar: avatarSlot, slotCover: coverSlot}},
 		{Name: media.UserKind, Types: imageTypes, MaxBytes: maxImageBytes, Slots: map[string]media.Slot{slotAvatar: avatarSlot}},
 	}
@@ -216,6 +218,10 @@ func newMedia(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth
 		return nil, err
 	}
 	hooks := media.Hooks{DownloadName: m.downloadName, Failed: func(_ context.Context, ref contentref.ContentRef, file string, err error) {
+		if ie := media.AsImageError(err); ie != nil { // a refused upload, shown to its editor
+			slog.Info("media file refused", "ref", ref.String(), "file", file, "code", ie.Code, "reason", ie.Message)
+			return
+		}
 		slog.Warn("media file cannot be derived", "ref", ref.String(), "file", file, "err", err)
 	}, SlotEncoded: m.slotEncoded}
 	proc, err := image.New(image.Config{Store: store, Kinds: kinds, Manifests: m.manifests, Hooks: hooks,
@@ -444,6 +450,17 @@ func (m *mediaService) files(c fiber.Ctx) error {
 	}
 	c.Set("Cache-Control", "no-store")
 	return c.JSON(out)
+}
+
+// hasMedia reports whether a post holds an image or video (the teaser is a copy).
+func (m *mediaService) hasMedia(ctx context.Context, id int64) (bool, error) {
+	man, _, err := m.manifests.Get(ctx, m.postRef(id))
+	if errors.Is(err, media.ErrNotFound) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(man.Files, func(f media.File) bool { t, _ := f.Meta["teaser"].(bool); return !t }), nil
 }
 
 // Actor implements media.Identity.

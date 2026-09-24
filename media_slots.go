@@ -19,8 +19,11 @@ const (
 )
 
 var (
-	avatarSlot = media.Slot{Aspect: 1, Widths: []int{128, 256, 512}, MinWidth: 128, Quality: 85}
-	coverSlot  = media.Slot{Aspect: 3, Widths: []int{600, 3000}, MinWidth: 600, Quality: 85}
+	// Two renditions each (small, large; the SDK picks by rendered size × 2–3×
+	// density): avatars show at 40–96 px, channel headers up to ~1000 px wide.
+	// ContentKit renders the large rung at the crop's width when it is narrower.
+	avatarSlot = media.Slot{Aspect: 1, Widths: []int{128, 512}, MinWidth: 128, Quality: 85}
+	coverSlot  = media.Slot{Aspect: 3, Widths: []int{900, 3000}, MinWidth: 600, Quality: 85}
 )
 
 type slotKey struct{ ID, Slot string }
@@ -53,20 +56,15 @@ func (m *mediaService) slots(ctx context.Context, kind string, ids []string, nam
 	}
 	var id, slot, stamp string
 	_, err = pgx.ForEachRow(rows, []any{&id, &slot, &stamp}, func() error {
-		spec, ok := k.Slots[slot]
-		if !ok {
+		if _, ok := k.Slots[slot]; !ok {
 			return nil
 		}
-		version, _, err := media.SlotStamp(stamp).Parse()
+		man, err := m.reader.StampedSlot(m.ref(kind, id), slot, media.SlotStamp(stamp))
 		if err != nil {
 			return err
 		}
-		outs, err := m.reader.SlotOutputs(m.ref(kind, id), slot, media.SlotStamp(stamp))
-		if err != nil {
-			return err
-		}
-		if len(outs) > 0 {
-			out[slotKey{id, slot}] = &media.SlotManifest{Aspect: spec.Aspect, Version: version, Outputs: outs}
+		if len(man.Outputs) > 0 {
+			out[slotKey{id, slot}] = &man
 		}
 		return nil
 	})

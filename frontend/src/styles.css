@@ -444,22 +444,11 @@
   .feed-text p {
     font-size: 0.92rem;
     white-space: pre-line;
-    overflow: hidden;
-    display: -webkit-box;
-    -webkit-line-clamp: 4;
-    -webkit-box-orient: vertical;
+    overflow-wrap: anywhere;
   }
-  .feed-media {
-    --h: 200;
-    position: relative;
-    display: grid;
-    place-items: center;
-    aspect-ratio: 16 / 9;
-    overflow: hidden;
-    background:
-      radial-gradient(circle at 30% 30%, hsl(var(--h) 60% 70% / 0.9), transparent 55%),
-      radial-gradient(circle at 75% 70%, hsl(calc(var(--h) + 60) 60% 55% / 0.9), transparent 60%),
-      hsl(calc(var(--h) + 30) 35% 45%);
+  .feed-more {
+    color: var(--primary);
+    font-weight: 600;
   }
   .feed-video.feed-video {
     border-radius: 0;
@@ -478,13 +467,6 @@
   .media-thumb[data-video] img {
     object-fit: cover;
   }
-  .feed-media:before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    backdrop-filter: blur(24px);
-    background: #0000001f;
-  }
   .lock-badge {
     position: relative;
     width: 76px;
@@ -495,20 +477,6 @@
     background: #ffffff2e;
     border: 1px solid #ffffff5c;
     color: #fff;
-  }
-  .media-meta {
-    position: absolute;
-    left: 14px;
-    bottom: 12px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 11px;
-    border-radius: 999px;
-    background: #0000004d;
-    color: #fff;
-    font-size: 0.75rem;
-    font-weight: 650;
   }
   .feed-unlock {
     padding: 14px 18px 4px;
@@ -879,9 +847,6 @@
     line-height: 1.75;
     padding-top: 6px;
   }
-  .locked-content {
-    padding-bottom: 16px;
-  }
   .purchase-panel h3 {
     margin: 12px 0 6px;
   }
@@ -1193,11 +1158,19 @@
       transform: rotate(360deg);
     }
   }
+  /* Post media spans the card's full width at its native aspect. */
   .post-gallery {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    padding: 0 16px 16px;
+    padding-bottom: 12px;
+  }
+  .post-gallery [data-ckui="gallery-header"],
+  .post-gallery .video-downloads {
+    padding-inline: 16px;
+  }
+  .post-gallery [data-ckui="stage"] {
+    border-radius: 0;
   }
   .media-editor {
     display: flex;

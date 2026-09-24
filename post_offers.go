@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"log"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -127,6 +129,9 @@ func (api *postAPI) syncOffer(ctx context.Context, args postOfferArgs) error {
 	}
 	if status == "active" {
 		return nil
+	}
+	if strings.TrimSpace(title) == "" {
+		title = "Post " + strconv.FormatInt(args.PostID, 10)
 	}
 	if err = api.billing.setOffer(ctx, channel, postResource(key), title, args.Price, false, false); err != nil {
 		return err

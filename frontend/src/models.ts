@@ -51,7 +51,7 @@ export interface Post {
   purchased?: boolean;
   has_membership?: boolean;
   channel_avatar?: SlotManifest;
-  // Posts with a video: the poster (16:9 srcset) and its silent hover loop.
+  // Posts with a video: the cover (native-aspect srcset) and its silent hover loop.
   poster?: SlotManifest;
   hover_preview?: { mp4: string; webp: string };
   access_policy: AccessPolicy;

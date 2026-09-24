@@ -94,6 +94,23 @@ func postID(c fiber.Ctx) (int64, error) {
 	return id, nil
 }
 func normalSlug(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
+
+var slugBreaks = regexp.MustCompile(`[^a-z0-9]+`)
+
+// fillSlug gives a post without a slug one from its title, else a short random token.
+func fillSlug(p *post) {
+	if p.Slug != "" {
+		return
+	}
+	s := strings.Trim(slugBreaks.ReplaceAllString(strings.ToLower(p.Title), "-"), "-")
+	if len(s) > 60 {
+		s = strings.TrimRight(s[:60], "-")
+	}
+	if s == "" || reservedPostSlugs[s] {
+		s = "post-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
+	}
+	p.Slug = s
+}
 func viewer(c fiber.Ctx) string {
 	if cl, ok := authkitfiber.UserClaims(c); ok {
 		return cl.UserID
@@ -253,9 +270,13 @@ var postSlug = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 // Words a future /c/<channel>/<word> page could need.
 var reservedPostSlugs = map[string]bool{"new": true, "edit": true, "settings": true, "members": true, "team": true, "posts": true, "about": true, "subscribe": true}
 
-func validatePost(p post) error {
-	if strings.TrimSpace(p.Slug) == "" || strings.TrimSpace(p.Title) == "" || strings.TrimSpace(p.Body) == "" {
-		return errors.New("slug, title and body are required")
+const needsText = "Add a title or some text, or attach an image or video."
+
+// validatePost checks a post with a slug (see fillSlug). Text is optional
+// when it has media.
+func validatePost(p post, hasMedia bool) error {
+	if !hasMedia && strings.TrimSpace(p.Title) == "" && strings.TrimSpace(p.Body) == "" {
+		return errors.New(needsText)
 	}
 	if len(p.Title) > 300 || len(p.Body) > 1_000_000 || len(p.Slug) > 120 {
 		return errors.New("post is too large")
@@ -295,14 +316,18 @@ func (api *postAPI) create(c fiber.Ctx) error {
 	if in.Draft {
 		return api.createDraft(c, id)
 	}
-	if in.Slug == nil || in.Title == nil || in.Body == nil {
-		return clientError(c, 400, "channel_id, slug, title and body are required")
-	}
-	p := post{AuthorID: viewer(c), ChannelID: id, BillingKey: uuid.NewString(), Slug: normalSlug(*in.Slug), Title: *in.Title, Body: *in.Body, AccessPolicy: "public", OfferStatus: "none"}
+	p := post{AuthorID: viewer(c), ChannelID: id, BillingKey: uuid.NewString(), Slug: normalSlug(deref(in.Slug)), Title: deref(in.Title), Body: deref(in.Body), AccessPolicy: "public", OfferStatus: "none"}
 	if in.AccessPolicy != nil {
 		p.AccessPolicy = *in.AccessPolicy
 	}
-	if err = validatePost(p); err != nil {
+	fillSlug(&p)
+	hasMedia := false
+	if in.DraftID != nil {
+		if hasMedia, err = api.media.hasMedia(c.Context(), *in.DraftID); err != nil {
+			return clientError(c, 500, "media store error")
+		}
+	}
+	if err = validatePost(p, hasMedia); err != nil {
 		return clientError(c, 400, err.Error())
 	}
 	var job *postOfferArgs
@@ -438,7 +463,12 @@ func (api *postAPI) update(c fiber.Ctx) error {
 	if in.AccessPolicy != nil {
 		p.AccessPolicy = *in.AccessPolicy
 	}
-	if err = validatePost(p); err != nil {
+	fillSlug(&p)
+	hasMedia, err := api.media.hasMedia(c.Context(), id)
+	if err != nil {
+		return clientError(c, 500, "media store error")
+	}
+	if err = validatePost(p, hasMedia); err != nil {
 		return clientError(c, 400, err.Error())
 	}
 	if ok, err := api.channels.requireMembership(c.Context(), p.ChannelID, p.AccessPolicy); in.AccessPolicy != nil && (err != nil || !ok) {
@@ -676,4 +706,11 @@ func bindJSON(c fiber.Ctx, value any) error {
 		return errors.New("expected one JSON object")
 	}
 	return nil
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
