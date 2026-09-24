@@ -64,10 +64,11 @@ func (api *channelAPI) create(c fiber.Ctx) error {
 	}
 	ref := authkit.GroupRef{Persona: channelPersona, Instance: input.Slug}
 	group, err := api.auth.client.GroupInstanceForSlug(c.Context(), ref)
+	resuming := false
 	if errors.Is(err, authkit.ErrGroupNotFound) {
 		id, createErr := api.auth.client.CreatePermissionGroup(c.Context(), authkit.CreatePermissionGroupRequest{Persona: channelPersona, InstanceSlug: input.Slug, DisplayName: input.Name, OwnerSubjectID: user.UserID})
 		if createErr != nil {
-			return clientError(c, http.StatusConflict, "channel slug is unavailable")
+			return clientError(c, http.StatusConflict, "That channel slug is already taken. Choose another.")
 		}
 		group = authkit.GroupInstance{ID: id, Persona: channelPersona, InstanceSlug: input.Slug, DisplayName: input.Name}
 	} else if err != nil {
@@ -80,8 +81,9 @@ func (api *channelAPI) create(c fiber.Ctx) error {
 			return clientError(c, http.StatusServiceUnavailable, "permission service is unavailable")
 		}
 		if !allowed {
-			return clientError(c, http.StatusConflict, "channel slug is unavailable")
+			return clientError(c, http.StatusConflict, "That channel slug is already taken. Choose another.")
 		}
+		resuming = true
 	}
 	release, err := api.lock(c.Context(), group.ID)
 	if err != nil {
@@ -93,6 +95,16 @@ func (api *channelAPI) create(c fiber.Ctx) error {
 	group, err = api.auth.client.GroupInstanceByID(c.Context(), group.ID)
 	if err != nil {
 		return clientError(c, http.StatusConflict, "channel is no longer available")
+	}
+	// Only a half-created channel (group without row) may be resumed.
+	if resuming {
+		var exists bool
+		if err := api.pool.QueryRow(c.Context(), `SELECT EXISTS(SELECT 1 FROM `+api.table+` WHERE id=$1)`, group.ID).Scan(&exists); err != nil {
+			return databaseError(c, err)
+		}
+		if exists {
+			return clientError(c, http.StatusConflict, "That channel slug is already taken. Choose another.")
+		}
 	}
 	_, err = api.pool.Exec(c.Context(), `INSERT INTO `+api.table+`(id,created_by) VALUES($1,$2) ON CONFLICT(id) DO NOTHING`, group.ID, user.UserID)
 	if err != nil {

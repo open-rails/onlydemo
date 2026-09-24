@@ -117,6 +117,9 @@ func smoke() error {
 	if err != nil {
 		return err
 	}
+	if _, err := owner.call("POST", "/api/v1/channels", ownerToken, map[string]any{"slug": "smoke-channel", "name": "Duplicate"}, "", 409); err != nil {
+		return fmt.Errorf("duplicate channel slug: %w", err)
+	}
 	post, err := owner.call("POST", "/api/v1/posts", ownerToken, map[string]any{"channel_id": ch["id"], "slug": "smoke-post", "title": "Manual purchase", "body": "Paid content", "access_policy": "ppv", "price": map[string]any{"unit_amount": "4990000", "currency": "USD"}}, "", 201)
 	if err != nil {
 		return err
