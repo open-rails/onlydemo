@@ -7,10 +7,15 @@ vars:
 
 tasks:
   dev:up:
-    desc: Start local PostgreSQL and MinIO (with the media bucket)
+    desc: Start local PostgreSQL and MinIO with the media bucket (idempotent)
     cmds:
       - docker compose up -d --wait postgres minio
       - docker compose run --rm bucket
+
+  migrate:
+    desc: Initialize application and library storage
+    cmds:
+      - go run . migrate
 
   dev:down:
     desc: Stop and remove the local services and their data
@@ -39,8 +44,9 @@ tasks:
         go run github.com/open-rails/contentkit/cmd/media-worker
 
   run:
-    desc: Run Go with Air, the React frontend with Vite, the media access worker and the video worker
+    desc: Migrate, then run Go with Air, Vite, the media access worker and the video worker (task dev:up first)
     cmds:
+      - task: migrate
       - |
         set -e
         pnpm --dir frontend dev --host 127.0.0.1 &
@@ -53,9 +59,10 @@ tasks:
         PUBLIC_URL="${DEV_PUBLIC_URL:-http://localhost:5173}" {{.AIR_BIN}} -c air.toml
 
   run:embedded:
-    desc: Build the embedded frontend and run the standalone Go binary
+    desc: Migrate, build the embedded frontend and run the standalone Go binary (task dev:up first)
     deps: [frontend:build]
     cmds:
+      - task: migrate
       - |
         set -e
         task media:access &

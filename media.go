@@ -40,7 +40,7 @@ const (
 // Post ceilings (teaser included in the file count).
 const (
 	maxImageBytes = 25 << 20
-	maxVideoBytes = 2 << 30
+	maxVideoBytes = 20 << 30 // room for long 4K sources; multipart
 	maxPostFiles  = 50
 	maxPostVideos = 10
 )
@@ -48,8 +48,9 @@ const (
 var (
 	imageTypes = []string{"image/jpeg", "image/png", "image/webp", "image/gif"}
 	videoTypes = []string{"video/mp4", "video/webm", "video/quicktime", "video/x-matroska"}
-	// editorSpec is the whole source, ignoring crop/rotate, for the cropper.
-	editorSpec = media.Spec{Width: 1200, Height: 1200, Fit: media.FitInside, Quality: 80, Unedited: true}
+	// editorSpec is the whole source, ignoring crop/rotate, for the cropper;
+	// only editors (Resolution.Editor) are signed it.
+	editorSpec = media.Spec{Width: 1200, Height: 1200, Fit: media.FitInside, Quality: 80, Unedited: true, EditorOnly: true}
 	postSpecs  = map[string]media.Spec{
 		"large":  {Width: 1600, Height: 1600, Fit: media.FitInside, Quality: 85},
 		"thumb":  {Width: 480, Height: 480, Fit: media.FitCover, Quality: 80},
@@ -61,7 +62,7 @@ var (
 	mediaKinds = []media.Kind{
 		{Name: kindPost, Types: append(append([]string{}, imageTypes...), videoTypes...), MaxBytes: maxVideoBytes, MaxFiles: maxPostFiles,
 			TypeLimits: map[string]media.Limit{"image": {MaxBytes: maxImageBytes}, "video": {MaxFiles: maxPostVideos}},
-			Specs:      postSpecs, Video: true},
+			Specs:      postSpecs, Video: &media.Video{}}, // default ladder, up to 2160p
 		// A channel's files are the sources its avatar and banner are cropped from.
 		{Name: kindChannel, Types: imageTypes, MaxBytes: maxImageBytes, MaxFiles: 2, Specs: map[string]media.Spec{"editor": editorSpec},
 			Slots: map[string]media.Slot{
@@ -132,8 +133,8 @@ func loadMediaConfig(get func(string) string) (mediaConfig, error) {
 		return n
 	}
 	c.FilesPerHour = int(num("media_upload_files_per_hour", 60))
-	c.BytesPerDay = num("media_upload_bytes_per_day", 10<<30)
-	c.ChannelQuota = num("media_channel_quota_bytes", 20<<30)
+	c.BytesPerDay = num("media_upload_bytes_per_day", 100<<30)
+	c.ChannelQuota = num("media_channel_quota_bytes", 500<<30)
 	if err != nil {
 		return c, err
 	}
@@ -296,7 +297,19 @@ func (m *mediaService) editorial(ctx context.Context, user, channel string) (boo
 }
 
 // Resolve is the one read decision for media: the same rule as the post API.
+// Editors are whoever may upload to the item: they alone get the uncropped
+// editor variant and the files' edits and source dims.
 func (m *mediaService) Resolve(ctx context.Context, ref contentref.ContentRef, actor access.Actor) (access.Resolution, error) {
+	r, err := m.resolve(ctx, ref, actor)
+	if err != nil || !r.Visible || actor.ID == "" {
+		return r, err
+	}
+	g, err := m.CanUpload(ctx, actor, ref)
+	r.Editor = g.Allowed
+	return r, err
+}
+
+func (m *mediaService) resolve(ctx context.Context, ref contentref.ContentRef, actor access.Actor) (access.Resolution, error) {
 	switch ref.ContentKind {
 	case kindPost:
 		id, err := strconv.ParseInt(ref.ContentID, 10, 64)
@@ -409,7 +422,7 @@ func (m *mediaService) files(c fiber.Ctx) error {
 	}
 	out := media.CommitReply{Files: make([]media.CommitFile, len(man.Files))}
 	for i, f := range man.Files {
-		out.Files[i] = media.CommitFile{Name: f.Name, Original: f.Original, Type: f.Type, Size: f.Size, Meta: f.Meta}
+		out.Files[i] = media.CommitFile{Name: f.Name, Original: f.Original, Type: f.Type, Size: f.Size, Edit: f.Edit, Meta: f.Meta}
 	}
 	c.Set("Cache-Control", "no-store")
 	return c.JSON(out)

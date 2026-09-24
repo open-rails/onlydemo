@@ -19,7 +19,7 @@
     "@base-ui/react": "^1.7.0",
     "@hugeicons/core-free-icons": "^4.3.5",
     "@hugeicons/react": "^1.1.10",
-    "@open-rails/contentkit-upload": "file:vendor/open-rails-contentkit-upload-0.17.0.tgz",
+    "@open-rails/contentkit-upload": "file:vendor/open-rails-contentkit-upload-0.19.0.tgz",
     "@openrails/auth-ui": "https://github.com/open-rails/auth-ui/releases/download/v0.3.1/openrails-auth-ui-0.3.1.tgz",
     "@openrails/billing-ui": "https://github.com/open-rails/billing-ui/releases/download/v0.8.0/openrails-billing-ui-0.8.0.tgz",
     "@tanstack/react-query": "^5.100.11",
