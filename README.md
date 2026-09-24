@@ -135,22 +135,27 @@ not a calendar month); a change applies to prices set afterwards. Repricing move
 
 Images and videos use ContentKit media: one private bucket, a folder per item,
 originals never served. Browsers upload straight to the bucket with
-`@open-rails/contentkit-upload` (vendored in `frontend/vendor` until the package
-is published); the app presigns and commits (`/api/v1/media/upload/*`).
+`@openrails/contentkit-upload` (a ContentKit release asset); the app presigns
+and commits (`/api/v1/media/upload/*`).
 
 - **Kinds.** `post`: images (`large`, `thumb`) and videos (MP4, WebM, MOV,
   MKV) mixed in one order, plus an optional image `teaser` derived as a
   blurred WebP (the app refuses a video teaser). ContentKit holds the caps
   (`Kind.MaxFiles`, `TypeLimits`): 50 files per post (teaser included), 10 of
-  them videos; images up to 25 MiB, videos up to 20 GiB (multipart, 4K sources); 409 `too_many_files`. `channel`: public `avatar` and `banner`
-  slots (`Slot.Aspect` 1 and 3), cropped from an uploaded
-  `avatar-source`/`banner-source` file of the channel or, with "Use as channel
-  avatar/banner" on a post image, from that post (`commit-slot-from-file` with
-  `from`; the manager must be allowed to upload to both). `user`: public
-  `avatar_80`/`avatar_320`.
+  them videos; images up to 25 MiB, videos up to 20 GiB (multipart, 4K sources); 409 `too_many_files`. `channel`: public `avatar` (1:1, 128/256/512 px) and
+  `cover` (3:1, 1500/3000 px) slots; `user`: `avatar`.
+- **Slots.** The SDK UI crops before saving (`AvatarUpload` on the account
+  page; `useSlotCrop` + `ImageCropDialog` in the channel header): the original
+  is kept, EXIF orientation applied, and ContentKit renders every width up to
+  the crop (never upscaled). "Edit crop" re-renders the kept original
+  (`edit-slot`); "Use as channel avatar/cover" on a post image copies it
+  (`commit-slot-from-file` with `from`; the manager must be allowed to upload to
+  both). The `SlotEncoded` hook records each slot's version and widths in
+  `media_slots`, so API listings return manifests whose `?v=` URLs are
+  immutable, and the frontend renders `SlotImage` with `srcset`/`sizes`.
 - **Edits.** Crop and rotate are ContentKit's non-destructive file edits
   (commit op `edit`): variants re-derive from the untouched original. The
-  cropper (react-easy-crop with the SDK's `useCrop`) draws the `Unedited`,
+  post image cropper (react-easy-crop with the SDK's `useCrop`) draws the `Unedited`,
   `EditorOnly` `editor` variant. Only editors (whoever may upload to the item:
   its channel's posters or managers, site admins; `Resolution.Editor`) are
   signed it and get `edit`/`dims`. Item order lives in the
@@ -265,7 +270,8 @@ image/video post (HLS playlists and byte ranges, downloads, locked viewers,
 ceilings; skipped without ffmpeg locally), what anonymous, member, buyer and members_ppv
 buyer (after membership lapse) viewers get, editor/admin bypass, the default
 ladder reaching the encoder, editor-only variants and edit data, rate and
-quota refusals (presign and commit), public slots (also from a post image) and
+quota refusals (presign and commit), slots (crop, rotate, re-crop, versioned
+srcset widths, also from a post image) and
 post erasure. `task dev:up && task test:media`
 runs it locally; CI runs it on every push. CI also builds/vets Go and
 builds/lints the frontend. The libraries retain their full automated qualification. A real sandbox

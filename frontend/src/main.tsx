@@ -2,7 +2,15 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import { UploadUiProvider } from "@openrails/contentkit-upload/ui";
+import { de } from "@openrails/contentkit-upload/locales/de";
+import { en } from "@openrails/contentkit-upload/locales/en";
+import { es } from "@openrails/contentkit-upload/locales/es";
+import { ja } from "@openrails/contentkit-upload/locales/ja";
+import { ko } from "@openrails/contentkit-upload/locales/ko";
+import { zh } from "@openrails/contentkit-upload/locales/zh";
 import { AuthHost } from "./auth";
+import { uploads } from "./media";
 import { AppLayout, NotFoundPage, RequireAccount } from "./App";
 import { HomePage, ChannelsPage } from "./pages/explore";
 import { ChannelPage, NewChannelPage } from "./pages/channel";
@@ -22,6 +30,10 @@ const queryClient = new QueryClient({
     mutations: { retry: false },
   },
 });
+// ContentKit's upload UI follows the page's shadcn tokens, .dark class and <html lang>.
+const uploadLocales = { de, en, es, ja, ko, zh };
+const uploadMessages =
+  uploadLocales[document.documentElement.lang.slice(0, 2) as keyof typeof uploadLocales] ?? en;
 const router = createBrowserRouter([
   {
     element: (
@@ -70,7 +82,9 @@ const router = createBrowserRouter([
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      <UploadUiProvider client={uploads} appearance={{ theme: "inherit" }} messages={uploadMessages}>
+        <RouterProvider router={router} />
+      </UploadUiProvider>
     </QueryClientProvider>
   </StrictMode>,
 );

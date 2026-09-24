@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Cropper from "react-easy-crop";
-import { useCrop } from "@open-rails/contentkit-upload/react";
-import type { Edit } from "@open-rails/contentkit-upload";
+import { useCrop } from "@openrails/contentkit-upload/react";
+import type { Edit } from "@openrails/contentkit-upload";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { RotateClockwiseIcon, RotateLeft01Icon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";

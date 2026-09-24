@@ -23,7 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { EmptyState, Loading } from "./components/states";
-import { Avatar, SuggestedCreators } from "./components/cards";
+import { UserAvatar, SuggestedCreators } from "./components/cards";
 import { channelsPath, newChannelPath } from "./paths";
 
 export function AppLayout() {
@@ -119,7 +119,7 @@ export function AppLayout() {
           </Link>
           {auth.user && (
             <Link to="/me" className="sidebar-user">
-              <Avatar name={auth.user.username} seed={auth.user.id} />
+              <UserAvatar user={auth.user} />
               <span>
                 <strong>{auth.user.username}</strong>
                 <small>@{auth.user.username}</small>

@@ -1,7 +1,8 @@
 import { useState } from "react";
+import { ImageCropDialog, useMessages } from "@openrails/contentkit-upload/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useUploadQueue } from "@open-rails/contentkit-upload/react";
-import type { Op } from "@open-rails/contentkit-upload";
+import { useUploadQueue } from "@openrails/contentkit-upload/react";
+import type { Op } from "@openrails/contentkit-upload";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowDown01Icon,
@@ -19,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import {
+  channelRef,
   commit,
   hlsBase,
   imageTypes,
@@ -30,6 +32,7 @@ import {
   uploadMessage,
   uploads,
   videoTypes,
+  useSlotSaved,
   withMediaType,
   type MediaDownload,
   type MediaFile,
@@ -39,6 +42,9 @@ import { FormError } from "./states";
 import { VideoPlayer } from "./video-player";
 
 const TEASER = "teaser";
+// The editor variant is a downscaled whole source; crops stay in its original pixels.
+const slotSource = (f?: MediaFile) =>
+  f?.url && f.dims ? { url: f.url, width: f.dims.w, height: f.dims.h } : null;
 const ready = (f: MediaFile) => (isVideo(f.type) ? !!f.hls : !!f.url);
 const pending = (files?: MediaFile[]) =>
   !!files?.some((f) => !f.locked && !ready(f));
@@ -131,8 +137,8 @@ export function PostGallery({ postID, viewer }: { postID: number; viewer?: strin
 // an image as the teaser. ContentKit derives image variants and HLS.
 // Channel slots a post image can fill (managers only), cropped at the slot's aspect.
 const channelSlots = {
-  avatar: { aspect: 1, label: "Use as channel avatar", short: "Avatar" },
-  banner: { aspect: 3, label: "Use as channel banner", short: "Banner" },
+  avatar: { aspect: 1, target: 512, label: "Use as channel avatar", short: "Avatar" },
+  cover: { aspect: 3, target: 3000, label: "Use as channel cover", short: "Cover" },
 };
 type ChannelSlot = keyof typeof channelSlots;
 
@@ -146,6 +152,11 @@ export function PostMediaEditor({ postID, channel }: { postID: number; channel?:
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [cropping, setCropping] = useState<{ name: string; slot?: ChannelSlot }>();
+  const [slotSaving, setSlotSaving] = useState(false);
+  const [slotError, setSlotError] = useState("");
+  const saved = useSlotSaved();
+  const messages = useMessages();
+  const slotCrop = cropping?.slot && channel ? { name: cropping.name, slot: cropping.slot, ref: channelRef(channel) } : undefined;
   // The unedited "editor" variant, source dims and current edit per image.
   const editor = useQuery({
     queryKey: ["post-media-editor", postID],
@@ -365,26 +376,49 @@ export function PostMediaEditor({ postID, channel }: { postID: number; channel?:
           </li>
         ))}
       </ol>
-      {cropping && (
+      {cropping && !cropping.slot && (
         <CropDialog
-          title={cropping.slot ? channelSlots[cropping.slot].label : "Crop and rotate"}
+          title="Crop and rotate"
           src={editable.get(cropping.name)?.url}
           dims={editable.get(cropping.name)?.dims}
-          aspect={cropping.slot && channelSlots[cropping.slot].aspect}
-          initial={cropping.slot ? undefined : editable.get(cropping.name)?.edit}
-          onSave={(e) =>
-            cropping.slot && channel
-              ? uploads
-                  .setSlotFromFile({ kind: "channel", id: channel }, cropping.slot, cropping.name, e ?? {}, {
-                    from: postRef(postID),
-                  })
-                  .then(() => {
-                    setNotice(`Channel ${cropping.slot} updated; it shows once processed.`);
-                    return client.invalidateQueries({ queryKey: ["channel"] });
-                  })
-              : uploads.edit(postRef(postID), cropping.name, e).then(refresh)
-          }
+          initial={editable.get(cropping.name)?.edit}
+          onSave={(e) => uploads.edit(postRef(postID), cropping.name, e).then(refresh)}
           onClose={() => setCropping(undefined)}
+        />
+      )}
+      {slotCrop && (
+        <ImageCropDialog
+          open
+          onOpenChange={(open) => {
+            if (!open && !slotSaving) {
+              setCropping(undefined);
+              setSlotError("");
+            }
+          }}
+          source={slotSource(editable.get(slotCrop.name))}
+          aspect={channelSlots[slotCrop.slot].aspect}
+          round={slotCrop.slot === "avatar"}
+          targetWidth={channelSlots[slotCrop.slot].target}
+          title={channelSlots[slotCrop.slot].label}
+          busy={slotSaving}
+          rendering={slotSaving}
+          error={slotError || undefined}
+          onConfirm={(e) => {
+            const { slot, name, ref } = slotCrop;
+            setSlotSaving(true);
+            setSlotError("");
+            uploads
+              .setSlotFromFile(ref, slot, name, e ?? {}, { from: postRef(postID) })
+              .then((m) => (m.pending ? uploads.waitForSlot(ref, slot) : m))
+              .then((m) => {
+                if (m.error) throw new Error(m.error);
+                saved(ref, slot, m);
+                setNotice(`Channel ${slot} updated.`);
+                setCropping(undefined);
+              })
+              .catch((err: unknown) => setSlotError(messages.error(err)))
+              .finally(() => setSlotSaving(false));
+          }}
         />
       )}
       {queue.blocked && <FormError>{uploadMessage(queue.blocked)}</FormError>}

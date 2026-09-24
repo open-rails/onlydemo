@@ -1,5 +1,7 @@
 import { Link } from "react-router-dom";
 import { useState, type CSSProperties, type ReactNode } from "react";
+import type { SlotManifest } from "@openrails/contentkit-upload";
+import { SlotImage } from "@openrails/contentkit-upload/ui";
 import { cn } from "cn";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -22,49 +24,57 @@ import {
 } from "../models";
 import { hue, membershipOffer, useChannels } from "../channels";
 import { channelsPath, channelPath, postPath } from "../paths";
+import { userRef, useSlot } from "../media";
 
 const tint = (seed: string | number) =>
   ({ "--h": hue(seed) }) as CSSProperties;
 
-// A public slot image over the generated placeholder; a slot never uploaded
-// answers 404 and the placeholder stays.
-function SlotImage({ src, className }: { src?: string; className?: string }) {
-  const [failed, setFailed] = useState("");
-  if (!src || failed === src) return null;
-  return <img src={src} alt="" className={className} onError={() => setFailed(src)} />;
-}
+// Slot images (srcset at every rendered width; sizes is the CSS box) over a
+// generated placeholder shown while unset.
+const hasImage = (m?: SlotManifest | null): m is SlotManifest => !!m?.outputs.length;
+// The box, not the slot aspect, sizes the image (object-fit: cover).
+const fill: CSSProperties = { position: "absolute", inset: 0, width: "100%", height: "100%", aspectRatio: "auto", borderRadius: "inherit" };
 export function Avatar({
   name,
   seed,
-  src,
+  image,
+  sizes = "40px",
   className,
 }: {
   name: string;
   seed: string | number;
-  src?: string;
+  image?: SlotManifest | null;
+  sizes?: string;
   className?: string;
 }) {
   return (
     <span className={cn("avatar", className)} style={tint(seed)}>
       {(name || "?").slice(0, 1).toUpperCase()}
-      <SlotImage src={src} />
+      {hasImage(image) && <SlotImage manifest={image} sizes={sizes} round style={fill} />}
     </span>
   );
 }
+// The signed-in user's avatar, shared with the account page's editor.
+export function UserAvatar({ user, className }: { user: { id: string; username: string }; className?: string }) {
+  const image = useSlot(userRef(user.id), "avatar");
+  return <Avatar name={user.username} seed={user.id} image={image} className={className} />;
+}
 export function Cover({
   seed,
-  src,
+  image,
+  sizes = "(min-width: 768px) 360px, 100vw",
   className,
   children,
 }: {
   seed: string | number;
-  src?: string;
+  image?: SlotManifest | null;
+  sizes?: string;
   className?: string;
   children?: ReactNode;
 }) {
   return (
     <div className={cn("cover", className)} style={tint(seed)}>
-      <SlotImage src={src} className="cover-image" />
+      {hasImage(image) && <SlotImage manifest={image} sizes={sizes} style={fill} />}
       {children}
     </div>
   );
@@ -90,7 +100,7 @@ export function PostCard({
     <article className="feed-card">
       <header className="feed-head">
         <Link to={channelPath(post.channel_slug)} className="feed-author">
-          <Avatar name={name} seed={post.channel_id} src={post.channel_avatar_url} />
+          <Avatar name={name} seed={post.channel_id} image={post.channel_avatar} />
           <span>
             <strong>
               {name}
@@ -192,9 +202,9 @@ export function ChannelCard({ channel }: { channel: Channel }) {
   const offer = membershipOffer(channel);
   return (
     <article className="creator-card">
-      <Cover seed={channel.id} src={channel.banner_url} />
+      <Cover seed={channel.id} image={channel.cover} />
       <div className="creator-card-body">
-        <Avatar name={channel.name} seed={channel.id} src={channel.avatar_url} className="avatar-lg" />
+        <Avatar name={channel.name} seed={channel.id} image={channel.avatar} sizes="72px" className="avatar-lg" />
         <h3>
           <Link to={channelPath(channel.slug)}>{channel.name}</Link>
         </h3>
@@ -252,9 +262,9 @@ export function SuggestedCreators({ strip = false }: { strip?: boolean }) {
             key={channel.id}
             className="suggested-item"
           >
-            <Cover seed={channel.id} src={channel.banner_url} />
+            <Cover seed={channel.id} image={channel.cover} sizes="260px" />
             <span className="suggested-info">
-              <Avatar name={channel.name} seed={channel.id} src={channel.avatar_url} />
+              <Avatar name={channel.name} seed={channel.id} image={channel.avatar} sizes="52px" />
               <span>
                 <strong>{channel.name}</strong>
                 <small>@{channel.slug}</small>

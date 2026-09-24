@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
 	authkitfiber "github.com/open-rails/authkit/adapters/fiber"
+	"github.com/open-rails/contentkit/media"
 	"github.com/open-rails/contentkit/media/tiered"
 	"github.com/open-rails/openrails"
 	"github.com/riverqueue/river"
@@ -54,7 +56,7 @@ type post struct {
 	CanEdit            bool                     `json:"can_edit"`
 	Purchased          bool                     `json:"purchased"`
 	SubscriptionActive bool                     `json:"has_membership"`
-	ChannelAvatarURL   string                   `json:"channel_avatar_url,omitempty"`
+	ChannelAvatar      *media.SlotManifest      `json:"channel_avatar,omitempty"`
 	CreatedAt          time.Time                `json:"created_at"`
 	UpdatedAt          time.Time                `json:"updated_at"`
 	BillingKey         string                   `json:"-"`
@@ -123,6 +125,16 @@ func (api *postAPI) decorate(c fiber.Ctx, posts []post, withOffers bool) error {
 	if err != nil {
 		return err
 	}
+	channelIDs := make([]string, 0, len(posts))
+	for _, p := range posts {
+		if !slices.Contains(channelIDs, p.ChannelID) {
+			channelIDs = append(channelIDs, p.ChannelID)
+		}
+	}
+	avatars, err := api.media.slots(c.Context(), kindChannel, channelIDs, slotAvatar)
+	if err != nil {
+		return err
+	}
 	publishing := map[string]bool{}
 	editing := map[string]bool{}
 	groups := map[string]authkit.GroupInstance{}
@@ -146,7 +158,7 @@ func (api *postAPI) decorate(c fiber.Ctx, posts []post, withOffers bool) error {
 		p.SubscriptionActive = access[membershipResource(p.ChannelID)]
 		p.CanEdit = editing[p.ChannelID] || editAdmin
 		p.CanRead = readable[i] || publishing[p.ChannelID] || admin
-		p.ChannelAvatarURL = api.media.publicURL(kindChannel, p.ChannelID, "avatar")
+		p.ChannelAvatar = avatars[slotKey{p.ChannelID, slotAvatar}]
 		if !p.CanRead {
 			p.Body = ""
 		}
@@ -530,7 +542,9 @@ func (api *postAPI) settled(c fiber.Ctx, status int, id int64, job *postOfferArg
 		return databaseError(c, err)
 	}
 	p.CanRead, p.CanEdit, p.Offers = true, true, []openrails.CatalogOffer{}
-	p.ChannelAvatarURL = api.media.publicURL(kindChannel, p.ChannelID, "avatar")
+	if avatars, e := api.media.slots(c.Context(), kindChannel, []string{p.ChannelID}, slotAvatar); e == nil {
+		p.ChannelAvatar = avatars[slotKey{p.ChannelID, slotAvatar}]
+	}
 	if g, e := api.auth.client.GroupInstanceByID(c.Context(), p.ChannelID); e == nil {
 		p.ChannelSlug, p.ChannelName = g.InstanceSlug, g.DisplayName
 	}

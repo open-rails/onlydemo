@@ -63,18 +63,8 @@ var (
 		{Name: kindPost, Types: append(append([]string{}, imageTypes...), videoTypes...), MaxBytes: maxVideoBytes, MaxFiles: maxPostFiles,
 			TypeLimits: map[string]media.Limit{"image": {MaxBytes: maxImageBytes}, "video": {MaxFiles: maxPostVideos}},
 			Specs:      postSpecs, Video: &media.Video{}}, // default ladder, up to 2160p
-		// A channel's files are the sources its avatar and banner are cropped from.
-		{Name: kindChannel, Types: imageTypes, MaxBytes: maxImageBytes, MaxFiles: 2, Specs: map[string]media.Spec{"editor": editorSpec},
-			Slots: map[string]media.Slot{
-				"avatar": {Aspect: 1, Outputs: map[string]media.Spec{"avatar": {Width: 256, Height: 256, Fit: media.FitCover, Quality: 85}}},
-				"banner": {Aspect: 3, Outputs: map[string]media.Spec{"banner": {Width: 1500, Height: 500, Fit: media.FitCover, Quality: 85}}},
-			}},
-		{Name: media.UserKind, Types: imageTypes, MaxBytes: 10 << 20, Slots: map[string]media.Slot{
-			"avatar": {Outputs: map[string]media.Spec{
-				"avatar_80":  {Width: 80, Height: 80, Fit: media.FitCover, Quality: 85},
-				"avatar_320": {Width: 320, Height: 320, Fit: media.FitCover, Quality: 85},
-			}},
-		}},
+		{Name: kindChannel, Types: imageTypes, MaxBytes: maxImageBytes, Slots: map[string]media.Slot{slotAvatar: avatarSlot, slotCover: coverSlot}},
+		{Name: media.UserKind, Types: imageTypes, MaxBytes: maxImageBytes, Slots: map[string]media.Slot{slotAvatar: avatarSlot}},
 	}
 	policyLevels = map[string]tiered.Level{
 		"public": tiered.Public, "membership": tiered.Members, "ppv": tiered.PPV, "members_ppv": tiered.MembersPPV,
@@ -157,6 +147,8 @@ type mediaService struct {
 	jobs      *media.Jobs
 	uploads   *media.Uploads
 	reader    *media.Reader
+	pool      *pgxpool.Pool
+	slotTable string
 	limiter   *media.PGLimiter
 	auth      *appAuth
 	billing   *billingService
@@ -200,7 +192,8 @@ func newMedia(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth
 		return nil, fmt.Errorf("MEDIA_TOKEN_KEY: %w", err)
 	}
 	signing, _ := token.ParseKey(mc.TokenKey)
-	m := &mediaService{cfg: mc, store: store, kinds: kinds, auth: auth, billing: billing, channels: channels, posts: posts}
+	m := &mediaService{cfg: mc, store: store, kinds: kinds, auth: auth, billing: billing, channels: channels, posts: posts,
+		pool: pool, slotTable: pgx.Identifier{appSchema(cfg), "media_slots"}.Sanitize()}
 	m.limiter, err = media.NewPGLimiter(pool, contentSchema(cfg), media.PGLimits{
 		FilesPerHour: mc.FilesPerHour, BytesPerDay: mc.BytesPerDay,
 		Quota: func(_ context.Context, _, owner string) (int64, error) {
@@ -221,7 +214,7 @@ func newMedia(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth
 	}
 	hooks := media.Hooks{DownloadName: m.downloadName, Failed: func(_ context.Context, ref contentref.ContentRef, file string, err error) {
 		slog.Warn("media file cannot be derived", "ref", ref.String(), "file", file, "err", err)
-	}}
+	}, SlotEncoded: m.slotEncoded}
 	proc, err := image.New(image.Config{Store: store, Kinds: kinds, Manifests: m.manifests, Hooks: hooks,
 		Specs: func(k media.Kind, f media.File) map[string]media.Spec {
 			if k.Name == kindPost && f.Teaser() {
@@ -263,16 +256,6 @@ func (m *mediaService) postRef(id int64) contentref.ContentRef {
 }
 
 func channelOwner(id string) string { return kindChannel + ":" + id }
-
-// publicURL addresses a public slot output; it reads nothing, so listings
-// build avatar URLs freely. A slot never uploaded answers 404.
-func (m *mediaService) publicURL(kind, id, output string) string {
-	u, err := m.reader.PublicURL(m.ref(kind, id), output)
-	if err != nil {
-		return ""
-	}
-	return u
-}
 
 // postPolicy maps a post's access policy onto OpenRails entitlement keys. A
 // purchase key grants every paid level, so buyers keep access after policy or
@@ -327,14 +310,6 @@ func (m *mediaService) resolve(ctx context.Context, ref contentref.ContentRef, a
 			ok, err = tiered.Decide(ctx, m.billing.checker(), actor, postPolicy(p))
 		}
 		return access.Resolution{Visible: true, Accessible: ok}, err
-	case kindChannel:
-		// Only managers read the slot sources; slots themselves are public.
-		ok, err := m.channels.active(ctx, ref.ContentID)
-		if err != nil || !ok || actor.ID == "" {
-			return access.Resolution{Visible: ok}, err
-		}
-		manage, err := m.channels.allowed(ctx, actor.ID, ref.ContentID, "channel:settings:manage")
-		return access.Resolution{Visible: true, Accessible: manage}, err
 	}
 	return access.Resolution{}, nil
 }
@@ -388,7 +363,7 @@ type mediaActorKey struct{}
 // mount serves the upload API (the browser SDK) and the read API behind
 // AuthKit's optional verification.
 func (m *mediaService) mount(app fiber.Router, optional fiber.Handler) {
-	upload := media.UploadHandler(m.uploads, media.UploadHandlerOptions{Tenant: m.cfg.Tenant,
+	upload := media.UploadHandler(m.uploads, media.UploadHandlerOptions{Tenant: m.cfg.Tenant, PublicBaseURL: m.cfg.URL,
 		Actor: func(r *http.Request) (access.Actor, bool) {
 			a, _ := r.Context().Value(mediaActorKey{}).(access.Actor)
 			return a, !a.Anonymous
@@ -460,12 +435,18 @@ func (m *mediaService) deletePostsTx(ctx context.Context, tx pgx.Tx, channel str
 }
 
 func (m *mediaService) deleteChannelTx(ctx context.Context, tx pgx.Tx, channel string) error {
+	if err := m.deleteSlotsTx(ctx, tx, kindChannel, channel); err != nil {
+		return err
+	}
 	return m.jobs.DeleteItemsTx(ctx, tx, media.Deletion{Ref: m.ref(kindChannel, channel), Owner: channelOwner(channel)})
 }
 
 // eraseUser removes a purged account's avatar folder.
 func (m *mediaService) eraseUser(ctx context.Context, user string) error {
 	return pgx.BeginFunc(ctx, m.posts.pool, func(tx pgx.Tx) error {
+		if err := m.deleteSlotsTx(ctx, tx, media.UserKind, user); err != nil {
+			return err
+		}
 		return m.jobs.EraseUserTx(ctx, tx, m.cfg.Tenant, user)
 	})
 }

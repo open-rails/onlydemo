@@ -64,8 +64,8 @@ import { Avatar, Cover, PostCard } from "../components/cards";
 import { membershipOffer } from "../channels";
 import { PostEditor } from "../components/post-editor";
 import { ChannelTeam } from "../components/channel-team";
-import { SlotCropUpload } from "../components/slot-upload";
-import { useSlotVersion } from "../media";
+import { SlotEdit } from "../components/slot-edit";
+import { channelRef, useSlot } from "../media";
 import { MembershipDialog } from "../components/membership";
 import { channelsPath, channelPath } from "../paths";
 
@@ -77,7 +77,6 @@ export function ChannelPage() {
   const [editor, setEditor] = useState(false);
   const [membership, setMembership] = useState(false);
   const [tab, setTab] = useState("posts");
-  const slots = useSlotVersion();
   const channel = useQuery({
     queryKey: ["channel", slug, auth.user?.id],
     queryFn: () =>
@@ -98,6 +97,10 @@ export function ChannelPage() {
     ...postQuery,
     data: postQuery.data?.pages.flatMap((page) => page.data),
   };
+  // Managers read the full slot manifests (edit, source size) to re-crop.
+  const manage = !!channel.data?.can_manage;
+  const avatar = useSlot(channelRef(id), "avatar", channel.data?.avatar, manage);
+  const cover = useSlot(channelRef(id), "cover", channel.data?.cover, manage);
   const canonical = channel.data?.slug;
   useEffect(() => {
     // A former slug still resolves; show the current URL.
@@ -119,7 +122,7 @@ export function ChannelPage() {
   return (
     <>
       <section className="profile">
-        <Cover seed={current.id} src={slots.src(current.banner_url)} className="profile-cover">
+        <Cover seed={current.id} image={cover} sizes="(min-width: 768px) 720px, 100vw" className="profile-cover">
           <Link to={channelsPath} className="cover-back" aria-label="Back">
             <HugeiconsIcon icon={ArrowLeft02Icon} size={20} />
           </Link>
@@ -130,12 +133,13 @@ export function ChannelPage() {
             </small>
           </div>
           {current.can_manage && (
-            <SlotCropUpload
-              channel={current.id}
-              slot="banner"
+            <SlotEdit
+              item={channelRef(current.id)}
+              slot="cover"
+              manifest={cover}
               aspect={3}
+              targetWidth={3000}
               label="Edit cover"
-              onDone={slots.refresh}
               className={cn(
                 buttonVariants({ variant: "secondary", size: "sm" }),
                 "cover-edit rounded-full border-white/20 bg-black/55 text-white backdrop-blur-md hover:bg-black/70",
@@ -149,17 +153,19 @@ export function ChannelPage() {
               <Avatar
                 name={current.name}
                 seed={current.id}
-                src={slots.src(current.avatar_url)}
+                image={avatar}
+                sizes="112px"
                 className="avatar-xl"
               />
               {current.can_manage && (
-                <SlotCropUpload
-                  channel={current.id}
+                <SlotEdit
+                  item={channelRef(current.id)}
                   slot="avatar"
+                  manifest={avatar}
                   aspect={1}
+                  targetWidth={512}
                   label="Change avatar"
                   iconOnly
-                  onDone={slots.refresh}
                   className={cn(
                     buttonVariants({ variant: "secondary", size: "icon-sm" }),
                     "avatar-edit rounded-full border-2 border-card shadow-sm",

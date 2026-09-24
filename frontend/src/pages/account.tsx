@@ -23,9 +23,10 @@ import {
   FormError,
   Loading,
 } from "../components/states";
-import { Avatar, PostCard, ChannelCard } from "../components/cards";
-import { SlotUpload } from "../components/slot-upload";
-import { useSlotVersion } from "../media";
+import { AvatarUpload } from "@openrails/contentkit-upload/ui";
+import { Card, CardContent } from "@/components/ui/card";
+import { UserAvatar, PostCard, ChannelCard } from "../components/cards";
+import { userRef, useSlot, useSlotSaved } from "../media";
 import { useAuth } from "../session";
 import { channelsPath, newChannelPath } from "../paths";
 
@@ -50,25 +51,13 @@ export function AccountPage() {
       last.has_more && last.next_cursor ? last.next_cursor : undefined,
   });
   const current = summary.data?.pages[0];
-  const slots = useSlotVersion();
   return (
     <>
       <div className="page-title">
         {current && (
-          <span className="avatar-slot">
-            <Avatar
-              name={current.user.username}
-              seed={current.user.id}
-              src={slots.src(current.user.avatar_url)}
-              className="avatar-lg"
-            />
-            <SlotUpload
-              target={{ kind: "user", id: current.user.id }}
-              slot="avatar"
-              label="Avatar"
-              onDone={slots.refresh}
-            />
-          </span>
+          <Link to="/me?tab=settings" aria-label="Change your avatar">
+            <UserAvatar user={current.user} className="avatar-lg" />
+          </Link>
         )}
         <h1>{titles[tab] || "Account"}</h1>
         <span className="muted">@{auth.user?.username}</span>
@@ -155,7 +144,7 @@ export function AccountPage() {
             </>
           )}
           {tab === "billing" && <Billing />}
-          {tab === "settings" && <AccountSettings />}
+          {tab === "settings" && current && <AccountSettings user={current.user} />}
         </>
       )}
     </>
@@ -251,7 +240,24 @@ function SetupReturn({ id }: { id: string }) {
     </Alert>
   );
 }
-function AccountSettings() {
+function AccountSettings({ user }: { user: AccountData["user"] }) {
   const navigate = useNavigate();
-  return <AccountSecurity onDeleted={() => navigate("/")} />;
+  const ref = userRef(user.id);
+  const avatar = useSlot(ref, "avatar", user.avatar);
+  const saved = useSlotSaved();
+  return (
+    <>
+      <Card className="mb-6">
+        <CardContent>
+          <AvatarUpload
+            item={ref}
+            manifest={avatar}
+            onChange={(m) => saved(ref, "avatar", m)}
+            label="Profile photo"
+          />
+        </CardContent>
+      </Card>
+      <AccountSecurity onDeleted={() => navigate("/")} />
+    </>
+  );
 }

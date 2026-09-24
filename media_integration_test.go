@@ -208,13 +208,14 @@ func TestMediaEndToEnd(t *testing.T) {
 		chRef := map[string]string{"kind": kindChannel, "id": channelID}
 		editor.upload(chRef, "avatar", testPNG(t, 300, 300, color.White), "image/png", 403)
 		owner.upload(chRef, "avatar", testPNG(t, 300, 300, color.RGBA{0, 160, 0, 255}), "image/png", 200)
-		view := anon.call("GET", "/api/v1/channels/"+channelID, nil, "", 200)
-		h.waitPublic(t, view["avatar_url"].(string))
+		// Never upscaled: a 300px avatar has the 128 and 256 widths.
+		h.waitSlot(t, "channel avatar", h.channelSlot(anon, channelID, "avatar"), "", 128, 256)
 
 		stranger.upload(map[string]string{"kind": media.UserKind, "id": owner.id}, "avatar", testPNG(t, 64, 64, color.White), "image/png", 403)
-		stranger.upload(map[string]string{"kind": media.UserKind, "id": stranger.id}, "avatar", testPNG(t, 400, 400, color.Black), "image/png", 200)
-		me := stranger.call("GET", "/api/v1/me", nil, "", 200)
-		h.waitPublic(t, me["user"].(map[string]any)["avatar_url"].(string))
+		stranger.upload(map[string]string{"kind": media.UserKind, "id": stranger.id}, "avatar", testPNG(t, 600, 600, color.Black), "image/png", 200)
+		h.waitSlot(t, "user avatar", func() any {
+			return stranger.call("GET", "/api/v1/me", nil, "", 200)["user"].(map[string]any)["avatar"]
+		}, "", 128, 256, 512)
 	})
 
 	t.Run("mixed images and videos", func(t *testing.T) {
@@ -372,32 +373,25 @@ func TestMediaEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("channel slot from a cropped file", func(t *testing.T) {
+	t.Run("channel cover: crop, rotate and re-crop without re-upload", func(t *testing.T) {
 		chRef := map[string]string{"kind": kindChannel, "id": channelID}
-		src := owner.upload(chRef, "", testPNG(t, 900, 600, color.RGBA{200, 120, 0, 255}), "image/png", 200)
-		owner.call("POST", "/api/v1/media/upload/commit", map[string]any{"ref": chRef, "ops": []media.Op{{Op: media.OpInsert, Name: "banner-source", Original: src}}}, "", 200)
-		slot := map[string]any{"ref": chRef, "slot": "banner", "file": "banner-source", "edit": map[string]any{"crop": map[string]int{"x": 0, "y": 150, "w": 900}}}
-		editor.call("POST", "/api/v1/media/upload/commit-slot-from-file", slot, "", 403)
-		owner.call("POST", "/api/v1/media/upload/commit-slot-from-file", slot, "", 204)
-		// Slot.Aspect 3 derives the crop height; the slot job re-encodes through it.
-		item, err := h.srv.media.kinds.Item(h.srv.media.ref(kindChannel, channelID))
-		if err != nil {
-			t.Fatal(err)
+		cover := h.channelSlot(anon, channelID, "cover")
+		owner.upload(chRef, "cover", testPNG(t, 1600, 1600, color.RGBA{200, 120, 0, 255}), "image/png", 200)
+		first := h.waitSlot(t, "cover", cover, "", 1500)
+		// Narrower than the cover's MinWidth: refused, the served cover stays.
+		if res, raw := owner.do("POST", "/api/v1/media/upload/edit-slot", map[string]any{"ref": chRef, "slot": "cover",
+			"edit": map[string]any{"crop": map[string]int{"x": 0, "y": 0, "w": 900}}}, ""); res.StatusCode/100 != 4 {
+			t.Fatalf("narrow cover edit %d %s", res.StatusCode, raw)
 		}
-		key, _ := item.SlotOriginal("banner")
-		obj, err := h.srv.media.store.Head(ctx, key)
-		if err != nil || !strings.Contains(obj.Metadata[media.SlotEditMeta], `"h":300`) {
-			t.Fatalf("banner original %+v %v", obj.Metadata, err)
+		// Rotated a quarter turn: the crop is in original pixels and its height
+		// follows at 1:3, so the output is 1590x530.
+		edit := map[string]any{"ref": chRef, "slot": "cover", "edit": map[string]any{"crop": map[string]int{"x": 100, "y": 0, "w": 530}, "rotate": 90}}
+		editor.call("POST", "/api/v1/media/upload/edit-slot", edit, "", 403)
+		got := owner.call("POST", "/api/v1/media/upload/edit-slot", edit, "", 200)
+		if crop := got["edit"].(map[string]any)["crop"].(map[string]any); crop["h"] != float64(1590) {
+			t.Fatalf("cover edit %+v", got)
 		}
-		h.waitPublic(t, anon.call("GET", "/api/v1/channels/"+channelID, nil, "", 200)["banner_url"].(string))
-		// Slot sources are for managers; everyone else sees them locked.
-		eventually(t, "banner source dims", func() bool {
-			r := h.read2(owner, "channel", channelID)
-			return r.Access == media.AccessFull && r.Files[0].Dims != nil && r.Files[0].Dims.W == 900 && r.Files[0].URL != ""
-		})
-		if r := h.read2(stranger, "channel", channelID); r.Access != media.AccessNone || !r.Files[0].Locked {
-			t.Fatalf("stranger channel read %+v", r)
-		}
+		h.waitSlot(t, "re-cropped cover", cover, first.Version, 1500)
 	})
 
 	t.Run("channel avatar from a post image", func(t *testing.T) {
@@ -410,25 +404,14 @@ func TestMediaEndToEnd(t *testing.T) {
 		other := stranger.call("POST", "/api/v1/channels", map[string]any{"slug": "elsewhere", "name": "Elsewhere"}, "", 201)
 		stranger.call("POST", "/api/v1/media/upload/commit-slot-from-file",
 			map[string]any{"ref": map[string]string{"kind": kindChannel, "id": other["id"].(string)}, "slot": "avatar", "from": from, "file": "b.png"}, "", 403)
-		owner.call("POST", "/api/v1/media/upload/commit-slot-from-file", slot, "", 204)
-
-		// Slot.Aspect 1 derives the crop height; the avatar re-encodes from the
-		// post image's source through it.
-		item, err := h.srv.media.kinds.Item(h.srv.media.ref(kindChannel, channelID))
-		if err != nil {
-			t.Fatal(err)
+		avatar := h.channelSlot(anon, channelID, "avatar")
+		before, _ := avatar().(map[string]any)
+		got := owner.call("POST", "/api/v1/media/upload/commit-slot-from-file", slot, "", 200)
+		// Slot.Aspect 1 derives the crop height.
+		if crop := got["edit"].(map[string]any)["crop"].(map[string]any); crop["h"] != float64(480) {
+			t.Fatalf("avatar edit %+v", got)
 		}
-		key, _ := item.SlotOriginal("avatar")
-		orig, err := h.srv.media.store.Head(ctx, key)
-		if err != nil || !strings.Contains(orig.Metadata[media.SlotEditMeta], `"h":480`) {
-			t.Fatalf("avatar original %+v %v", orig.Metadata, err)
-		}
-		pub, _ := item.Public("avatar")
-		eventually(t, "avatar from post image", func() bool {
-			obj, err := h.srv.media.store.Head(ctx, pub)
-			return err == nil && obj.Metadata["source"] == strings.Trim(orig.ETag, `"`)
-		})
-		h.waitPublic(t, anon.call("GET", "/api/v1/channels/"+channelID, nil, "", 200)["avatar_url"].(string))
+		h.waitSlot(t, "avatar from post image", avatar, before["version"].(string), 128, 256)
 	})
 
 	t.Run("post deletion erases its folder and releases quota", func(t *testing.T) {
@@ -786,7 +769,7 @@ func (p peer) upload(ref map[string]string, slot string, data []byte, typ string
 	}
 	if slot != "" {
 		sum := sha256.Sum256(data)
-		p.call("POST", "/api/v1/media/upload/commit-slot", map[string]any{"ref": ref, "slot": slot, "sha256": hex.EncodeToString(sum[:])}, "", 204)
+		p.call("POST", "/api/v1/media/upload/commit-slot", map[string]any{"ref": ref, "slot": slot, "sha256": hex.EncodeToString(sum[:])}, "", 200)
 	}
 	return plan["name"].(string)
 }
@@ -948,6 +931,38 @@ func (h *mediaHarness) expectFetch(t *testing.T, u, cookie string, status int) {
 	if status == 200 && res.Header.Get("Content-Type") != "image/webp" {
 		t.Fatalf("GET %s served %s", u, res.Header.Get("Content-Type"))
 	}
+}
+
+func (h *mediaHarness) channelSlot(p peer, channel, slot string) func() any {
+	return func() any { return p.call("GET", "/api/v1/channels/"+channel, nil, "", 200)[slot] }
+}
+
+// waitSlot polls an API slot manifest until a version other than prev lists
+// exactly widths (the SlotEncoded hook recorded it), then fetches each
+// versioned output from the access worker.
+func (h *mediaHarness) waitSlot(t *testing.T, what string, get func() any, prev string, widths ...int) media.SlotManifest {
+	t.Helper()
+	var man media.SlotManifest
+	eventually(t, what, func() bool {
+		raw, _ := json.Marshal(get())
+		man = media.SlotManifest{}
+		if json.Unmarshal(raw, &man) != nil || man.Version == "" || man.Version == prev || len(man.Outputs) != len(widths) {
+			return false
+		}
+		for i, o := range man.Outputs {
+			if o.W != widths[i] {
+				return false
+			}
+		}
+		return true
+	})
+	for _, o := range man.Outputs {
+		if !strings.HasSuffix(o.URL, "?"+media.SlotVersionParam+"="+man.Version) {
+			t.Fatalf("%s output %s is not versioned", what, o.URL)
+		}
+		h.waitPublic(t, o.URL)
+	}
+	return man
 }
 
 func (h *mediaHarness) waitPublic(t *testing.T, u string) {

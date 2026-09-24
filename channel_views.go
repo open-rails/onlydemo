@@ -15,15 +15,15 @@ import (
 var channelSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,99}$`)
 
 type channelView struct {
-	ID         string            `json:"id"`
-	Slug       string            `json:"slug"`
-	Name       string            `json:"name"`
-	Role       string            `json:"role,omitempty"`
-	CanManage  bool              `json:"can_manage"`
-	CanEdit    bool              `json:"can_edit"`
-	AvatarURL  string            `json:"avatar_url"`
-	BannerURL  string            `json:"banner_url"`
-	Membership channelMembership `json:"membership"`
+	ID         string              `json:"id"`
+	Slug       string              `json:"slug"`
+	Name       string              `json:"name"`
+	Role       string              `json:"role,omitempty"`
+	CanManage  bool                `json:"can_manage"`
+	CanEdit    bool                `json:"can_edit"`
+	Avatar     *media.SlotManifest `json:"avatar"`
+	Cover      *media.SlotManifest `json:"cover"`
+	Membership channelMembership   `json:"membership"`
 }
 
 func (api *channelAPI) view(c fiber.Ctx, id string, offers bool) (channelView, error) {
@@ -45,8 +45,12 @@ func (api *channelAPI) view(c fiber.Ctx, id string, offers bool) (channelView, e
 	if err != nil {
 		return channelView{}, err
 	}
+	slots, err := api.media.slots(c.Context(), kindChannel, []string{id}, slotAvatar, slotCover)
+	if err != nil {
+		return channelView{}, err
+	}
 	v := channelView{ID: id, Slug: group.InstanceSlug, Name: group.DisplayName, Membership: channelMembership{Status: state.Status, Free: state.Free, Sync: state.Sync},
-		AvatarURL: api.media.publicURL(kindChannel, id, "avatar"), BannerURL: api.media.publicURL(kindChannel, id, "banner")}
+		Avatar: slots[slotKey{id, slotAvatar}], Cover: slots[slotKey{id, slotCover}]}
 	user := viewer(c)
 	if user != "" {
 		v.CanManage, err = api.allowed(c.Context(), user, id, "channel:settings:manage")
@@ -307,6 +311,10 @@ func (api *postAPI) me(c fiber.Ctx) error {
 	if err != nil {
 		return billingUnavailable(c)
 	}
+	avatar, err := api.media.slots(c.Context(), media.UserKind, []string{profile.ID}, slotAvatar)
+	if err != nil {
+		return databaseError(c, err)
+	}
 	c.Set("Cache-Control", "no-store")
-	return c.JSON(fiber.Map{"user": fiber.Map{"id": profile.ID, "username": profile.Username, "email": profile.Email, "avatar_url": api.media.publicURL(media.UserKind, profile.ID, "avatar_320")}, "manageable_channels": managed, "purchased_posts": purchased, "has_more": more, "next_cursor": next, "subscriptions": subscriptions.Data, "payments": payments.Data})
+	return c.JSON(fiber.Map{"user": fiber.Map{"id": profile.ID, "username": profile.Username, "email": profile.Email, "avatar": avatar[slotKey{profile.ID, slotAvatar}]}, "manageable_channels": managed, "purchased_posts": purchased, "has_more": more, "next_cursor": next, "subscriptions": subscriptions.Data, "payments": payments.Data})
 }

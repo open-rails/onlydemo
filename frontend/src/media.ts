@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import { createUploadClient, UploadError } from "@open-rails/contentkit-upload";
-import type { CommitFile, Edit, Op, RefBody } from "@open-rails/contentkit-upload";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { createUploadClient, UploadError } from "@openrails/contentkit-upload";
+import type { CommitFile, Edit, Op, RefBody, SlotManifest } from "@openrails/contentkit-upload";
 import { auth, request } from "./api";
 
 // Browser uploads go straight to the bucket; the app only presigns and commits.
@@ -78,10 +78,6 @@ export const hlsBase = (postID: number | string, name: string) =>
 export const readPost = (id: number | string, variants: string) =>
   request<MediaRead>(`/api/v1/media/post/${id}?variant=${variants}`);
 
-// A channel's slot sources, for its managers' cropper.
-export const readChannel = (id: string) =>
-  request<MediaRead>(`/api/v1/media/channel/${id}?variant=editor`);
-
 export const postFiles = (id: number | string) =>
   request<{ files: CommitFile[] }>(`/api/v1/posts/${id}/media`);
 
@@ -107,19 +103,27 @@ export function uploadMessage(error: unknown) {
   return error.message;
 }
 
-// A public slot (avatar, banner) is re-encoded by a background job after
-// upload; bump the URL for a few seconds so the new image shows up.
-export function useSlotVersion() {
-  const [version, setVersion] = useState(0);
-  const [polls, setPolls] = useState(0);
-  useEffect(() => {
-    if (polls <= 0) return;
-    const t = setTimeout(() => {
-      setVersion((v) => v + 1);
-      setPolls((p) => p - 1);
-    }, 1500);
-    return () => clearTimeout(t);
-  }, [polls]);
-  const src = (url?: string) => (url && version ? `${url}?v=${version}` : url);
-  return { src, refresh: () => setPolls(6) };
+// Slots (avatars, covers): listings carry a manifest from the app API; a
+// slot's full manifest (edit, source dims) is read for its editors.
+export const channelRef = (id: string): RefBody => ({ kind: "channel", id });
+export const userRef = (id: string): RefBody => ({ kind: "user", id });
+const slotKey = (ref: RefBody, slot: string) => ["slot", ref.kind, ref.id, slot];
+
+export function useSlot(ref: RefBody, slot: string, initial?: SlotManifest | null, enabled = true) {
+  const q = useQuery({
+    queryKey: slotKey(ref, slot),
+    queryFn: ({ signal }) => uploads.getSlot(ref, slot, signal),
+    enabled: enabled && !!ref.id,
+    staleTime: Infinity,
+  });
+  return q.data ?? initial ?? null;
+}
+
+// Stores a saved slot and refetches the listings that embed it.
+export function useSlotSaved() {
+  const client = useQueryClient();
+  return (ref: RefBody, slot: string, m: SlotManifest) => {
+    client.setQueryData(slotKey(ref, slot), m);
+    void client.invalidateQueries({ predicate: (q) => q.queryKey[0] !== "slot" });
+  };
 }

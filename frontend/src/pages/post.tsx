@@ -154,7 +154,7 @@ export function PostPage() {
         <article className="feed-card reader-main">
           <header className="feed-head">
             <Link to={channelPath(item.channel_slug)} className="feed-author">
-              <Avatar name={creator} seed={item.channel_id} src={item.channel_avatar_url} />
+              <Avatar name={creator} seed={item.channel_id} image={item.channel_avatar} />
               <span>
                 <strong>
                   {creator}

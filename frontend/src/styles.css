@@ -1112,14 +1112,6 @@
   .cover {
     overflow: hidden;
   }
-  .avatar > img,
-  .cover-image {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
   .avatar {
     position: relative;
   }
@@ -1130,17 +1122,25 @@
     align-items: center;
     gap: 4px;
   }
-  .slot-upload {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
+  .slot-error {
+    position: absolute;
+    z-index: 2;
+    max-width: 16rem;
     padding: 2px 10px;
     border-radius: 999px;
     font-size: 0.75rem;
-    cursor: pointer;
+    color: var(--destructive);
     background: var(--card);
     border: 1px solid var(--border);
-    max-width: 16rem;
+  }
+  .cover-edit ~ .slot-error {
+    right: 14px;
+    bottom: 56px;
+  }
+  .avatar-edit ~ .slot-error {
+    top: 100%;
+    left: 0;
+    white-space: nowrap;
   }
   .cover-edit {
     position: absolute;

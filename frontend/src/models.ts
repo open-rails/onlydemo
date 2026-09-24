@@ -1,3 +1,4 @@
+import type { SlotManifest } from "@openrails/contentkit-upload";
 import type { PspConfig } from "@openrails/billing-ui";
 export type AccessPolicy = "public" | "membership" | "members_ppv" | "ppv";
 export interface Offer {
@@ -21,8 +22,8 @@ export interface Channel {
   role?: "owner" | "editor";
   can_manage: boolean;
   can_edit: boolean;
-  avatar_url?: string;
-  banner_url?: string;
+  avatar: SlotManifest | null;
+  cover: SlotManifest | null;
   membership: ChannelMembership;
   deleted_at?: string | null;
 }
@@ -49,7 +50,7 @@ export interface Post {
   can_edit?: boolean;
   purchased?: boolean;
   has_membership?: boolean;
-  channel_avatar_url?: string;
+  channel_avatar?: SlotManifest;
   access_policy: AccessPolicy;
   offer_status: "none" | "pending" | "active" | "failed";
   offers: Offer[];
@@ -63,7 +64,7 @@ export interface Page<T> {
   total?: number;
 }
 export interface AccountData {
-  user: { id: string; username: string; email?: string; avatar_url?: string };
+  user: { id: string; username: string; email?: string; avatar: SlotManifest | null };
   manageable_channels: Channel[];
   purchased_posts: Post[];
 }
