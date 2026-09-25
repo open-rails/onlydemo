@@ -1,5 +1,5 @@
 import { useEffect, useImperativeHandle, useRef, useState, type DragEvent, type Ref } from "react";
-import { EncodeProgress, HoverPreviewPicker, ImageCropDialog, MediaGallery, VideoPosterPicker, useMessages } from "@openrails/contentkit-upload/ui";
+import { EncodeProgress, ImageCropDialog, MediaGallery, VideoPosterPicker, useMessages } from "@openrails/contentkit-upload/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useUploadQueue, type UseUploadQueue } from "@openrails/contentkit-upload/react";
 import type { Op, QueueItem } from "@openrails/contentkit-upload";
@@ -262,7 +262,7 @@ function MediaEditor({
   const [refused, setRefused] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
   const [cropping, setCropping] = useState<{ name: string; slot?: ChannelSlot }>();
-  const [picking, setPicking] = useState<{ file: string; what: "poster" | "preview" }>();
+  const [picking, setPicking] = useState<string>();
   const [slotSaving, setSlotSaving] = useState(false);
   const [slotError, setSlotError] = useState("");
   const saved = useSlotSaved();
@@ -277,13 +277,13 @@ function MediaEditor({
       q.state.data?.files.some((f) => !f.failed && (isVideo(f.type) ? !f.hls : !f.url || !f.dims)) ? 3000 : false,
   });
   const editable = new Map((editor.data?.files ?? []).map((f) => [f.name, f]));
-  // The post's poster and hover preview, cut from one of its videos.
+  // The post's poster, cut from one of its videos (its inline preview starts there).
   const hasVideo = (files.data?.files ?? []).some((f) => isVideo(f.type));
   const videoImages = useQuery({
     queryKey: ["post-media-video", postID],
     queryFn: ({ signal }) => uploads.getVideoImages(postRef(postID), undefined, signal),
     enabled: hasVideo,
-    refetchInterval: (q) => (q.state.data?.poster.pending || q.state.data?.hover_preview.pending ? 3000 : false),
+    refetchInterval: (q) => (q.state.data?.poster.pending ? 3000 : false),
   });
   const imagesOf = videoImages.data;
   const encodePending = (editor.data?.files ?? []).some((f) => isVideo(f.type) && !f.hls && !f.failed);
@@ -467,14 +467,9 @@ function MediaEditor({
               )}
               <span className="inline-actions">
                 {video && e?.hls && (
-                  <>
-                    <Button size="sm" variant="ghost" onClick={() => setPicking({ file: f.name, what: "poster" })}>
-                      Set cover
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setPicking({ file: f.name, what: "preview" })}>
-                      Hover preview
-                    </Button>
-                  </>
+                  <Button size="sm" variant="ghost" onClick={() => setPicking(f.name)}>
+                    Set cover
+                  </Button>
                 )}
                 {!video && (
                   <Button
@@ -584,25 +579,16 @@ function MediaEditor({
         </div>
       )}
       {picking && (
-        <>
-          <VideoPosterPicker
-            open={picking.what === "poster"}
-            onOpenChange={(open) => !open && setPicking(undefined)}
-            item={postRef(postID)}
-            file={picking.file}
-            onChange={(v) => {
-              client.setQueryData(["post-media-video", postID], v);
-              void client.invalidateQueries({ queryKey: ["posts"] });
-            }}
-          />
-          <HoverPreviewPicker
-            open={picking.what === "preview"}
-            onOpenChange={(open) => !open && setPicking(undefined)}
-            item={postRef(postID)}
-            file={picking.file}
-            onChange={(v) => client.setQueryData(["post-media-video", postID], v)}
-          />
-        </>
+        <VideoPosterPicker
+          open
+          onOpenChange={(open) => !open && setPicking(undefined)}
+          item={postRef(postID)}
+          file={picking}
+          onChange={(v) => {
+            client.setQueryData(["post-media-video", postID], v);
+            void client.invalidateQueries({ queryKey: ["posts"] });
+          }}
+        />
       )}
       {cropping && !cropping.slot && (
         <CropDialog

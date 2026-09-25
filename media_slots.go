@@ -79,15 +79,9 @@ func (m *mediaService) deleteSlotsTx(ctx context.Context, tx pgx.Tx, kind, id st
 	return err
 }
 
-// hoverPreview is a post's silent loop: the smallest MP4 (preferred) and WebP.
-type hoverPreview struct {
-	MP4  string `json:"mp4"`
-	WebP string `json:"webp"`
-}
-
-// videoImages sets each published post's poster and, for public posts, its
-// hover preview: only what ContentKit publishes (paid posts show the poster
-// alone; drafts nothing). URLs are fixed; public/ is served no-cache.
+// videoImages sets each published post's poster, which ContentKit publishes
+// for every visible post (drafts nothing). URLs are fixed; public/ is served
+// no-cache. Playable videos preview inline from their HLS (SDK MediaGallery).
 func (m *mediaService) videoImages(ctx context.Context, posts []post) error {
 	ids := make([]string, len(posts))
 	for i, p := range posts {
@@ -103,14 +97,6 @@ func (m *mediaService) videoImages(ctx context.Context, posts []post) error {
 			continue
 		}
 		posts[i].Poster = poster
-		if posts[i].AccessPolicy != "public" {
-			continue
-		}
-		mp4, webp, err := m.reader.HoverPreviewURLs(m.postRef(posts[i].ID))
-		if err != nil {
-			return err
-		}
-		posts[i].HoverPreview = &hoverPreview{MP4: mp4, WebP: webp}
 	}
 	return nil
 }

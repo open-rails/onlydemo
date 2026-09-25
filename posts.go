@@ -60,7 +60,6 @@ type post struct {
 	SubscriptionActive bool                     `json:"has_membership"`
 	ChannelAvatar      *media.SlotManifest      `json:"channel_avatar,omitempty"`
 	Poster             *media.SlotManifest      `json:"poster,omitempty"`
-	HoverPreview       *hoverPreview            `json:"hover_preview,omitempty"`
 	CreatedAt          time.Time                `json:"created_at"`
 	UpdatedAt          time.Time                `json:"updated_at"`
 	Offers             []openrails.CatalogOffer `json:"offers"`

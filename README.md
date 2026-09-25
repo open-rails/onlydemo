@@ -223,20 +223,22 @@ and channel folders with no row.
   post. Cancel deletes the draft with its folder (`DELETE /api/v1/posts/{id}`);
   drafts abandoned for 24 h are swept hourly.
 - **Covers.** Each post with a video has a cover at the video's native aspect
-  (`Video.PosterWidths` 640/1280/1920: the ~620 px feed column at 2–3×) and a
-  silent hover-preview loop (MP4 + WebP, 320/640, still 16:9), cut from its HLS. The
-  worker picks an automatic frame and section; in the composer and the post's
-  media editor, "Set cover" (`VideoPosterPicker`: an exact frame via
-  `GET /api/v1/media/upload/frame`, optionally cropped at the video's aspect, or an uploaded image) and "Hover
-  preview" (`HoverPreviewPicker`) change them. Frame posters reach the app's
-  image job in the same worker; the app needs ffmpeg for `/frame`. `SlotEncoded` stores the poster stamp like other slots,
-  so listings carry `poster` and `hover_preview` URLs without reads. Both render to ContentKit's token-gated
-  `editor/` area and are copied to tokenless `public/` URLs according to what
-  anonymous viewers may see (`JobsConfig.Resolver`, default `Exposure`):
-  drafts nothing, public posts poster and preview, members-only or paid
-  posts the poster alone as a teaser. Publishing a draft or changing a
-  post's access policy republishes (`PublishTx` in the same transaction),
-  and deleting a post removes both first.
+  (`Video.PosterWidths` 640/1280/1920: the ~620 px feed column at 2–3×). The
+  worker picks an automatic frame; in the composer and the post's media editor,
+  "Set cover" (`VideoPosterPicker`: an exact frame via
+  `GET /api/v1/media/upload/frame`, optionally cropped at the video's aspect, or
+  an uploaded image) changes it. Frame posters reach the app's image job in the
+  same worker; the app needs ffmpeg for `/frame`. `SlotEncoded` stores the
+  poster stamp like other slots, so listings carry `poster` URLs without reads.
+  It renders to ContentKit's token-gated `editor/` area and is copied to a
+  tokenless `public/` URL for every visible post (drafts nothing; members-only
+  or paid posts show it as the teaser). Publishing a draft or changing a post's
+  access policy republishes (`PublishTx` in the same transaction), and deleting
+  a post removes it first.
+- **Inline preview.** Videos the viewer can play preview in the feed with
+  their own HLS, muted (mouse: after 500 ms of hover; touch: the most visible
+  one), from the cover's frame or 10 % in (ContentKit `MediaGallery`). Locked
+  posts show only the cover (`VideoPoster`): they have no stream.
 - **Uploads.** Post images need `channel:posts:create`, channel slots
   `channel:settings:manage`, a user their own avatar. The UploadLimiter
   rate-limits each uploader (429) and holds each channel's quota: presign

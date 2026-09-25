@@ -110,7 +110,7 @@ export function mediaXhr(xhr: XMLHttpRequest, url: string) {
   }
 }
 
-// The public poster and hover preview (none for drafts; paid posts get the poster only).
+// The public poster with its frame time (none for drafts).
 export const readVideoImages = (id: string) =>
   request<VideoImages>(`/api/v1/media/post/${id}/video-images`);
 
@@ -120,7 +120,7 @@ export const hlsBase = (postID: string, name: string) =>
 
 // The read API resolves access once and returns URLs only for what this
 // viewer may see (cookie mode sets the folder cookie for full access).
-// The item's current encode step, including the poster/preview pass after publish.
+// The item's current encode step, including the poster pass after publish.
 export const readVideoProgress = (id: string) =>
   request<{ progress?: EncodeProgress }>(`/api/v1/media/post/${id}/video-images`);
 

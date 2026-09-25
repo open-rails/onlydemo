@@ -232,8 +232,8 @@ func newMedia(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth
 	if err != nil {
 		return nil, err
 	}
-	// Resolver publishes video posters and hover previews by what anonymous
-	// viewers may see: drafts nothing, public posts both, paid posts the poster.
+	// Resolver publishes video posters by what anonymous viewers may see:
+	// drafts nothing, every visible post its poster (the teaser of paid ones).
 	if m.jobs, err = media.NewJobs(media.JobsConfig{Store: store, Kinds: kinds, Tenants: []string{mc.Tenant}, Limiter: m.limiter, Resolver: m}); err != nil {
 		return nil, err
 	}

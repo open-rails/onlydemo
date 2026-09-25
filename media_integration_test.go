@@ -489,7 +489,7 @@ func TestMediaEndToEnd(t *testing.T) {
 		h.waitSlot(t, "avatar from post image", avatar, before, 128, 256)
 	})
 
-	t.Run("video poster and hover preview", func(t *testing.T) {
+	t.Run("video poster", func(t *testing.T) {
 		if !h.video {
 			t.Skip("ffmpeg not installed")
 		}
@@ -511,19 +511,8 @@ func TestMediaEndToEnd(t *testing.T) {
 		// The worker grabs an automatic frame; the app's image job encodes it and records the stamp.
 		eventually(t, "automatic poster listed", func() bool { p := listed(); return p.Poster != nil && len(p.Poster.Outputs) > 0 })
 		first := listed()
-		if first.HoverPreview == nil || !strings.Contains(first.HoverPreview.MP4, "hover_preview_320.mp4") {
-			t.Fatalf("hover preview %+v", first.HoverPreview)
-		}
 		h.waitPublic(t, first.Poster.Outputs[0].URL)
 		firstPoster := publicSum(first.Poster.Outputs[0].URL)
-		eventually(t, "hover preview served", func() bool {
-			res, err := http.Get(first.HoverPreview.MP4)
-			if err != nil {
-				return false
-			}
-			res.Body.Close()
-			return res.StatusCode == 200 && res.Header.Get("Content-Type") == "video/mp4"
-		})
 
 		frame := fmt.Sprintf("/api/v1/media/upload/frame?kind=post&id=%s&t=1&w=320", id)
 		if res, _ := stranger.do("GET", frame, nil, ""); res.StatusCode != 403 && res.StatusCode != 404 {
@@ -538,14 +527,14 @@ func TestMediaEndToEnd(t *testing.T) {
 			p := listed()
 			return p.Poster != nil && len(p.Poster.Outputs) > 0 && publicSum(p.Poster.Outputs[0].URL) != firstPoster
 		})
-		imgs := owner.call("POST", "/api/v1/media/upload/video-preview", map[string]any{"ref": ref, "start": 0.5, "duration": 1}, "", 200)
-		if sel := imgs["hover_preview"].(map[string]any)["selection"].(map[string]any); sel["start"] != 0.5 || sel["duration"] != 1.0 {
-			t.Fatalf("preview selection %v", sel)
+		// Viewers get the cover's frame time: the SDK's inline preview starts there. There is no preview clip.
+		imgs := anon.call("GET", fmt.Sprintf("/api/v1/media/post/%s/video-images", id), nil, "", 200)
+		if p := imgs["poster"].(map[string]any); p["time"] != 1.5 || p["file"] != "clip.mp4" || imgs["hover_preview"] != nil {
+			t.Fatalf("video images %v", imgs)
 		}
-		eventually(t, "preview rendered", func() bool {
-			v := owner.call("POST", "/api/v1/media/upload/video-images", map[string]any{"ref": ref}, "", 200)
-			return v["hover_preview"].(map[string]any)["pending"] == false
-		})
+		if res, _ := owner.do("POST", "/api/v1/media/upload/video-preview", map[string]any{"ref": ref}, ""); res.StatusCode != 404 && res.StatusCode != 405 {
+			t.Fatalf("video-preview route %d", res.StatusCode)
+		}
 
 		status := func(u string) int {
 			res, err := http.Get(u)
@@ -555,12 +544,11 @@ func TestMediaEndToEnd(t *testing.T) {
 			res.Body.Close()
 			return res.StatusCode
 		}
-		// Members-only: the poster stays public as the teaser, the hover clip goes.
+		// Members-only: the poster stays public as the teaser.
 		owner.call("PATCH", fmt.Sprintf("/api/v1/posts/%s", id), map[string]any{"access_policy": "membership"}, "", 200)
-		eventually(t, "hover preview unpublished", func() bool { return status(first.HoverPreview.MP4) == 404 && status(first.HoverPreview.WebP) == 404 })
 		paid := listed()
-		if paid.HoverPreview != nil || paid.Poster == nil || len(paid.Poster.Outputs) == 0 {
-			t.Fatalf("members-only post listing %+v %+v", paid.Poster, paid.HoverPreview)
+		if paid.Poster == nil || len(paid.Poster.Outputs) == 0 {
+			t.Fatalf("members-only post listing %+v", paid.Poster)
 		}
 		posterURL := paid.Poster.Outputs[0].URL
 		h.waitPublic(t, posterURL)

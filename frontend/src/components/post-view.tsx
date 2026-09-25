@@ -131,7 +131,7 @@ export function PostView({
       <div ref={watchMedia}>
         {mediaNear &&
           (!post.can_read && post.poster ? (
-            <VideoPoster className="feed-video" poster={post.poster} preview={post.hover_preview} alt="">
+            <VideoPoster className="feed-video" poster={post.poster} alt="">
               <span className="feed-video-link" aria-hidden>
                 <span className="lock-badge">
                   <HugeiconsIcon icon={SquareLock02Icon} size={30} />
