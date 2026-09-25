@@ -13,6 +13,17 @@ export function date(value?: string | null) {
       })
     : "—";
 }
+export function dateTime(value?: string | null) {
+  return value
+    ? new Date(value).toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : "—";
+}
 export function duration(hours?: number | null) {
   if (!hours) return "one time";
   if (hours === 1) return "every hour";

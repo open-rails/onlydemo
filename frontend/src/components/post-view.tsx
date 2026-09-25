@@ -4,7 +4,7 @@ import { VideoPoster } from "@openrails/contentkit-upload/ui";
 import { cn } from "cn";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Bookmark02Icon, FavouriteIcon, Message01Icon, SquareLock02Icon, Tick02Icon } from "@hugeicons/core-free-icons";
-import { date } from "../format";
+import { dateTime } from "../format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PolicyBadge } from "./policy-badge";
@@ -92,14 +92,17 @@ export function PostView({
             {handle && <small>@{handle}</small>}
           </span>
         </Link>
-        <span className="feed-date">
-          <PolicyBadge policy={policy} offer={price} /> {badges}
-          <Link to={postPath(post)} aria-label={`Open ${label}`}>
-            {date(post.created_at)}
-          </Link>
-        </span>
+        <div className="feed-meta">
+          <span className="feed-date">
+            <PolicyBadge policy={policy} offer={price} /> {badges}
+            <Link to={postPath(post)} aria-label={`Open ${label}`}>
+              <time dateTime={post.created_at}>{dateTime(post.created_at)}</time>
+            </Link>
+          </span>
+          {controls}
+        </div>
       </header>
-      {(post.title || body || controls) && (
+      {(post.title || body) && (
         <div className="feed-text">
           {post.title &&
             (full ? (
@@ -109,7 +112,6 @@ export function PostView({
                 <Link to={postPath(post)}>{post.title}</Link>
               </Title>
             ))}
-          {controls}
           {body &&
             (full ? (
               <div className="article-body">{body}</div>

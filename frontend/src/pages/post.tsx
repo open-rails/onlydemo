@@ -9,6 +9,7 @@ import { money } from "../format";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowLeft02Icon,
+  Delete02Icon,
   PencilEdit02Icon,
   SquareLock02Icon,
 } from "@hugeicons/core-free-icons";
@@ -152,13 +153,12 @@ export function PostPage() {
           }
           controls={
             canEdit && (
-              <div className="inline-actions">
-                <Button variant="outline" size="sm" onClick={() => setEditor(true)}>
-                  <HugeiconsIcon icon={PencilEdit02Icon} data-icon="inline-start" />
-                  Edit post
+              <div className="feed-controls">
+                <Button variant="ghost" size="icon-sm" aria-label="Edit post" title="Edit post" onClick={() => setEditor(true)}>
+                  <HugeiconsIcon icon={PencilEdit02Icon} />
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => setDeleting(true)}>
-                  Delete post
+                <Button variant="ghost" size="icon-sm" aria-label="Delete post" title="Delete post" onClick={() => setDeleting(true)}>
+                  <HugeiconsIcon icon={Delete02Icon} />
                 </Button>
               </div>
             )
