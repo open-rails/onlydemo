@@ -50,7 +50,7 @@ func newAuth(ctx context.Context, config Config, pool *pgxpool.Pool) (*appAuth, 
 	ownership := embedded.RiverFromHost()
 	runtime, err := embedded.New(embedded.Config{
 		Schema: strings.TrimSpace(config.AuthSchema),
-		HTTP:   authhttp.Config{DirectPeerIP: true, Mount: authhttp.MountOptions{APIPrefix: "/auth/v1", RefreshCookie: true}},
+		HTTP:   authhttp.Config{DirectPeerIP: true, PerProcessRateLimits: true, Mount: authhttp.MountOptions{APIPrefix: "/auth/v1", RefreshCookie: true}},
 		RBAC: []embedded.PersonaDef{embedded.IntrinsicRootPersona(embedded.RoleDef{
 			Name:        "admin",
 			Permissions: []string{postReadPermission, postEditPermission, postDeletePermission, billingOperatePermission},

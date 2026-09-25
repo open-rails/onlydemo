@@ -139,3 +139,12 @@ tasks:
       DEMO_TEST_S3_ENDPOINT: http://127.0.0.1:59000
       DEMO_TEST_S3_ACCESS_KEY: onlydemo
       DEMO_TEST_S3_SECRET_KEY: onlydemo-dev-secret
+  test:nmi:
+    desc: NMI billing end-to-end test against nmimock on the local PostgreSQL and MinIO (task dev:up first)
+    cmds:
+      - go test -run TestNMIBillingEndToEnd -count=1 -v .
+    env:
+      DEMO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:55433/postgres?sslmode=disable
+      DEMO_TEST_S3_ENDPOINT: http://127.0.0.1:59000
+      DEMO_TEST_S3_ACCESS_KEY: onlydemo
+      DEMO_TEST_S3_SECRET_KEY: onlydemo-dev-secret

@@ -443,7 +443,7 @@ func smoke() error {
 	if err = channels.finishDeletion(ctx, channelID); !errors.As(err, &snooze) {
 		return fmt.Errorf("early cleanup did not defer hard deletion: %w", err)
 	}
-	var retained bool
+	retained = false
 	if err = pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM demo.channels c JOIN demo.posts p ON p.channel_id=c.id WHERE c.id=$1 AND c.deleted_at IS NOT NULL)`, channelID).Scan(&retained); err != nil {
 		return err
 	}

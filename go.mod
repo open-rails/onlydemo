@@ -8,9 +8,9 @@ require (
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/knadh/koanf/providers/env/v2 v2.0.1
 	github.com/knadh/koanf/v2 v2.3.6
-	github.com/open-rails/authkit v0.140.0
+	github.com/open-rails/authkit v0.141.0
 	github.com/open-rails/migratekit v1.0.5
-	github.com/open-rails/openrails v0.190.0
+	github.com/open-rails/openrails v0.210.0
 	github.com/riverqueue/river v0.47.0
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.47.0 // indirect
 )
@@ -19,8 +19,10 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.42.1
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.96.0
 	github.com/joho/godotenv v1.5.1
+	github.com/jonboulle/clockwork v0.5.0
 	github.com/open-rails/contentkit v0.52.0
 	github.com/open-rails/helpers v0.3.0
+	github.com/riverqueue/river/rivertype v0.47.0
 	github.com/spf13/cobra v1.10.2
 )
 
@@ -79,7 +81,6 @@ require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
-	github.com/jonboulle/clockwork v0.5.0 // indirect
 	github.com/klauspost/compress v1.19.2 // indirect
 	github.com/knadh/koanf/maps v0.1.2 // indirect
 	github.com/knadh/koanf/parsers/yaml v1.1.0 // indirect
@@ -101,7 +102,6 @@ require (
 	github.com/redis/go-redis/v9 v9.22.0 // indirect
 	github.com/riverqueue/river/riverdriver v0.47.0 // indirect
 	github.com/riverqueue/river/rivershared v0.47.0 // indirect
-	github.com/riverqueue/river/rivertype v0.47.0 // indirect
 	github.com/ryanuber/go-glob v1.0.0 // indirect
 	github.com/sendgrid/rest v2.6.9+incompatible // indirect
 	github.com/sendgrid/sendgrid-go v3.16.1+incompatible // indirect
