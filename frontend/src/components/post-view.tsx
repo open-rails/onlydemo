@@ -183,13 +183,11 @@ export function PostView({
           </Button>
         )}
         <span className="feed-actions-end">
-          {post.purchased ? (
+          {post.purchased && (
             <Badge className="bg-success/10 text-success">
               <HugeiconsIcon icon={Tick02Icon} data-icon="inline-start" />
               Purchased
             </Badge>
-          ) : (
-            policy === "public" && <Badge variant="secondary">Free</Badge>
           )}
           <HugeiconsIcon icon={Bookmark02Icon} size={20} className="muted" />
         </span>

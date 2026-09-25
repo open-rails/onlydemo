@@ -166,16 +166,14 @@ export function PostPage() {
           editor={canEdit && <PostMediaEditor postID={item.id} channel={channel.data?.can_manage ? item.channel_id : undefined} />}
         />
         <aside className="panel purchase-panel">
-          <Badge
-            variant={
-              item.purchased || policy === "public" ? "secondary" : "default"
-            }
-            className={item.purchased ? "bg-success/10 text-success" : undefined}
-          >
-            {item.purchased
-              ? "Permanent purchased access"
-              : policyLabels[policy]}
-          </Badge>
+          {(item.purchased || policy !== "public") && (
+            <Badge
+              variant={item.purchased ? "secondary" : "default"}
+              className={item.purchased ? "bg-success/10 text-success" : undefined}
+            >
+              {item.purchased ? "Permanent purchased access" : policyLabels[policy]}
+            </Badge>
+          )}
           <h3>{item.can_read ? "You have access." : "Support the creator."}</h3>
           <p>
             {item.purchased
