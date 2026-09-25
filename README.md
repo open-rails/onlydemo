@@ -12,7 +12,7 @@ directory is `/dev/routes`. AuthKit protocol anchors stay at
 ## Run locally
 
 Prerequisites: Docker, Go 1.26.6, Node 24 with pnpm 11, libvips (`libvips-dev`;
-the image job is CGO) and ffmpeg with ffprobe (the video worker). Copy
+the media worker's image jobs are CGO) and ffmpeg with ffprobe (its video jobs). Copy
 `.env.example` to `.env` and set `MEDIA_TOKEN_KEY`
 (`echo "dev:$(openssl rand -base64 32)"`), then:
 
@@ -23,8 +23,8 @@ task seed     # optional display channels and posts, created through the API
 ```
 
 `task run` migrates (idempotent), then serves Go with Air, the frontend with
-Vite, the media access worker (`task media:access`) and the video encode
-worker (`task media:worker`), reloading on change; open http://localhost:5173.
+Vite, the media access worker (`task media:access`) and the media worker
+(`task media:worker`, `onlydemo media-worker`), reloading on change; open http://localhost:5173.
 The MinIO console is http://localhost:59001 (`onlydemo` / `onlydemo-dev-secret`). `task run:embedded` builds the frontend into
 the single Go binary and serves everything from http://localhost:3000.
 `task seed` targets http://127.0.0.1:3000; pass `-- --url <base>` for another
@@ -148,6 +148,12 @@ originals never served. Browsers upload straight to the bucket with
 `@openrails/contentkit-upload` (a ContentKit release asset); the app presigns
 and commits (`/api/v1/media/upload/*`).
 
+Post ids are UUIDv7s (`uuidv7()`), ContentKit's content id and the media
+folder `{tenant}/post/{id}/`, so an id is never reused after a database reset.
+Creating a post starts its folder (`Manifests.Create`) and fails over leftovers.
+`onlydemo media sweep-orphans [--grace 24h] [--delete]` reports or removes post
+and channel folders with no row.
+
 - **Kinds.** `post`: images (`large`, `thumb`) and videos (MP4, WebM, MOV,
   MKV) mixed in one order, plus an optional image `teaser` derived as a
   blurred WebP (the app refuses a video teaser). ContentKit holds the caps
@@ -185,8 +191,23 @@ and commits (`/api/v1/media/upload/*`).
   editors and site admins read everything). Full access gets every file;
   anyone else who can see the post gets the teaser only. Files are served by
   `media-access`, never the bucket.
+- **Media worker.** `onlydemo media-worker` (`task media:worker`) is
+  ContentKit's media worker built with this app's kinds, teaser spec choice
+  and hooks (`media_worker.go`): it does every image rendition, slot, video
+  encode and the placement of multipart uploads (`staging/u-…` hashed while
+  processed, then moved to `originals/sha256-…`). The app only presigns,
+  commits, publishes and reads, enqueueing into River schema `media_worker`.
+  Env: the app's config plus `MEDIA_WORKER_THREADS` (ffmpeg threads),
+  `MEDIA_WORKER_CONCURRENCY`, `MEDIA_WORKER_IMAGE_CONCURRENCY`,
+  `MEDIA_WORKER_ENCODER` (auto/x264/nvenc), `MEDIA_WORKER_TMP` and
+  `MEDIA_HOST_RIVER_SCHEMA` (default: `RIVER_SCHEMA`).
+- **Process on upload.** Each file is committed unattached the moment it
+  uploads, so it is processed while the post is still being composed; the
+  queue row shows the processing progress, "Add to post" attaches the files
+  in order without reprocessing, and removing one cancels its jobs and
+  deletes it.
 - **Video.** A commit enqueues the encode in River schema `media_worker`;
-  ContentKit's `cmd/media-worker` (`task media:worker`, needs ffmpeg) writes a
+  the media worker writes a
   byte-range HLS ladder (ContentKit's default rungs 2160–480 by short side, so
   vertical and 21:9 sources keep their aspect; capped at 4096 px per side and
   3840×2160 area), a seek sprite and one MP4 download per rung. Sources outside
@@ -208,8 +229,7 @@ and commits (`/api/v1/media/upload/*`).
   media editor, "Set cover" (`VideoPosterPicker`: an exact frame via
   `GET /api/v1/media/upload/frame`, optionally cropped at the video's aspect, or an uploaded image) and "Hover
   preview" (`HoverPreviewPicker`) change them. Frame posters reach the app's
-  image job through the worker's `MEDIA_HOST_RIVER_SCHEMA`; the app needs
-  ffmpeg for `/frame`. `SlotEncoded` stores the poster stamp like other slots,
+  image job in the same worker; the app needs ffmpeg for `/frame`. `SlotEncoded` stores the poster stamp like other slots,
   so listings carry `poster` and `hover_preview` URLs without reads. Both render to ContentKit's token-gated
   `editor/` area and are copied to tokenless `public/` URLs according to what
   anonymous viewers may see (`JobsConfig.Resolver`, default `Exposure`):
@@ -346,7 +366,7 @@ explicit quote confirmation/cancellation and retained deletion. Unexpected provi
 requests fail locally; no real Stripe request or credential is used.
 
 `TestMediaEndToEnd` runs the media proof on real PostgreSQL, MinIO, the
-ContentKit handlers, the libvips job, the `media-worker` ffmpeg encode and the
+ContentKit handlers, the app's media worker (libvips, ffmpeg) and the
 `media-access` binary (fake Stripe only): uploads and variants, a mixed
 image/video post (HLS playlists and byte ranges, downloads, locked viewers,
 ceilings; skipped without ffmpeg locally), what anonymous, member, buyer and members_ppv

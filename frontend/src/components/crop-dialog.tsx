@@ -1,3 +1,4 @@
+import { ratio, type AspectRatio } from "@openrails/contentkit-upload";
 import { useEffect, useMemo, useState } from "react";
 import Cropper from "react-easy-crop";
 import { useCrop } from "@openrails/contentkit-upload/react";
@@ -23,11 +24,11 @@ export interface Dims {
 }
 
 // Edited-image aspects offered for post images; slots pass their own.
-const presets: [string, number | undefined][] = [
+const presets: [string, AspectRatio | undefined][] = [
   ["Original", undefined],
-  ["1:1", 1],
-  ["4:5", 4 / 5],
-  ["16:9", 16 / 9],
+  ["1:1", "1:1"],
+  ["4:5", "4:5"],
+  ["16:9", "16:9"],
 ];
 
 function useNaturalSize(src: string) {
@@ -54,7 +55,7 @@ function CropEditor({
   src: string;
   display: { width: number; height: number };
   dims: Dims;
-  aspect?: number;
+  aspect?: AspectRatio;
   initial?: Edit | null;
   onEdit: (edit: Edit | null) => void;
 }) {
@@ -70,7 +71,8 @@ function CropEditor({
   // The cropper draws the unrotated source: a fixed edited aspect transposes
   // with the rotation; without one the starting crop's shape is kept.
   const [free] = useState(() => c.crop.w / c.crop.h);
-  const ratio = aspect ? (turned ? 1 / aspect : aspect) : free;
+  const value = ratio(aspect);
+  const shape = value ? (turned ? 1 / value : value) : free;
   return (
     <>
       <div className="crop-area">
@@ -80,7 +82,7 @@ function CropEditor({
           crop={pos}
           zoom={zoom}
           maxZoom={8}
-          aspect={ratio}
+          aspect={shape}
           initialCroppedAreaPixels={{
             x: c.crop.x * scale,
             y: c.crop.y * scale,
@@ -152,13 +154,13 @@ export function CropDialog({
   title: string;
   src?: string;
   dims?: Dims;
-  aspect?: number;
+  aspect?: AspectRatio;
   initial?: Edit | null;
   onSave: (edit: Edit | null) => Promise<unknown>;
   onClose: () => void;
 }) {
   const display = useNaturalSize(src ?? "");
-  const [preset, setPreset] = useState<number | undefined | null>(null);
+  const [preset, setPreset] = useState<AspectRatio | undefined | null>(null);
   const [edit, setEdit] = useState<Edit | null>(initial ?? null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");

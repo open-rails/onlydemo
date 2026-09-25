@@ -1,4 +1,4 @@
--- parent: 1 sha256:8c08588eec8b39d467f46381a12798e42a3035e87a8a5d79d2e980459cd9b1c6
+-- parent: 1 sha256:470ba50c48a1e6fd6f05fe324fa0e8a78bb4e17b9e618123733347b9b6f12b94
 
 -- A channel optionally sells one membership. The catalog owns its price; this
 -- row owns whether it is open, closed or free. Catalog writes run after commit

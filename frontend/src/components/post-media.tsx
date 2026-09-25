@@ -2,7 +2,7 @@ import { useEffect, useImperativeHandle, useRef, useState, type DragEvent, type 
 import { EncodeProgress, HoverPreviewPicker, ImageCropDialog, MediaGallery, VideoPosterPicker, useMessages } from "@openrails/contentkit-upload/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useUploadQueue, type UseUploadQueue } from "@openrails/contentkit-upload/react";
-import type { Op } from "@openrails/contentkit-upload";
+import type { Op, QueueItem } from "@openrails/contentkit-upload";
 import type { Post } from "../models";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -129,8 +129,8 @@ export function PostGallery({ post, viewer, unlock }: { post: Post; viewer?: str
 // pick an image as the teaser. ContentKit derives image variants and HLS.
 // Channel slots a post image can fill (managers only), cropped at the slot's aspect.
 const channelSlots = {
-  avatar: { aspect: 1, target: 512, label: "Use as channel avatar", short: "Avatar" },
-  cover: { aspect: 3, target: 3000, label: "Use as channel cover", short: "Cover" },
+  avatar: { aspect: "1:1", target: 512, label: "Use as channel avatar", short: "Avatar" },
+  cover: { aspect: "3:1", target: 3000, label: "Use as channel cover", short: "Cover" },
 };
 type ChannelSlot = keyof typeof channelSlots;
 const accept = [...imageTypes, ...videoTypes, ".mkv", ".mov"].join(",");
@@ -197,7 +197,7 @@ export function MediaDrop({
   );
 }
 
-export function PostMediaEditor({ postID, channel }: { postID: number; channel?: string }) {
+export function PostMediaEditor({ postID, channel }: { postID: string; channel?: string }) {
   const queue = useUploadQueue(uploads, { ref: postRef(postID) });
   return <MediaEditor postID={postID} channel={channel} queue={queue} />;
 }
@@ -215,7 +215,7 @@ export function DraftMediaEditor({
   onBusy,
   onCount,
 }: {
-  postID: number;
+  postID: string;
   initial: File[];
   handle: Ref<DraftMediaHandle>;
   onBusy: (busy: boolean) => void;
@@ -246,7 +246,7 @@ function MediaEditor({
   onBusy,
   onCount,
 }: {
-  postID: number;
+  postID: string;
   channel?: string;
   queue: UseUploadQueue;
   draft?: boolean;
@@ -330,21 +330,9 @@ function MediaEditor({
     onSettled: refresh,
   });
   // A draft commits the uploaded head of the queue, so the post keeps the order files were added in.
-  const commitHead = async () => {
-    const items = queue.queue.getSnapshot().items;
-    const end = items.findIndex((i) => i.status !== "uploaded" && i.status !== "committed");
-    const head = (end < 0 ? items : items.slice(0, end)).filter((i) => i.status === "uploaded");
-    if (head.length === 0) return;
-    await uploads.commit(
-      postRef(postID),
-      head.map((i) => ({ op: "insert" as const, name: i.name, original: i.result!.name, meta: i.meta })),
-      { sources: Object.fromEntries(head.map((i) => [i.result!.name, { file: i.file, type: i.result!.type }])) },
-    );
-    for (const i of head) queue.remove(i.id);
-  };
   const publish = useMutation({
     mutationFn: async () => {
-      await (draft ? commitHead() : queue.commit());
+      await queue.commit(undefined, { head: draft });
     },
     onSuccess: () => {
       for (const item of queue.queue.getSnapshot().items) if (item.status === "committed") queue.remove(item.id);
@@ -562,6 +550,9 @@ function MediaEditor({
             {item.status === "uploading" && item.progress && (
               <progress max={Math.max(1, item.progress.total)} value={item.progress.loaded} />
             )}
+            {item.status === "uploaded" && item.unattached && !item.processed && item.processing?.progress && (
+              <progress max={100} value={item.processing.progress.percent} />
+            )}
             <span className={item.status === "failed" ? "text-sm text-destructive" : "muted text-sm"}>
               {item.status === "uploading" && item.progress
                 ? `${item.progress.phase} ${Math.round((100 * item.progress.loaded) / Math.max(1, item.progress.total))}%`
@@ -569,7 +560,9 @@ function MediaEditor({
                   ? uploadMessage(item.error)
                   : item.status === "uploaded" && draft
                     ? "adding…"
-                    : item.status}
+                    : item.status === "uploaded" && item.unattached
+                      ? processingLabel(item)
+                      : item.status}
             </span>
             <span className="inline-actions">
               {item.status === "failed" && (
@@ -694,4 +687,14 @@ function MediaThumb({ video, url }: { video: boolean; url?: string }) {
       )}
     </span>
   );
+}
+
+// processingLabel is a queue row's state while the media worker processes the
+// file before "Add to post".
+function processingLabel(item: QueueItem): string {
+  const p = item.processing;
+  if (p?.failed) return `can't process: ${failureMessage(p.failed)}`;
+  if (item.processed) return "processed";
+  if (p?.progress && p.progress.phase !== "queued") return `processing ${Math.round(p.progress.percent)}%`;
+  return "processing…";
 }

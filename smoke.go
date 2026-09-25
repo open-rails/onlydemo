@@ -128,7 +128,7 @@ func smoke() error {
 	if err != nil {
 		return err
 	}
-	path := fmt.Sprintf("/api/v1/posts/%.0f", post["id"].(float64))
+	path := "/api/v1/posts/" + post["id"].(string)
 	if post, err = owner.activeOffer(path, ownerToken); err != nil {
 		return err
 	}
@@ -242,10 +242,10 @@ func smoke() error {
 	if err != nil {
 		return err
 	}
-	if gated, err = owner.activeOffer(fmt.Sprintf("/api/v1/posts/%.0f", gated["id"].(float64)), ownerToken); err != nil {
+	if gated, err = owner.activeOffer("/api/v1/posts/"+gated["id"].(string), ownerToken); err != nil {
 		return err
 	}
-	gatedPath := fmt.Sprintf("/api/v1/posts/%.0f/checkout", gated["id"].(float64))
+	gatedPath := "/api/v1/posts/" + gated["id"].(string) + "/checkout"
 	gatedPrice := gated["offers"].([]any)[0].(map[string]any)["price_id"]
 	if _, err = buyer.call("POST", gatedPath, buyerToken, map[string]any{"price_id": gatedPrice, "payment": stripeRail}, "nonmember-refusal", 403); err != nil {
 		return err
@@ -274,7 +274,7 @@ func smoke() error {
 	if err != nil {
 		return err
 	}
-	includedPath := fmt.Sprintf("/api/v1/posts/%.0f", included["id"].(float64))
+	includedPath := "/api/v1/posts/" + included["id"].(string)
 	beforeMembership, err := buyer.call("GET", includedPath, buyerToken, nil, "", 200)
 	if err != nil {
 		return err
@@ -308,14 +308,14 @@ func smoke() error {
 	if err != nil {
 		return err
 	}
-	futureRead, err := buyer.call("GET", fmt.Sprintf("/api/v1/posts/%.0f", future["id"].(float64)), buyerToken, nil, "", 200)
+	futureRead, err := buyer.call("GET", "/api/v1/posts/"+future["id"].(string), buyerToken, nil, "", 200)
 	if err != nil {
 		return err
 	}
 	if futureRead["can_read"] != true {
 		return fmt.Errorf("membership did not include future post")
 	}
-	gatedRead, err := buyer.call("GET", fmt.Sprintf("/api/v1/posts/%.0f", gated["id"].(float64)), buyerToken, nil, "", 200)
+	gatedRead, err := buyer.call("GET", "/api/v1/posts/"+gated["id"].(string), buyerToken, nil, "", 200)
 	if err != nil {
 		return err
 	}
@@ -403,7 +403,7 @@ func smoke() error {
 	if err != nil {
 		return err
 	}
-	doomedPath := fmt.Sprintf("/api/v1/posts/%.0f", doomed["id"].(float64))
+	doomedPath := "/api/v1/posts/" + doomed["id"].(string)
 	if doomed, err = owner.activeOffer(doomedPath, ownerToken); err != nil {
 		return err
 	}
@@ -416,11 +416,11 @@ func smoke() error {
 	if _, err = buyer.call("POST", doomedPath+"/checkout", buyerToken, map[string]any{"price_id": doomed["offers"].([]any)[0].(map[string]any)["price_id"], "payment": stripeRail}, "deleted-post", 404); err != nil {
 		return err
 	}
-	var billingKey string
-	if err = pool.QueryRow(ctx, `SELECT billing_key::text FROM demo.posts WHERE id=$1 AND deleted_at IS NOT NULL`, int64(doomed["id"].(float64))).Scan(&billingKey); err != nil {
+	var retained bool
+	if err = pool.QueryRow(ctx, `SELECT true FROM demo.posts WHERE id=$1 AND deleted_at IS NOT NULL`, doomed["id"]).Scan(&retained); err != nil {
 		return fmt.Errorf("deleted post row was not retained: %w", err)
 	}
-	if product, e := billing.client.Products.RetrieveByKey(ctx, postResource(billingKey)); e != nil || !product.Archived {
+	if product, e := billing.client.Products.RetrieveByKey(ctx, postResource(doomed["id"].(string))); e != nil || !product.Archived {
 		return fmt.Errorf("deleted post product was not archived: %v", e)
 	}
 	if _, err = owner.call("DELETE", "/api/v1/channels/"+channelID, ownerToken, nil, "", 202); err != nil {
@@ -492,7 +492,7 @@ func smokeChannelScopedSlugs(owner smokeClient, token, channelID string, postID 
 	if first["id"] != postID || second["id"] != twin["id"] || second["channel_slug"] != "smoke-other" {
 		return fmt.Errorf("slug lookup resolved the wrong posts")
 	}
-	twinPath := fmt.Sprintf("/api/v1/posts/%.0f", twin["id"].(float64))
+	twinPath := "/api/v1/posts/" + twin["id"].(string)
 	if _, err = owner.call("PATCH", twinPath, token, map[string]any{"slug": "smoke-renamed"}, "", 200); err != nil {
 		return err
 	}
@@ -537,7 +537,7 @@ func smokeMembershipSettings(owner smokeClient, ownerToken string, buyer smokeCl
 	if err != nil {
 		return err
 	}
-	closedPath := fmt.Sprintf("/api/v1/posts/%.0f", closedPost["id"].(float64))
+	closedPath := "/api/v1/posts/" + closedPost["id"].(string)
 	for _, path := range []string{includedPath, closedPath} {
 		if ok, err := readable(buyer, buyerToken, path); err != nil || !ok {
 			return fmt.Errorf("closing removed a member's access to %s: %v", path, err)

@@ -141,7 +141,7 @@ export function ChannelPage() {
               item={channelRef(current.id)}
               slot="cover"
               manifest={cover}
-              aspect={3}
+              aspect="3:1"
               targetWidth={3000}
               onChange={(m) => saved(channelRef(current.id), "cover", m)}
             >
@@ -176,7 +176,7 @@ export function ChannelPage() {
                   item={channelRef(current.id)}
                   slot="avatar"
                   manifest={avatar}
-                  aspect={1}
+                  aspect="1:1"
                   targetWidth={512}
                   onChange={(m) => saved(channelRef(current.id), "avatar", m)}
                 >

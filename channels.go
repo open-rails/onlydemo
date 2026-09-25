@@ -309,11 +309,11 @@ func (api *channelAPI) finishDeletion(ctx context.Context, id string) error {
 	// Post and channel folders are erased with the rows; soft-deleted posts
 	// were erased when they were deleted, and a repeated erasure is harmless.
 	err = pgx.BeginFunc(ctx, api.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `DELETE FROM `+api.posts+` WHERE channel_id=$1 RETURNING id`, id)
+		rows, err := tx.Query(ctx, `DELETE FROM `+api.posts+` WHERE channel_id=$1 RETURNING id::text`, id)
 		if err != nil {
 			return err
 		}
-		ids, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+		ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
 		if err != nil {
 			return err
 		}

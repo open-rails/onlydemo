@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -54,10 +55,25 @@ func newRootCommand() *cobra.Command {
 	}
 	seedCommand.Flags().StringVar(&seedURL, "url", "http://127.0.0.1:3000", "running server base URL")
 	mediaCommand := &cobra.Command{Use: "media", Short: "Media maintenance", Args: cobra.NoArgs}
+	root.AddCommand(&cobra.Command{
+		Use: "media-worker", Short: "Run the media worker: image renditions, slots, video encodes, upload placement (needs libvips and ffmpeg)", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error { return runMediaWorker(cmd.Context()) },
+	})
 	mediaCommand.AddCommand(&cobra.Command{
 		Use: "reprocess", Short: "Re-derive every item's media after a rendition policy change", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return reprocessMedia(cmd.Context(), cmd.OutOrStdout()) },
 	})
+	var orphanGrace time.Duration
+	var deleteOrphans bool
+	orphans := &cobra.Command{
+		Use: "sweep-orphans", Short: "Report (or --delete) post and channel media folders with no row", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return sweepOrphanMedia(cmd.Context(), cmd.OutOrStdout(), orphanGrace, deleteOrphans)
+		},
+	}
+	orphans.Flags().DurationVar(&orphanGrace, "grace", 24*time.Hour, "skip folders changed within this period")
+	orphans.Flags().BoolVar(&deleteOrphans, "delete", false, "delete the orphans instead of only reporting them")
+	mediaCommand.AddCommand(orphans)
 	root.AddCommand(admin, seedCommand, mediaCommand)
 	return root
 }

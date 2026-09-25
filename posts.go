@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -19,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
 	authkitfiber "github.com/open-rails/authkit/adapters/fiber"
+	"github.com/open-rails/contentkit/contentref"
 	"github.com/open-rails/contentkit/media"
 	"github.com/open-rails/contentkit/media/tiered"
 	"github.com/open-rails/openrails"
@@ -40,7 +42,7 @@ func newPosts(channels *channelAPI, cfg Config) *postAPI {
 }
 
 type post struct {
-	ID                 int64                    `json:"id"`
+	ID                 string                   `json:"id"`
 	AuthorID           string                   `json:"author_id"`
 	ChannelID          string                   `json:"channel_id"`
 	ChannelSlug        string                   `json:"channel_slug"`
@@ -61,7 +63,6 @@ type post struct {
 	HoverPreview       *hoverPreview            `json:"hover_preview,omitempty"`
 	CreatedAt          time.Time                `json:"created_at"`
 	UpdatedAt          time.Time                `json:"updated_at"`
-	BillingKey         string                   `json:"-"`
 	Offers             []openrails.CatalogOffer `json:"offers"`
 }
 type postInput struct {
@@ -72,26 +73,31 @@ type postInput struct {
 	AccessPolicy *string     `json:"access_policy"`
 	Price        *offerPrice `json:"price"`
 	// Draft creates an empty draft; DraftID publishes that draft.
-	Draft   bool   `json:"draft"`
-	DraftID *int64 `json:"draft_id"`
+	Draft   bool    `json:"draft"`
+	DraftID *string `json:"draft_id"`
 }
 
-const postColumns = `id,author_id::text,channel_id::text,billing_key::text,COALESCE(slug,''),title,body,access_policy,offer_status,offer_revision,published_at IS NULL,created_at,updated_at`
+const postColumns = `id::text,author_id::text,channel_id::text,COALESCE(slug,''),title,body,access_policy,offer_status,offer_revision,published_at IS NULL,created_at,updated_at`
 
 // published excludes drafts, which only their author sees (through the composer).
 const published = ` AND published_at IS NOT NULL`
 
 func scanPost(row interface{ Scan(...any) error }) (post, error) {
 	var p post
-	err := row.Scan(&p.ID, &p.AuthorID, &p.ChannelID, &p.BillingKey, &p.Slug, &p.Title, &p.Body, &p.AccessPolicy, &p.OfferStatus, &p.OfferRevision, &p.Draft, &p.CreatedAt, &p.UpdatedAt)
+	err := row.Scan(&p.ID, &p.AuthorID, &p.ChannelID, &p.Slug, &p.Title, &p.Body, &p.AccessPolicy, &p.OfferStatus, &p.OfferRevision, &p.Draft, &p.CreatedAt, &p.UpdatedAt)
 	return p, err
 }
-func postID(c fiber.Ctx) (int64, error) {
-	id, err := strconv.ParseInt(c.Params("id"), 10, 64)
-	if err != nil || id <= 0 {
-		return 0, errors.New("invalid post id")
+
+var errNoPost = errors.New("post not found")
+
+// postID parses a post id: a canonical UUIDv7 (ContentKit's content id);
+// anything else names no post.
+func postID(c fiber.Ctx) (string, error) { return parsePostID(c.Params("id")) }
+func parsePostID(raw string) (string, error) {
+	if contentref.ValidateID(raw) != nil {
+		return "", errNoPost
 	}
-	return id, nil
+	return raw, nil
 }
 func normalSlug(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
 
@@ -126,7 +132,7 @@ func (api *postAPI) decorate(c fiber.Ctx, posts []post, withOffers bool) error {
 	for i, p := range posts {
 		channels[i] = p.ChannelID
 		if user != "" {
-			keys = append(keys, postResource(p.BillingKey), membershipResource(p.ChannelID))
+			keys = append(keys, postResource(p.ID), membershipResource(p.ChannelID))
 		}
 	}
 	pg, err := api.channels.loadPage(ctx, user, channels, nil, keys, slotAvatar)
@@ -150,7 +156,7 @@ func (api *postAPI) decorate(c fiber.Ctx, posts []post, withOffers bool) error {
 		p := &posts[i]
 		g := pg.groups[p.ChannelID]
 		p.ChannelSlug, p.ChannelName = g.InstanceSlug, g.DisplayName
-		p.Purchased = pg.access[postResource(p.BillingKey)]
+		p.Purchased = pg.access[postResource(p.ID)]
 		p.SubscriptionActive = pg.access[membershipResource(p.ChannelID)]
 		// Channel grants include the viewer's site-wide (root) grants.
 		p.CanEdit = pg.can(p.ChannelID, channelEditPermission) || pg.can(p.ChannelID, postEditPermission)
@@ -160,7 +166,7 @@ func (api *postAPI) decorate(c fiber.Ctx, posts []post, withOffers bool) error {
 			p.Body = ""
 		}
 		if withOffers && paidPolicy(p.AccessPolicy) && p.OfferStatus == "active" {
-			selling = append(selling, postResource(p.BillingKey))
+			selling = append(selling, postResource(p.ID))
 		}
 	}
 	offers, err := api.billing.offers(ctx, openrails.OfferPermanent, selling, 100)
@@ -168,7 +174,7 @@ func (api *postAPI) decorate(c fiber.Ctx, posts []post, withOffers bool) error {
 		return err
 	}
 	for i := range posts {
-		if posts[i].Offers = offers[postResource(posts[i].BillingKey)]; posts[i].Offers == nil {
+		if posts[i].Offers = offers[postResource(posts[i].ID)]; posts[i].Offers == nil {
 			posts[i].Offers = []openrails.CatalogOffer{}
 		}
 	}
@@ -183,13 +189,12 @@ func (api *postAPI) list(c fiber.Ctx) error {
 		}
 		limit = n
 	}
-	before := int64(0)
-	if raw := c.Query("before"); raw != "" {
-		n, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || n < 1 {
+	// UUIDv7 ids sort by creation, so the last id is the cursor.
+	before := c.Query("before")
+	if before != "" {
+		if _, err := parsePostID(before); err != nil {
 			return clientError(c, 400, "invalid cursor")
 		}
-		before = n
 	}
 	channel := c.Query("channel_id")
 	if channel != "" {
@@ -197,7 +202,7 @@ func (api *postAPI) list(c fiber.Ctx) error {
 			return clientError(c, 400, "invalid channel_id")
 		}
 	}
-	rows, err := api.pool.Query(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE deleted_at IS NULL`+published+` AND ($1::text='' OR channel_id::text=$1) AND ($2::bigint=0 OR id<$2) AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL) ORDER BY id DESC LIMIT $3`, channel, before, limit+1)
+	rows, err := api.pool.Query(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE deleted_at IS NULL`+published+` AND ($1::text='' OR channel_id::text=$1) AND ($2::text='' OR id<$2::uuid) AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL) ORDER BY id DESC LIMIT $3`, channel, before, limit+1)
 	if err != nil {
 		return databaseError(c, err)
 	}
@@ -218,7 +223,7 @@ func (api *postAPI) list(c fiber.Ctx) error {
 	more := len(posts) > limit
 	if more {
 		posts = posts[:limit]
-		c.Set("X-Next-Cursor", strconv.FormatInt(posts[len(posts)-1].ID, 10))
+		c.Set("X-Next-Cursor", posts[len(posts)-1].ID)
 	}
 	// Feed access is one bounded grant lookup; paid posts carry their offers
 	// so cards can show prices.
@@ -233,7 +238,7 @@ func (api *postAPI) list(c fiber.Ctx) error {
 func (api *postAPI) get(c fiber.Ctx) error {
 	id, err := postID(c)
 	if err != nil {
-		return clientError(c, 400, err.Error())
+		return clientError(c, 404, err.Error())
 	}
 	return api.show(c, api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1 AND deleted_at IS NULL`+published+` AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL)`, id))
 }
@@ -316,13 +321,16 @@ func (api *postAPI) create(c fiber.Ctx) error {
 	if in.Draft {
 		return api.createDraft(c, id)
 	}
-	p := post{AuthorID: viewer(c), ChannelID: id, BillingKey: uuid.NewString(), Slug: normalSlug(deref(in.Slug)), Title: deref(in.Title), Body: deref(in.Body), AccessPolicy: "public", OfferStatus: "none"}
+	p := post{AuthorID: viewer(c), ChannelID: id, Slug: normalSlug(deref(in.Slug)), Title: deref(in.Title), Body: deref(in.Body), AccessPolicy: "public", OfferStatus: "none"}
 	if in.AccessPolicy != nil {
 		p.AccessPolicy = *in.AccessPolicy
 	}
 	fillSlug(&p)
 	hasMedia := false
 	if in.DraftID != nil {
+		if *in.DraftID, err = parsePostID(*in.DraftID); err != nil {
+			return clientError(c, 404, "draft not found")
+		}
 		if hasMedia, err = api.media.hasMedia(c.Context(), *in.DraftID); err != nil {
 			return clientError(c, 500, "media store error")
 		}
@@ -360,7 +368,10 @@ func (api *postAPI) create(c fiber.Ctx) error {
 		if in.DraftID != nil {
 			p, err = scanPost(tx.QueryRow(c.Context(), `UPDATE `+api.table+` SET slug=$1,title=$2,body=$3,access_policy=$4,offer_status=$5,offer_revision=$6,published_at=NOW(),created_at=NOW(),updated_at=NOW() WHERE id=$7 AND channel_id=$8 AND author_id=$9 AND published_at IS NULL AND deleted_at IS NULL RETURNING `+postColumns, p.Slug, p.Title, p.Body, p.AccessPolicy, p.OfferStatus, p.OfferRevision, *in.DraftID, id, p.AuthorID))
 		} else {
-			p, err = scanPost(tx.QueryRow(c.Context(), `INSERT INTO `+api.table+`(author_id,channel_id,billing_key,slug,title,body,access_policy,offer_status,offer_revision,published_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW()) RETURNING `+postColumns, p.AuthorID, id, p.BillingKey, p.Slug, p.Title, p.Body, p.AccessPolicy, p.OfferStatus, p.OfferRevision))
+			p, err = scanPost(tx.QueryRow(c.Context(), `INSERT INTO `+api.table+`(author_id,channel_id,slug,title,body,access_policy,offer_status,offer_revision,published_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,NOW()) RETURNING `+postColumns, p.AuthorID, id, p.Slug, p.Title, p.Body, p.AccessPolicy, p.OfferStatus, p.OfferRevision))
+			if err == nil {
+				err = api.media.createPost(c.Context(), p.ID)
+			}
 		}
 		if err == nil {
 			err = api.media.publishTx(c.Context(), tx, p.ID)
@@ -389,13 +400,19 @@ func (api *postAPI) createDraft(c fiber.Ctx, channel string) error {
 	if !allowed {
 		return clientError(c, 404, "channel not found")
 	}
-	var id int64
-	err = api.pool.QueryRow(c.Context(), `INSERT INTO `+api.table+`(author_id,channel_id,title,body) SELECT $1,$2,'','' WHERE EXISTS(SELECT 1 FROM `+api.channels.table+` WHERE id=$2 AND deleted_at IS NULL) RETURNING id`, viewer(c), channel).Scan(&id)
+	var id string
+	err = pgx.BeginFunc(c.Context(), api.pool, func(tx pgx.Tx) error {
+		err := tx.QueryRow(c.Context(), `INSERT INTO `+api.table+`(author_id,channel_id,title,body) SELECT $1,$2,'','' WHERE EXISTS(SELECT 1 FROM `+api.channels.table+` WHERE id=$2 AND deleted_at IS NULL) RETURNING id::text`, viewer(c), channel).Scan(&id)
+		if err != nil {
+			return err
+		}
+		return api.media.createPost(c.Context(), id)
+	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, 404, "channel not found")
 	}
 	if err != nil {
-		return databaseError(c, err)
+		return writeError(c, err)
 	}
 	return c.Status(201).JSON(fiber.Map{"id": id, "channel_id": channel, "draft": true})
 }
@@ -406,7 +423,7 @@ func (api *postAPI) update(c fiber.Ctx) error {
 	}
 	id, err := postID(c)
 	if err != nil {
-		return clientError(c, 400, err.Error())
+		return clientError(c, 404, err.Error())
 	}
 	var in postInput
 	if err = bindJSON(c, &in); err != nil {
@@ -515,7 +532,7 @@ func (api *postAPI) delete(c fiber.Ctx) error {
 	}
 	id, err := postID(c)
 	if err != nil {
-		return clientError(c, 400, err.Error())
+		return clientError(c, 404, err.Error())
 	}
 	p, err := api.live(c.Context(), id)
 	if err != nil {
@@ -584,13 +601,13 @@ func (api *postAPI) discardDraft(c fiber.Ctx, p post) error {
 
 // deleteDraftsTx deletes the drafts matching where, with their media.
 func (api *postAPI) deleteDraftsTx(ctx context.Context, tx pgx.Tx, where string, args ...any) error {
-	rows, err := tx.Query(ctx, `DELETE FROM `+api.table+` WHERE published_at IS NULL AND `+where+` RETURNING id,channel_id::text`, args...)
+	rows, err := tx.Query(ctx, `DELETE FROM `+api.table+` WHERE published_at IS NULL AND `+where+` RETURNING id::text,channel_id::text`, args...)
 	if err != nil {
 		return err
 	}
-	byChannel := map[string][]int64{}
+	byChannel := map[string][]string{}
 	for rows.Next() {
-		var id int64
+		var id string
 		var channel string
 		if err = rows.Scan(&id, &channel); err != nil {
 			rows.Close()
@@ -611,10 +628,10 @@ func (api *postAPI) deleteDraftsTx(ctx context.Context, tx pgx.Tx, where string,
 }
 
 // visible is a live post (or draft) on a live channel.
-func (api *postAPI) visible(ctx context.Context, id int64) (post, error) {
+func (api *postAPI) visible(ctx context.Context, id string) (post, error) {
 	return scanPost(api.pool.QueryRow(ctx, `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1 AND deleted_at IS NULL AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL)`, id))
 }
-func (api *postAPI) live(ctx context.Context, id int64) (post, error) {
+func (api *postAPI) live(ctx context.Context, id string) (post, error) {
 	return scanPost(api.pool.QueryRow(ctx, `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1 AND deleted_at IS NULL`, id))
 }
 func readError(c fiber.Ctx, err error) error {
@@ -642,7 +659,7 @@ func (api *postAPI) inTx(c fiber.Ctx, fn func(pgx.Tx) error) error {
 
 // settled runs the committed offer job inline (caller holds the channel lock)
 // and answers with the post's resulting offer state.
-func (api *postAPI) settled(c fiber.Ctx, status int, id int64, job *postOfferArgs) error {
+func (api *postAPI) settled(c fiber.Ctx, status int, id string, job *postOfferArgs) error {
 	if job != nil {
 		inline(c.Context(), "post offer sync", func(ctx context.Context) error { return api.syncOffer(ctx, *job) })
 	}
@@ -658,8 +675,8 @@ func (api *postAPI) settled(c fiber.Ctx, status int, id int64, job *postOfferArg
 		p.ChannelSlug, p.ChannelName = g.InstanceSlug, g.DisplayName
 	}
 	if paidPolicy(p.AccessPolicy) && p.OfferStatus == "active" {
-		if offers, e := api.billing.offers(c.Context(), openrails.OfferPermanent, []string{postResource(p.BillingKey)}, 100); e == nil && offers[postResource(p.BillingKey)] != nil {
-			p.Offers = offers[postResource(p.BillingKey)]
+		if offers, e := api.billing.offers(c.Context(), openrails.OfferPermanent, []string{postResource(p.ID)}, 100); e == nil && offers[postResource(p.ID)] != nil {
+			p.Offers = offers[postResource(p.ID)]
 		}
 	}
 	return c.Status(status).JSON(p)
@@ -674,6 +691,9 @@ func writeError(c fiber.Ctx, err error) error {
 		return clientError(c, 503, err.Error())
 	case errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "posts_channel_slug_idx":
 		return clientError(c, 409, "That post slug is already used in this channel. Choose another.")
+	case errors.Is(err, media.ErrFolderNotEmpty):
+		log.Printf("new post refused: %v", err)
+		return clientError(c, 500, "media store error")
 	}
 	return databaseError(c, err)
 }

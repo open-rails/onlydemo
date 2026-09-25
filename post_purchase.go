@@ -66,7 +66,7 @@ func (api *postAPI) checkout(c fiber.Ctx, publicURL string) error {
 	}
 	id, err := postID(c)
 	if err != nil {
-		return clientError(c, 400, err.Error())
+		return clientError(c, 404, err.Error())
 	}
 	// Identity-only lookup includes soft-deleted content so accepted exact-key
 	// retries can resolve before mutable content/membership admission checks.
@@ -77,7 +77,7 @@ func (api *postAPI) checkout(c fiber.Ctx, publicURL string) error {
 	if err != nil {
 		return databaseError(c, err)
 	}
-	request := checkoutRequest(viewer(c), postResource(post.BillingKey), key, in.PriceID, in.Payment, openrails.OfferPermanent, publicURL)
+	request := checkoutRequest(viewer(c), postResource(post.ID), key, in.PriceID, in.Payment, openrails.OfferPermanent, publicURL)
 	replay, err := api.billing.client.LookupCheckoutSession(c.Context(), request)
 	if err == nil {
 		if replay.Status == "created" {

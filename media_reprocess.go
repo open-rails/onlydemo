@@ -8,19 +8,24 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/contentkit/contentref"
 	"github.com/open-rails/contentkit/media"
+	"github.com/open-rails/contentkit/media/workqueue"
 )
 
 // reprocessMedia re-derives every item's media under the current policy
 // (slot widths, cover widths, variant specs): one ProcessJob per post and per
 // channel or user with a slot. The app's job workers re-encode what changed
-// from the kept originals and drop retired widths.
+// from the kept originals and drop retired widths (in the media worker).
 func reprocessMedia(ctx context.Context, out io.Writer) error {
 	cfg, pool, err := openDatabase(ctx)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-	q, err := media.NewProcessInserter(pool, cfg.RiverSchema, "")
+	kinds, err := media.NewRegistry(mediaKinds...)
+	if err != nil {
+		return err
+	}
+	q, err := workqueue.New(pool, kinds)
 	if err != nil {
 		return err
 	}

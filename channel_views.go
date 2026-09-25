@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -247,10 +246,7 @@ func (api *postAPI) me(c fiber.Ctx) error {
 	if err != nil {
 		return billingUnavailable(c)
 	}
-	before := int64(0)
-	if raw := c.Query("before"); raw != "" {
-		before, _ = strconv.ParseInt(raw, 10, 64)
-	}
+	before, _ := parsePostID(c.Query("before"))
 	// The library is every post the viewer holds a purchase of.
 	held, err := api.billing.reads.ListEntitlements(c.Context(), user, time.Time{})
 	if err != nil {
@@ -262,7 +258,7 @@ func (api *postAPI) me(c fiber.Ctx) error {
 			keys = append(keys, key)
 		}
 	}
-	rows, err := api.pool.Query(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE billing_key=ANY($2::uuid[]) AND deleted_at IS NULL`+published+` AND ($1::bigint=0 OR id<$1) AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL) ORDER BY id DESC LIMIT 51`, before, keys)
+	rows, err := api.pool.Query(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=ANY($2::uuid[]) AND deleted_at IS NULL`+published+` AND ($1::text='' OR id<$1::uuid) AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL) ORDER BY id DESC LIMIT 51`, before, keys)
 	if err != nil {
 		return databaseError(c, err)
 	}
@@ -274,7 +270,7 @@ func (api *postAPI) me(c fiber.Ctx) error {
 	next := ""
 	if more {
 		purchased = purchased[:50]
-		next = strconv.FormatInt(purchased[len(purchased)-1].ID, 10)
+		next = purchased[len(purchased)-1].ID
 	}
 	if err = api.decorate(c, purchased, false); err != nil {
 		return billingUnavailable(c)

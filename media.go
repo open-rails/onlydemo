@@ -23,11 +23,11 @@ import (
 	"github.com/open-rails/contentkit/access"
 	"github.com/open-rails/contentkit/contentref"
 	"github.com/open-rails/contentkit/media"
-	"github.com/open-rails/contentkit/media/image"
 	mediaS3 "github.com/open-rails/contentkit/media/s3"
 	"github.com/open-rails/contentkit/media/tiered"
 	"github.com/open-rails/contentkit/media/token"
 	"github.com/open-rails/contentkit/media/video"
+	"github.com/open-rails/contentkit/media/workqueue"
 	"github.com/open-rails/contentkit/migrations"
 )
 
@@ -160,15 +160,39 @@ type mediaService struct {
 }
 
 // applyContentMigrations installs ContentKit's baseline (the upload limiter's
-// counters) in its own schema and the video queue (River schema
-// media_worker, drained by cmd/media-worker).
+// counters) in its own schema and the media worker's queue (River schema
+// media_worker, drained by `onlydemo media-worker`).
 func applyContentMigrations(ctx context.Context, pool *pgxpool.Pool, cfg Config) error {
 	db := stdlib.OpenDBFromPool(pool)
 	defer db.Close()
 	if err := migrations.ApplyPostgres(ctx, db, contentSchema(cfg)); err != nil {
 		return err
 	}
-	return video.Migrate(ctx, pool)
+	return workqueue.Migrate(ctx, pool)
+}
+
+// mediaSpecs is the post kind's per-file spec choice: the teaser gets its
+// blurred variant only.
+func mediaSpecs(k media.Kind, f media.File) map[string]media.Spec {
+	if k.Name == kindPost && f.Teaser() {
+		return teaserSpecs
+	}
+	return k.Specs
+}
+
+// mediaFailed is Hooks.Failed: a refused upload is shown to its editor, a
+// processing fault is logged.
+func mediaFailed(_ context.Context, ref contentref.ContentRef, file string, err error) {
+	if ie := media.AsImageError(err); ie != nil {
+		slog.Info("media file refused", "ref", ref.String(), "file", file, "code", ie.Code, "reason", ie.Message)
+		return
+	}
+	slog.Warn("media file cannot be derived", "ref", ref.String(), "file", file, "err", err)
+}
+
+func mediaStoreConfig(mc mediaConfig) mediaS3.Config {
+	return mediaS3.Config{Bucket: mc.S3Bucket, Region: mc.S3Region, Endpoint: mc.S3Endpoint, PublicEndpoint: mc.S3PublicEndpoint,
+		AccessKeyID: mc.S3AccessKeyID, SecretAccessKey: mc.S3SecretKey, UsePathStyle: true}
 }
 
 func newMedia(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth, billing *billingService, channels *channelAPI, posts *postAPI) (*mediaService, error) {
@@ -177,8 +201,7 @@ func newMedia(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth
 	if err != nil {
 		return nil, err
 	}
-	s3cfg := mediaS3.Config{Bucket: mc.S3Bucket, Region: mc.S3Region, Endpoint: mc.S3Endpoint, PublicEndpoint: mc.S3PublicEndpoint,
-		AccessKeyID: mc.S3AccessKeyID, SecretAccessKey: mc.S3SecretKey, UsePathStyle: true}
+	s3cfg := mediaStoreConfig(mc)
 	probe, err := mediaS3.New(s3cfg)
 	if err != nil {
 		return nil, err
@@ -214,38 +237,19 @@ func newMedia(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth
 	if m.jobs, err = media.NewJobs(media.JobsConfig{Store: store, Kinds: kinds, Tenants: []string{mc.Tenant}, Limiter: m.limiter, Resolver: m}); err != nil {
 		return nil, err
 	}
-	if m.manifests, err = media.NewManifests(store, kinds, media.ManifestOptions{Locker: media.PGLocker(pool), Jobs: m.jobs}); err != nil {
+	if m.manifests, err = media.NewManifests(store, kinds, media.ManifestOptions{Locker: media.PGLocker(pool), Sweeps: m.jobs}); err != nil {
 		return nil, err
 	}
-	hooks := media.Hooks{DownloadName: m.downloadName, Failed: func(_ context.Context, ref contentref.ContentRef, file string, err error) {
-		if ie := media.AsImageError(err); ie != nil { // a refused upload, shown to its editor
-			slog.Info("media file refused", "ref", ref.String(), "file", file, "code", ie.Code, "reason", ie.Message)
-			return
-		}
-		slog.Warn("media file cannot be derived", "ref", ref.String(), "file", file, "err", err)
-	}, SlotEncoded: m.slotEncoded}
-	proc, err := image.New(image.Config{Store: store, Kinds: kinds, Manifests: m.manifests, Hooks: hooks,
-		Specs: func(k media.Kind, f media.File) map[string]media.Spec {
-			if k.Name == kindPost && f.Teaser() {
-				return teaserSpecs
-			}
-			return k.Specs
-		}})
+	hooks := media.Hooks{DownloadName: m.downloadName}
+	// Processing (images, video, placement of multipart uploads) runs in
+	// `onlydemo media-worker`; the app only enqueues. Files process as soon
+	// as they upload, before "Add to post".
+	queue, err := workqueue.New(pool, kinds)
 	if err != nil {
-		return nil, err
-	}
-	if err = m.jobs.AddProcessor(proc.Process); err != nil {
-		return nil, err
-	}
-	videos, err := video.NewEnqueuer(pool, kinds)
-	if err != nil {
-		return nil, err
-	}
-	if err = m.jobs.AddProcessor(videos.Processor()); err != nil {
 		return nil, err
 	}
 	uploadOptions := media.UploadOptions{Store: store, Kinds: kinds, Manifests: m.manifests,
-		Authorizer: m, Tickets: &ring, Limiter: m.limiter, Queue: m.jobs}
+		Authorizer: m, Tickets: &ring, Limiter: m.limiter, Queue: queue, ProcessOnUpload: true}
 	// The poster picker's exact frames need ffmpeg in the app; without it /frame answers not_found.
 	if frames, err := video.NewFrames(store, ""); err == nil {
 		uploadOptions.Frames = frames
@@ -256,7 +260,7 @@ func newMedia(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth
 		return nil, err
 	}
 	if m.reader, err = media.NewReader(media.ReaderOptions{Manifests: m.manifests, Kinds: kinds, Resolver: m, Hooks: hooks,
-		Progress: video.NewProgressSource(pool),
+		Progress: workqueue.NewProgressSource(pool),
 		Delivery: media.Delivery{Mode: mc.Delivery, BaseURL: mc.URL, CookieDomain: mc.CookieDomain, SigningKey: signing}}); err != nil {
 		return nil, err
 	}
@@ -268,8 +272,18 @@ func (m *mediaService) ref(kind, id string) contentref.ContentRef {
 	return contentref.New(m.cfg.Tenant, kind, id)
 }
 
-func (m *mediaService) postRef(id int64) contentref.ContentRef {
-	return m.ref(kindPost, strconv.FormatInt(id, 10))
+func (m *mediaService) postRef(id string) contentref.ContentRef {
+	return m.ref(kindPost, id)
+}
+
+// createPost starts a new post's folder; a folder already holding objects
+// (a reused id) refuses the post instead of showing another post's media.
+func (m *mediaService) createPost(ctx context.Context, id string) error {
+	if m == nil {
+		return nil
+	}
+	_, err := m.manifests.Create(ctx, m.postRef(id))
+	return err
 }
 
 func channelOwner(id string) string { return kindChannel + ":" + id }
@@ -278,7 +292,7 @@ func channelOwner(id string) string { return kindChannel + ":" + id }
 // purchase key grants every paid level, so buyers keep access after policy or
 // membership changes; members_ppv checks only the purchase.
 func postPolicy(p post) tiered.Policy {
-	return tiered.Policy{Level: policyLevels[p.AccessPolicy], Membership: membershipResource(p.ChannelID), Purchase: postResource(p.BillingKey)}
+	return tiered.Policy{Level: policyLevels[p.AccessPolicy], Membership: membershipResource(p.ChannelID), Purchase: postResource(p.ID)}
 }
 
 func actorFor(user string) access.Actor {
@@ -307,7 +321,7 @@ func (g grants) can(perm authkit.Perm) bool { return slices.ContainsFunc(g, perm
 // postAccess loads a live post (found false otherwise) and the actor's upload
 // grant and grants on its channel.
 func (m *mediaService) postAccess(ctx context.Context, actor access.Actor, contentID string) (p post, up media.UploadGrant, g grants, found bool, err error) {
-	id, err := strconv.ParseInt(contentID, 10, 64)
+	id, err := parsePostID(contentID)
 	if err != nil {
 		return p, up, nil, false, nil
 	}
@@ -428,7 +442,7 @@ func (m *mediaService) mount(app fiber.Router, optional fiber.Handler) {
 func (m *mediaService) files(c fiber.Ctx) error {
 	id, err := postID(c)
 	if err != nil {
-		return clientError(c, 400, err.Error())
+		return clientError(c, 404, err.Error())
 	}
 	ref := m.postRef(id)
 	g, err := m.CanUpload(c.Context(), actorFor(viewer(c)), ref)
@@ -453,7 +467,7 @@ func (m *mediaService) files(c fiber.Ctx) error {
 }
 
 // hasMedia reports whether a post holds an image or video (the teaser is a copy).
-func (m *mediaService) hasMedia(ctx context.Context, id int64) (bool, error) {
+func (m *mediaService) hasMedia(ctx context.Context, id string) (bool, error) {
 	man, _, err := m.manifests.Get(ctx, m.postRef(id))
 	if errors.Is(err, media.ErrNotFound) {
 		return false, nil
@@ -486,7 +500,7 @@ func withMediaActor(next http.Handler) http.Handler {
 
 // publishTx republishes posts' public video images after a change to what
 // anonymous viewers may see (publish, access policy).
-func (m *mediaService) publishTx(ctx context.Context, tx pgx.Tx, ids ...int64) error {
+func (m *mediaService) publishTx(ctx context.Context, tx pgx.Tx, ids ...string) error {
 	if m == nil {
 		return nil
 	}
@@ -499,11 +513,11 @@ func (m *mediaService) publishTx(ctx context.Context, tx pgx.Tx, ids ...int64) e
 
 // deletePostsTx erases post folders in the caller's delete transaction and
 // releases their channel quota.
-func (m *mediaService) deletePostsTx(ctx context.Context, tx pgx.Tx, channel string, ids ...int64) error {
+func (m *mediaService) deletePostsTx(ctx context.Context, tx pgx.Tx, channel string, ids ...string) error {
 	items := make([]media.Deletion, len(ids))
 	for i, id := range ids {
 		items[i] = media.Deletion{Ref: m.postRef(id), Owner: channelOwner(channel)}
-		if err := m.deleteSlotsTx(ctx, tx, kindPost, strconv.FormatInt(id, 10)); err != nil {
+		if err := m.deleteSlotsTx(ctx, tx, kindPost, id); err != nil {
 			return err
 		}
 	}
@@ -532,7 +546,7 @@ var qualityKey = regexp.MustCompile(`^(.+)-(\d+p)$`)
 // downloadName saves a post's video download as "{post-slug}-{file}-{rung}p.mp4"
 // (video.DownloadKey: rungs are short sides, so a vertical 1080p is 1080 wide).
 func (m *mediaService) downloadName(ctx context.Context, ref contentref.ContentRef, key string, d media.Download) (string, error) {
-	id, err := strconv.ParseInt(ref.ContentID, 10, 64)
+	id, err := parsePostID(ref.ContentID)
 	if err != nil || ref.ContentKind != kindPost {
 		return ref.ContentID + "-" + key, nil
 	}

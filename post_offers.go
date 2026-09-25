@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log"
-	"strconv"
 	"strings"
 	"time"
 
@@ -21,7 +20,7 @@ func paidPolicy(policy string) bool { return policy == "ppv" || policy == "membe
 
 // Price nil retires the offer of a post that is no longer sold separately.
 type postOfferArgs struct {
-	PostID   int64       `json:"post_id"`
+	PostID   string      `json:"post_id"`
 	Revision int64       `json:"revision"`
 	Price    *offerPrice `json:"price,omitempty"`
 }
@@ -29,7 +28,7 @@ type postOfferArgs struct {
 func (postOfferArgs) Kind() string { return "demo_sync_post_offer" }
 
 type postArchiveArgs struct {
-	PostID int64 `json:"post_id"`
+	PostID string `json:"post_id"`
 }
 
 func (postArchiveArgs) Kind() string { return "demo_archive_post" }
@@ -89,7 +88,7 @@ func (api *postAPI) RiverJobs() riverkit.Contribution {
 }
 
 // locked serializes catalog writes with post edits and channel cleanup.
-func (api *postAPI) locked(ctx context.Context, id int64, fn func() error) error {
+func (api *postAPI) locked(ctx context.Context, id string, fn func() error) error {
 	var channel string
 	err := api.pool.QueryRow(ctx, `SELECT channel_id::text FROM `+api.table+` WHERE id=$1`, id).Scan(&channel)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -109,10 +108,10 @@ func (api *postAPI) locked(ctx context.Context, id int64, fn func() error) error
 // syncOffer requires the channel lock. Catalog.Apply is keyed by the post
 // resource, so repeating it after an inline success changes nothing.
 func (api *postAPI) syncOffer(ctx context.Context, args postOfferArgs) error {
-	var channel, key, title, status string
+	var channel, title, status string
 	var revision int64
 	var live bool
-	err := api.pool.QueryRow(ctx, `SELECT p.channel_id::text,p.billing_key::text,p.title,p.offer_status,p.offer_revision,p.deleted_at IS NULL AND ch.deleted_at IS NULL FROM `+api.table+` p JOIN `+api.channels.table+` ch ON ch.id=p.channel_id WHERE p.id=$1`, args.PostID).Scan(&channel, &key, &title, &status, &revision, &live)
+	err := api.pool.QueryRow(ctx, `SELECT p.channel_id::text,p.title,p.offer_status,p.offer_revision,p.deleted_at IS NULL AND ch.deleted_at IS NULL FROM `+api.table+` p JOIN `+api.channels.table+` ch ON ch.id=p.channel_id WHERE p.id=$1`, args.PostID).Scan(&channel, &title, &status, &revision, &live)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -125,25 +124,24 @@ func (api *postAPI) syncOffer(ctx context.Context, args postOfferArgs) error {
 	}
 	// A post that became free keeps its buyers' access; nothing is refunded.
 	if args.Price == nil {
-		return api.billing.archiveResource(ctx, postResource(key))
+		return api.billing.archiveResource(ctx, postResource(args.PostID))
 	}
 	if status == "active" {
 		return nil
 	}
 	if strings.TrimSpace(title) == "" {
-		title = "Post " + strconv.FormatInt(args.PostID, 10)
+		title = "Post " + args.PostID
 	}
-	if err = api.billing.setOffer(ctx, channel, postResource(key), title, args.Price, false, false); err != nil {
+	if err = api.billing.setOffer(ctx, channel, postResource(args.PostID), title, args.Price, false, false); err != nil {
 		return err
 	}
 	_, err = api.pool.Exec(ctx, `UPDATE `+api.table+` SET offer_status='active' WHERE id=$1 AND offer_revision=$2`, args.PostID, args.Revision)
 	return err
 }
 
-func (api *postAPI) archivePost(ctx context.Context, id int64) error {
-	var key string
+func (api *postAPI) archivePost(ctx context.Context, id string) error {
 	var deletedAt *time.Time
-	err := api.pool.QueryRow(ctx, `SELECT billing_key::text,deleted_at FROM `+api.table+` WHERE id=$1`, id).Scan(&key, &deletedAt)
+	err := api.pool.QueryRow(ctx, `SELECT deleted_at FROM `+api.table+` WHERE id=$1`, id).Scan(&deletedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -153,7 +151,7 @@ func (api *postAPI) archivePost(ctx context.Context, id int64) error {
 	if deletedAt == nil {
 		return errors.New("post deletion was not accepted")
 	}
-	return api.billing.archivePostProduct(ctx, postResource(key), *deletedAt)
+	return api.billing.archivePostProduct(ctx, postResource(id), *deletedAt)
 }
 
 // inline runs a committed job's work in the request, bounded; failure is left

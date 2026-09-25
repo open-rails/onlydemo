@@ -38,12 +38,12 @@ tasks:
         go run github.com/open-rails/contentkit/cmd/media-access
 
   media:worker:
-    desc: Run the video encode worker (ContentKit cmd/media-worker at the go.mod version; needs ffmpeg). Poster frames go to the app's River queue
+    desc: Run the media worker (`onlydemo media-worker`; needs libvips and ffmpeg). It does every image rendition, slot, video encode and upload placement; publishes go back to the app's River queue
     cmds:
       - |
         MEDIA_WORKER_THREADS="${MEDIA_WORKER_THREADS:-2}" \
         MEDIA_HOST_RIVER_SCHEMA="${RIVER_SCHEMA:-public}" \
-        go run github.com/open-rails/contentkit/cmd/media-worker
+        go run . media-worker
 
   run:
     desc: Migrate, then run Go with Air, Vite, the media access worker and the video worker (task dev:up first)

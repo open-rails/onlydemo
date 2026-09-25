@@ -10,7 +10,7 @@ require (
 	github.com/knadh/koanf/v2 v2.3.6
 	github.com/open-rails/authkit v0.140.0
 	github.com/open-rails/migratekit v1.0.5
-	github.com/open-rails/openrails v0.182.0
+	github.com/open-rails/openrails v0.183.0
 	github.com/riverqueue/river v0.47.0
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.47.0 // indirect
 )
@@ -19,7 +19,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.42.1
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.96.0
 	github.com/joho/godotenv v1.5.1
-	github.com/open-rails/contentkit v0.39.0
+	github.com/open-rails/contentkit v0.45.0
 	github.com/open-rails/helpers v0.3.0
 	github.com/spf13/cobra v1.10.2
 )

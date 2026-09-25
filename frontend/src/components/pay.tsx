@@ -38,7 +38,7 @@ import { ErrorState, Loading } from "./states";
 
 // What the buyer is paying for: a post unlock or a channel membership.
 export type PayTarget =
-  | { kind: "post"; id: number; merchant: string; offer: Offer }
+  | { kind: "post"; id: string; merchant: string; offer: Offer }
   | { kind: "membership"; id: string; merchant: string; offer: Offer };
 
 const PayContext = createContext<(target: PayTarget) => void>(() => {});

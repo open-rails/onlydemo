@@ -10,7 +10,7 @@ export const uploads = createUploadClient({
   fetch: (input, init) => auth.authFetch(input, init),
 });
 
-export const postRef = (id: number | string): RefBody => ({
+export const postRef = (id: string): RefBody => ({
   kind: "post",
   id: String(id),
 });
@@ -111,26 +111,26 @@ export function mediaXhr(xhr: XMLHttpRequest, url: string) {
 }
 
 // The public poster and hover preview (none for drafts; paid posts get the poster only).
-export const readVideoImages = (id: number | string) =>
+export const readVideoImages = (id: string) =>
   request<VideoImages>(`/api/v1/media/post/${id}/video-images`);
 
 // HLS routes of the read API; relative playlists resolve under the master.
-export const hlsBase = (postID: number | string, name: string) =>
+export const hlsBase = (postID: string, name: string) =>
   `/api/v1/media/post/${postID}/hls/${encodeURIComponent(name)}/`;
 
 // The read API resolves access once and returns URLs only for what this
 // viewer may see (cookie mode sets the folder cookie for full access).
 // The item's current encode step, including the poster/preview pass after publish.
-export const readVideoProgress = (id: number | string) =>
+export const readVideoProgress = (id: string) =>
   request<{ progress?: EncodeProgress }>(`/api/v1/media/post/${id}/video-images`);
 
-export const readPost = (id: number | string, variants: string) =>
+export const readPost = (id: string, variants: string) =>
   request<MediaRead & ReadResult>(`/api/v1/media/post/${id}?variant=${variants}`);
 
-export const postFiles = (id: number | string) =>
+export const postFiles = (id: string) =>
   request<{ files: CommitFile[] }>(`/api/v1/posts/${id}/media`);
 
-export const commit = (id: number | string, ops: Op[]) =>
+export const commit = (id: string, ops: Op[]) =>
   uploads.commit(postRef(id), ops);
 
 export function uploadMessage(error: unknown) {

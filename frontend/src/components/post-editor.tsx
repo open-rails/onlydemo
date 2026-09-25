@@ -130,14 +130,14 @@ export function PostForm({
   const client = useQueryClient();
   // New posts upload into a draft created with the first file; Publish turns
   // it into the post, Cancel deletes it with its media.
-  const [draft, setDraft] = useState<{ id: number; files: File[] }>();
+  const [draft, setDraft] = useState<{ id: string; files: File[] }>();
   const [mediaBusy, setMediaBusy] = useState(false);
   const [refused, setRefused] = useState<string[]>([]);
   const media = useRef<DraftMediaHandle>(null);
   const onBusy = useCallback((busy: boolean) => setMediaBusy(busy), []);
   const createDraft = useMutation({
     mutationFn: () =>
-      request<{ id: number }>("/api/v1/posts", {
+      request<{ id: string }>("/api/v1/posts", {
         method: "POST",
         body: JSON.stringify({ channel_id: channelID, draft: true }),
       }),

@@ -38,7 +38,7 @@ export interface ChannelMembership {
   free_member: boolean;
 }
 export interface Post {
-  id: number;
+  id: string;
   channel_id: string;
   channel_slug: string;
   channel_name?: string;

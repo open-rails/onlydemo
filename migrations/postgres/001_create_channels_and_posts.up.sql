@@ -10,10 +10,11 @@ CREATE TABLE channels (
 );
 
 CREATE TABLE posts (
-    id BIGSERIAL PRIMARY KEY,
+    -- The id is ContentKit's content_id (media folder) and the OpenRails
+    -- resource post:<id>: a UUIDv7 is never reused, even across database resets.
+    id UUID PRIMARY KEY DEFAULT uuidv7(),
     channel_id UUID NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
     author_id UUID NOT NULL,
-    billing_key UUID NOT NULL DEFAULT gen_random_uuid(),
     slug TEXT NOT NULL,
     title TEXT NOT NULL,
     body TEXT NOT NULL,
@@ -23,11 +24,10 @@ CREATE TABLE posts (
     offer_revision BIGINT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    -- Deleted posts stay for purchase history and entitlements keyed by billing_key.
+    -- Deleted posts stay for purchase history and entitlements keyed by id.
     deleted_at TIMESTAMPTZ
 );
 
 CREATE INDEX posts_channel_id_idx ON posts (channel_id);
-CREATE UNIQUE INDEX posts_billing_key_idx ON posts (billing_key);
 -- Post slugs are scoped to their channel: /c/<channel>/<post>.
 CREATE UNIQUE INDEX posts_channel_slug_idx ON posts (channel_id, slug) WHERE deleted_at IS NULL;

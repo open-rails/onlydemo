@@ -105,7 +105,7 @@ func (h *mediaHarness) cost(p peer, path string) (cost, []byte) {
 // testListingCost grows the site by channels and posts and requires every
 // listing to cost exactly what it did before. It also proves the library
 // holds a purchase older than the newest 50 posts.
-func (h *mediaHarness) testListingCost(t *testing.T, purchasedPost int64, buyer peer) {
+func (h *mediaHarness) testListingCost(t *testing.T, purchasedPost string, buyer peer) {
 	lister := h.register("lister", "127.0.0.11")
 	fan := h.register("follower", "127.0.0.12")
 	anon := peer{h: h, name: "anonymous", client: h.client("127.0.0.13")}
@@ -118,13 +118,13 @@ func (h *mediaHarness) testListingCost(t *testing.T, purchasedPost int64, buyer 
 		})
 		return id
 	}
-	paidPost := func(ch, slug string) int64 {
+	paidPost := func(ch, slug string) string {
 		id := lister.call("POST", "/api/v1/posts", map[string]any{"channel_id": ch, "slug": slug, "title": slug, "body": "b", "access_policy": "ppv",
-			"price": map[string]any{"unit_amount": "990000", "currency": "USD"}}, "", 201)["id"].(float64)
+			"price": map[string]any{"unit_amount": "990000", "currency": "USD"}}, "", 201)["id"].(string)
 		eventually(t, slug+" offer", func() bool {
-			return len(lister.call("GET", fmt.Sprintf("/api/v1/posts/%.0f", id), nil, "", 200)["offers"].([]any)) > 0
+			return len(lister.call("GET", fmt.Sprintf("/api/v1/posts/%s", id), nil, "", 200)["offers"].([]any)) > 0
 		})
-		return int64(id)
+		return id
 	}
 	first := channel("cost-a")
 	firstPaid := paidPost(first, "cost-a-paid")
@@ -169,13 +169,13 @@ func (h *mediaHarness) testListingCost(t *testing.T, purchasedPost int64, buyer 
 		t.Fatal(err)
 	}
 	if !slices.ContainsFunc(library.Purchased, func(p post) bool { return p.ID == purchasedPost && p.Purchased && p.CanRead }) {
-		t.Fatalf("library %+v lacks purchased post %d", library.Purchased, purchasedPost)
+		t.Fatalf("library %+v lacks purchased post %s", library.Purchased, purchasedPost)
 	}
 
 	// A media read resolves the post and the viewer's grants (plus, when
 	// they hold any, the account's liveness) once.
 	for _, p := range []peer{buyer, fan, lister} {
-		c, _ := h.cost(p, fmt.Sprintf("/api/v1/media/post/%d?variant=large,blurred", purchasedPost))
+		c, _ := h.cost(p, fmt.Sprintf("/api/v1/media/post/%s?variant=large,blurred", purchasedPost))
 		if c.auth > 2 || c.billing > 1 {
 			t.Errorf("%s media read: %+v", p.name, c)
 		}
@@ -186,7 +186,7 @@ func (h *mediaHarness) testListingCost(t *testing.T, purchasedPost int64, buyer 
 	lister.call("POST", "/api/v1/channels/"+first+"/members", map[string]any{"username": "helper", "role": "editor"}, "", 201)
 	rights := func() (bool, bool, bool) {
 		ch := helper.call("GET", "/api/v1/channels/"+first, nil, "", 200)
-		post := helper.call("GET", fmt.Sprintf("/api/v1/posts/%d", firstPaid), nil, "", 200)
+		post := helper.call("GET", fmt.Sprintf("/api/v1/posts/%s", firstPaid), nil, "", 200)
 		return ch["can_edit"] == true, post["can_read"] == true, h.read(helper, firstPaid).res.Access == media.AccessFull
 	}
 	if edit, read, media := rights(); !edit || !read || !media {
