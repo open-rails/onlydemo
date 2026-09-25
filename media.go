@@ -345,7 +345,7 @@ func (m *mediaService) postAccess(ctx context.Context, actor access.Actor, conte
 	}
 	admin := g.can(postEditPermission)
 	up = media.UploadGrant{Owner: channelOwner(p.ChannelID), Exempt: admin,
-		Allowed: admin || (!p.Draft || p.AuthorID == actor.ID) && g.can(channelCreatePermission)}
+		Allowed: admin || (!p.draft() || p.AuthorID == actor.ID) && g.can(channelCreatePermission)}
 	return p, up, g, true, nil
 }
 
@@ -374,9 +374,14 @@ func (m *mediaService) resolve(ctx context.Context, ref contentref.ContentRef, a
 		if err != nil || !found {
 			return access.Resolution{}, err
 		}
-		if p.Draft {
+		switch p.State {
+		case stateDraft:
 			// Only its author (or a site admin) sees a draft.
 			return access.Resolution{Visible: up.Allowed, Accessible: up.Allowed, Editor: up.Allowed}, nil
+		case statePublishing:
+			// Only its channel's editors see a post whose media is processing.
+			editor := up.Allowed || g.can(channelEditPermission)
+			return access.Resolution{Visible: editor, Accessible: editor, Editor: up.Allowed}, nil
 		}
 		ok := g.can(channelReadPermission) || g.can(postReadPermission)
 		if !ok {
@@ -473,6 +478,18 @@ func (m *mediaService) files(c fiber.Ctx) error {
 	}
 	c.Set("Cache-Control", "no-store")
 	return c.JSON(out)
+}
+
+// readiness is a post's media processing; a post without media is ready.
+func (m *mediaService) readiness(ctx context.Context, id string) (*media.Readiness, error) {
+	if m == nil {
+		return &media.Readiness{State: media.StateReady}, nil
+	}
+	r, err := m.manifests.Readiness(ctx, m.postRef(id))
+	if errors.Is(err, media.ErrNotFound) {
+		return &media.Readiness{State: media.StateReady}, nil
+	}
+	return &r, err
 }
 
 // hasMedia reports whether a post holds an image or video (the teaser is a copy).

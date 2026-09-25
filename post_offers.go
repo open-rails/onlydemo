@@ -47,7 +47,7 @@ type postDraftSweepWorker struct {
 
 func (w *postDraftSweepWorker) Work(ctx context.Context, _ *river.Job[postDraftSweepArgs]) error {
 	return pgx.BeginFunc(ctx, w.api.pool, func(tx pgx.Tx) error {
-		return w.api.deleteDraftsTx(ctx, tx, `id IN (SELECT id FROM `+w.api.table+` WHERE published_at IS NULL AND created_at < $1 LIMIT 500)`, time.Now().Add(-draftLifetime))
+		return w.api.deleteDraftsTx(ctx, tx, `id IN (SELECT id FROM `+w.api.table+` WHERE state='draft' AND created_at < $1 LIMIT 500)`, time.Now().Add(-draftLifetime))
 	})
 }
 

@@ -590,7 +590,7 @@ func TestMediaEndToEnd(t *testing.T) {
 		}
 		editor.call("POST", "/api/v1/posts", map[string]any{"channel_id": channelID, "draft_id": id, "slug": "stolen", "title": "t", "body": "b"}, "", 404)
 		pub := owner.call("POST", "/api/v1/posts", map[string]any{"channel_id": channelID, "draft_id": id, "slug": "composed", "title": "Composed", "body": "b", "access_policy": "membership"}, "", 201)
-		if pub["id"].(string) != id || pub["draft"] != nil || !listed(id) {
+		if pub["id"].(string) != id || pub["state"] != statePublished || !listed(id) {
 			t.Fatalf("published draft %v", pub)
 		}
 		if r := h.read(stranger, id).res; r.Access == "full" || len(r.Files) != 2 || r.Files[0].URL == "" || !r.Files[1].Locked {
@@ -640,6 +640,53 @@ func TestMediaEndToEnd(t *testing.T) {
 		if !slices.Equal(left, []string{fresh}) {
 			t.Fatalf("sweep left %v, want only the fresh draft %s", left, fresh)
 		}
+	})
+
+	t.Run("publishing: editors only until processed; a failed file holds it back", func(t *testing.T) {
+		if !h.video {
+			t.Skip("the media worker needs ffmpeg")
+		}
+		id := owner.call("POST", "/api/v1/posts", map[string]any{"channel_id": channelID, "draft": true}, "", 201)["id"].(string)
+		ref := postRefBody(id)
+		clip := owner.upload(ref, "", testVideo(t, 320, 240), "video/mp4", 200)
+		bad := owner.upload(ref, "", []byte("not a video at all"), "video/mp4", 200)
+		owner.call("POST", "/api/v1/media/upload/commit", map[string]any{"ref": ref, "ops": []media.Op{
+			{Op: media.OpInsert, Name: "clip.mp4", Original: clip}, {Op: media.OpInsert, Name: "bad.mp4", Original: bad}}}, "", 200)
+		pub := owner.call("POST", "/api/v1/posts", map[string]any{"channel_id": channelID, "draft_id": id, "slug": "held", "title": "Held", "body": "b"}, "", 201)
+		if pub["state"] != statePublishing {
+			t.Fatalf("published with media processing: %v", pub)
+		}
+		hidden := func() {
+			t.Helper()
+			for _, p := range []peer{stranger, member, anon} {
+				p.call("GET", "/api/v1/posts/"+id, nil, "", 404)
+				p.call("GET", "/api/v1/channels/"+channelID+"/posts/held", nil, "", 404)
+				p.call("GET", "/api/v1/media/post/"+id, nil, "", 404)
+			}
+			res, raw := anon.do("GET", "/api/v1/posts?channel_id="+channelID+"&limit=50", nil, "")
+			if res.StatusCode != 200 || strings.Contains(string(raw), id) {
+				t.Fatalf("a publishing post listed: %d", res.StatusCode)
+			}
+		}
+		hidden()
+		if got := editor.call("GET", "/api/v1/posts/"+id, nil, "", 200); got["state"] != statePublishing {
+			t.Fatalf("the channel editor's view %v", got)
+		}
+		eventually(t, "the broken file failed", func() bool {
+			r, _ := owner.call("GET", "/api/v1/posts/"+id, nil, "", 200)["media_readiness"].(map[string]any)
+			failed, _ := r["failed"].([]any)
+			return r["state"] == media.StateFailed && len(failed) == 1 && failed[0] == "bad.mp4"
+		})
+		hidden()
+		owner.call("POST", "/api/v1/media/upload/commit", map[string]any{"ref": ref, "ops": []media.Op{{Op: media.OpRemove, Name: "bad.mp4"}}}, "", 200)
+		eventually(t, "published once processed", func() bool {
+			res, _ := anon.do("GET", "/api/v1/posts/"+id, nil, "")
+			return res.StatusCode == 200
+		})
+		eventually(t, "the cover exposed", func() bool {
+			root, _, err := h.srv.media.manifests.Root(ctx, h.srv.media.postRef(id))
+			return err == nil && !root.Hidden && len(root.PublicNames()) > 0
+		})
 	})
 
 	t.Run("listings cost the same for any number of items", func(t *testing.T) {

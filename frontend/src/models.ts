@@ -54,10 +54,20 @@ export interface Post {
   // Posts with a video: the cover (native-aspect srcset).
   poster?: SlotManifest;
   access_policy: AccessPolicy;
+  // "publishing": media still processing; only the channel's editors see it.
+  state: "draft" | "publishing" | "published";
+  media_readiness?: MediaReadiness;
   offer_status: "none" | "pending" | "active" | "failed";
   offers: Offer[];
   created_at: string;
   updated_at: string;
+}
+// ContentKit's media readiness: failed once nothing is processing and some
+// files could not be processed.
+export interface MediaReadiness {
+  state: "ready" | "processing" | "failed";
+  processing?: string[];
+  failed?: string[];
 }
 export interface Page<T> {
   data: T[];

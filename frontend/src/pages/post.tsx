@@ -54,7 +54,7 @@ export function PostPage() {
         `/api/v1/channels/${encodeURIComponent(channelSlug)}/posts/${encodeURIComponent(postSlug)}`,
       ),
     refetchInterval: (query) =>
-      query.state.data?.offer_status === "pending" ? 2000 : false,
+      query.state.data?.offer_status === "pending" || query.state.data?.state === "publishing" ? 2000 : false,
   });
   const channel = useQuery({
     queryKey: ["channel", post.data?.channel_id, auth.user?.id],

@@ -1294,6 +1294,13 @@
     height: 6px;
     accent-color: var(--primary);
   }
+  .publishing-notice {
+    margin-bottom: 12px;
+  }
+  .publishing-notice .media-encode {
+    width: min(320px, 100%);
+    margin-top: 8px;
+  }
   .media-images {
     width: min(320px, 100%);
     margin-top: 8px;

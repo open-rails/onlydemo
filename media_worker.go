@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/contentkit/contentref"
 	"github.com/open-rails/contentkit/media"
 	mediaS3 "github.com/open-rails/contentkit/media/s3"
 	"github.com/open-rails/contentkit/media/worker"
@@ -51,5 +52,27 @@ func newMediaWorker(ctx context.Context, cfg Config, pool *pgxpool.Pool, tune fu
 	if err := tune(&wc); err != nil {
 		return nil, err
 	}
+	host, err := media.NewHostQueue(pool, kinds, wc.HostSchema, wc.HostQueue, wc.Grace)
+	if err != nil {
+		return nil, err
+	}
+	wc.Hooks.ItemReady = postReady(pgx.Identifier{appSchema(cfg), "posts"}.Sanitize(), host)
 	return worker.New(ctx, wc)
+}
+
+// postReady is Hooks.ItemReady: a publishing post goes live once its media is
+// ready, its covers exposed in the same transaction. A failed one stays
+// publishing; its editors see which file failed and remove it.
+func postReady(table string, host *media.HostQueue) func(context.Context, pgx.Tx, contentref.ContentRef, media.Readiness) error {
+	return func(ctx context.Context, tx pgx.Tx, ref contentref.ContentRef, r media.Readiness) error {
+		if ref.ContentKind != kindPost || !r.Ready() {
+			return nil
+		}
+		tag, err := tx.Exec(ctx, `UPDATE `+table+` SET state='published', published_at=NOW(), created_at=NOW() WHERE id=$1 AND state='publishing' AND deleted_at IS NULL`, ref.ContentID)
+		if err != nil || tag.RowsAffected() == 0 {
+			return err
+		}
+		slog.Info("post published after processing", "post", ref.ContentID)
+		return host.ExposeTx(ctx, tx, ref)
+	}
 }

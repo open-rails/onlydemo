@@ -90,6 +90,9 @@ export function ChannelPage() {
       ),
     getNextPageParam: (last) => last.next_cursor || undefined,
     enabled: !!id,
+    // An editor's publishing posts go live on their own.
+    refetchInterval: (q) =>
+      q.state.data?.pages.some((p) => p.data.some((post) => post.state === "publishing")) ? 3000 : false,
   });
   const posts = {
     ...postQuery,

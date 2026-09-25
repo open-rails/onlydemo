@@ -15,6 +15,7 @@ import {
   SquareLock02Icon,
   Video01Icon,
 } from "@hugeicons/core-free-icons";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -124,6 +125,38 @@ export function PostGallery({ post, viewer, unlock }: { post: Post; viewer?: str
   );
 }
 
+// A publishing post's status for its editors: it goes live by itself once
+// every file is processed; a file that failed holds it back until removed.
+export function PublishingNotice({ post }: { post: Post }) {
+  const failed = post.media_readiness?.state === "failed" ? (post.media_readiness.failed ?? []) : [];
+  const encode = useQuery({
+    queryKey: ["post-media-encode", post.id],
+    queryFn: () => readVideoProgress(post.id),
+    enabled: failed.length === 0,
+    refetchInterval: 2000,
+    retry: false,
+  });
+  const progress = encode.data?.progress;
+  if (failed.length)
+    return (
+      <Alert variant="destructive" className="publishing-notice">
+        <AlertTitle>Not published: {failed.map(displayName).join(", ")} couldn't be processed</AlertTitle>
+        <AlertDescription>Remove {failed.length === 1 ? "it" : "them"} and the post publishes by itself.</AlertDescription>
+      </Alert>
+    );
+  return (
+    <Alert className="publishing-notice">
+      <AlertTitle>Publishes when processing finishes</AlertTitle>
+      <AlertDescription>Only this channel's editors can see it until then.</AlertDescription>
+      {progress && (
+        <div className="media-encode">
+          <EncodeProgress progress={progress} />
+        </div>
+      )}
+    </Alert>
+  );
+}
+
 // Creator tools: upload images and videos with the ContentKit SDK (hashing,
 // resumable multipart, reorder before commit), then reorder, remove, crop or
 // pick an image as the teaser. ContentKit derives image variants and HLS.
@@ -136,7 +169,7 @@ type ChannelSlot = keyof typeof channelSlots;
 const accept = [...imageTypes, ...videoTypes, ".mkv", ".mov"].join(",");
 
 const uniqueName = (f: File) => `${crypto.randomUUID().slice(0, 8)}-${f.name}`;
-const displayName = (name: string) => name.replace(/^[0-9a-f]{8}-/, "");
+export const displayName = (name: string) => name.replace(/^[0-9a-f]{8}-/, "");
 
 // A file picker that also takes drops; `empty` renders it as the big drop zone.
 export function MediaDrop({

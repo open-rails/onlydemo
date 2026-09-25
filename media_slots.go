@@ -77,8 +77,8 @@ func (m *mediaService) deleteSlotsTx(ctx context.Context, tx pgx.Tx, kind, id st
 	return err
 }
 
-// videoImages sets each published post's poster; drafts are hidden, so their
-// covers have no public copy. Playable videos preview inline from their HLS
+// videoImages sets each published post's poster; drafts and publishing posts
+// are hidden, so their covers have no public copy. Playable videos preview inline from their HLS
 // (SDK MediaGallery).
 func (m *mediaService) videoImages(ctx context.Context, posts []post) error {
 	ids := make([]string, len(posts))
@@ -91,7 +91,7 @@ func (m *mediaService) videoImages(ctx context.Context, posts []post) error {
 	}
 	for i := range posts {
 		poster := posters[slotKey{ids[i], media.PosterSlot}]
-		if poster == nil || posts[i].Draft {
+		if poster == nil || posts[i].State != statePublished {
 			continue
 		}
 		posts[i].Poster = poster

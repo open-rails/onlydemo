@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PolicyBadge } from "./policy-badge";
 import { Avatar } from "./cards";
-import { PostGallery } from "./post-media";
+import { PostGallery, PublishingNotice } from "./post-media";
 import type { ChannelMembership, Post } from "../models";
 import { subscribeLabel, unlockLabel, useJoinFree, usePay } from "./pay";
 import { channelPath, postPath } from "../paths";
@@ -95,6 +95,7 @@ export function PostView({
         <div className="feed-meta">
           <span className="feed-date">
             <PolicyBadge policy={policy} offer={price} /> {badges}
+            {post.state === "publishing" && <Badge variant="outline">Publishing</Badge>}
             <Link to={postPath(post)} aria-label={`Open ${label}`}>
               <time dateTime={post.created_at}>{dateTime(post.created_at)}</time>
             </Link>
@@ -130,6 +131,7 @@ export function PostView({
             ))}
         </div>
       )}
+      {post.state === "publishing" && <PublishingNotice post={post} />}
       <div ref={watchMedia}>
         {mediaNear &&
           (!post.can_read && post.poster ? (
