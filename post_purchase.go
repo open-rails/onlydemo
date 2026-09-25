@@ -33,6 +33,8 @@ func checkoutError(c fiber.Ctx, err error) error {
 		return c.Status(http.StatusPaymentRequired).JSON(fiber.Map{"error": fiber.Map{"code": openrails.CodeCardDeclined, "message": failure.Message, "metadata": fiber.Map{"failure": failure}}})
 	}
 	switch {
+	case errors.Is(err, openrails.ErrPaymentMethodRequired):
+		return paymentMethodRequired(c)
 	case errors.Is(err, openrails.ErrPaymentMethodStale):
 		return clientError(c, http.StatusPaymentRequired, "this saved card can no longer be used; add it again")
 	case errors.Is(err, openrails.ErrConflict), errors.Is(err, openrails.ErrIdempotencyKeyReused):
@@ -45,6 +47,11 @@ func checkoutError(c fiber.Ctx, err error) error {
 		return clientError(c, 404, "offer not found")
 	}
 	return billingUnavailable(c)
+}
+
+// paymentMethodRequired: a charge names its card; none is implied (#1087).
+func paymentMethodRequired(c fiber.Ctx) error {
+	return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": fiber.Map{"code": openrails.CodePaymentMethodRequired, "param": "payment_method_id", "message": "choose a saved card or enter a new one"}})
 }
 
 // returnOrigin returns the buyer to the site origin they checked out from;
@@ -181,7 +188,7 @@ func (api *channelAPI) subscribe(c fiber.Ctx, publicURL string) error {
 		return clientError(c, 409, "you already have editorial access to this channel")
 	}
 	if in.Payment.PaymentMethodID == "" {
-		return clientError(c, 400, "a verified saved payment method is required")
+		return paymentMethodRequired(c)
 	}
 	result, err := api.billing.client.CreateCheckoutSession(c.Context(), request)
 	if err != nil {

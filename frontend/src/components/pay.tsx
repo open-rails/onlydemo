@@ -342,7 +342,9 @@ function paySource(
           clearAttempt(scope);
           return { status: "failed", failure_message: error.message };
         }
-        // Unknown outcome: keep the key and let the panel check its status.
+        // A server error is shown at once; the kept key makes paying again a replay.
+        if (error instanceof APIError && error.status >= 500) throw error;
+        // Unknown outcome (network): keep the key and let the panel check its status.
         return { status: "processing" };
       }
     },
