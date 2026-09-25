@@ -4,14 +4,13 @@ import { useEffect, useState } from "react";
 import { APIError, request } from "../api";
 import { NotFoundPage } from "../App";
 import { useAuth } from "../session";
-import { policyLabels, type Channel, type Post } from "../models";
+import { visibilityLabels, type Channel, type Post } from "../models";
 import { money } from "../format";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowLeft02Icon,
   Delete02Icon,
   PencilEdit02Icon,
-  SquareLock02Icon,
 } from "@hugeicons/core-free-icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -166,34 +165,22 @@ export function PostPage() {
           editor={canEdit && <PostMediaEditor postID={item.id} channel={channel.data?.can_manage ? item.channel_id : undefined} />}
         />
         <aside className="panel purchase-panel">
-          {(item.purchased || policy !== "public") && (
-            <Badge
-              variant={item.purchased ? "secondary" : "default"}
-              className={item.purchased ? "bg-success/10 text-success" : undefined}
-            >
-              {item.purchased ? "Permanent purchased access" : policyLabels[policy]}
-            </Badge>
-          )}
-          <h3>{item.can_read ? "You have access." : "Support the creator."}</h3>
-          <p>
-            {item.purchased
-              ? "This purchase remains yours after membership ends. Deleted or archived content may no longer be available."
-              : policy === "public"
-                ? "No account is required to read this post."
-                : policy === "membership"
-                  ? "Available while your channel membership is active."
-                  : "A one-time purchase. No recurring charge for this post."}
-          </p>
-          {(!item.can_read || canEdit) && pricePending && (
-            <div className="purchase-price">
-              <small>Price pending</small>
-            </div>
-          )}
-          {(!item.can_read || canEdit) && !pricePending && offer && (
-            <div className="purchase-price">
-              {money(offer.unit_amount, offer.currency)} <small>one time</small>
-            </div>
-          )}
+          <dl className="post-facts">
+            <dt>Visibility</dt>
+            <dd>{visibilityLabels[policy]}</dd>
+            {policy !== "public" && policy !== "membership" && (
+              <>
+                <dt>Price</dt>
+                <dd>{pricePending ? "Pending" : offer ? money(offer.unit_amount, offer.currency) : "—"}</dd>
+              </>
+            )}
+            {item.purchased && (
+              <>
+                <dt>Access</dt>
+                <dd className="text-success">Purchased</dd>
+              </>
+            )}
+          </dl>
           {!item.can_read && !pricePending && (offer || mustJoin) && (
             <Button
               size="lg"
@@ -205,13 +192,6 @@ export function PostPage() {
             </Button>
           )}
           {joinFree.error && <FormError>{joinFree.error}</FormError>}
-          <div className="purchase-note">
-            <HugeiconsIcon icon={SquareLock02Icon} size={14} />
-            <span>
-              Sandbox test payments. Access is granted only after verified
-              payment confirmation.
-            </span>
-          </div>
         </aside>
       </div>
       <PostEditor

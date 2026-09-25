@@ -858,33 +858,23 @@
     line-height: 1.75;
     padding-top: 6px;
   }
-  .purchase-panel h3 {
-    margin: 12px 0 6px;
+  .post-facts {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 8px 16px;
+    margin: 0;
+    font-size: 0.9rem;
   }
-  .purchase-panel p {
-    font-size: 0.85rem;
+  .post-facts + * {
+    margin-top: 16px;
+  }
+  .post-facts dt {
     color: var(--muted-foreground);
   }
-  .purchase-price {
-    font-size: 1.8rem;
-    letter-spacing: -0.03em;
-    font-weight: 800;
-    margin: 16px 0 4px;
-  }
-  .purchase-price small {
-    font-size: 0.8rem;
-    letter-spacing: 0;
-    color: var(--muted-foreground);
-    font-weight: 500;
-  }
-  .purchase-note {
-    display: flex;
-    align-items: flex-start;
-    gap: 7px;
-    margin-top: 14px;
-    color: var(--muted-foreground);
-    font-size: 0.72rem;
-    line-height: 1.6;
+  .post-facts dd {
+    margin: 0;
+    font-weight: 600;
+    text-align: right;
   }
   /* Lists */
   .data-list {

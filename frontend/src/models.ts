@@ -112,11 +112,11 @@ export interface AppConfig {
   /** The buyer's country from a trusted edge header, else "". */
   country: string;
 }
-export const policyLabels: Record<AccessPolicy, string> = {
-  public: "Free to read",
-  membership: "Included with membership",
-  members_ppv: "Members-only purchase",
-  ppv: "One-time purchase",
+export const visibilityLabels: Record<AccessPolicy, string> = {
+  public: "Public",
+  membership: "Members only",
+  members_ppv: "Members only, for sale",
+  ppv: "For sale",
 };
 export const terminalCheckout = (status?: string) =>
   ["succeeded", "failed", "expired", "canceled"].includes(status || "");
