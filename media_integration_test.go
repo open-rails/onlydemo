@@ -1109,7 +1109,7 @@ func (h *mediaHarness) expectRead(t *testing.T, p peer, id string, level string)
 			h.expectFetch(t, f.URL, "", 403)
 		}
 		// The cookie never opens originals or manifests.
-		prefix := strings.TrimSuffix(r.res.Files[0].URL[:strings.Index(r.res.Files[0].URL, "/blobs/")], "/")
+		prefix := strings.TrimSuffix(r.res.Files[0].URL[:strings.Index(r.res.Files[0].URL, "/private/")], "/")
 		h.expectFetch(t, prefix+"/manifest.json", r.cookie, 404)
 		h.expectFetch(t, prefix+"/originals/"+h.original(id), r.cookie, 404)
 	case "teaser":

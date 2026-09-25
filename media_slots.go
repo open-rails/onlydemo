@@ -11,9 +11,8 @@ import (
 )
 
 // Public slots render at a small and a large width (the SDK picks by rendered
-// size × 2–3× density), rewritten in place at fixed URLs that the media host
-// serves no-cache with an ETag. media_slots records which slots are set (and
-// a native slot's aspect) so listings link them without reads.
+// size × 2–3× density) to immutable, hash-named files. media_slots keeps each
+// set slot's SlotListing so listings link it without reads.
 const (
 	slotAvatar = "avatar"
 	slotCover  = "cover"
@@ -29,14 +28,13 @@ var (
 
 type slotKey struct{ ID, Slot string }
 
-// slotEncoded is Hooks.SlotEncoded (run by the media worker): it records in
-// table that the slot is set, with its aspect.
-func slotEncoded(pool *pgxpool.Pool, table string) func(context.Context, contentref.ContentRef, string, media.Aspect) {
-	return func(ctx context.Context, ref contentref.ContentRef, slot string, aspect media.Aspect) {
-		a, _ := aspect.MarshalText()
-		_, err := pool.Exec(ctx, `INSERT INTO `+table+` (kind, item_id, slot, aspect) VALUES ($1,$2,$3,$4)
-			ON CONFLICT (kind, item_id, slot) DO UPDATE SET aspect=EXCLUDED.aspect, updated_at=NOW()`,
-			ref.ContentKind, ref.ContentID, slot, string(a))
+// slotEncoded is Hooks.SlotEncoded (run by the media worker): it stores the
+// slot's new listing in table.
+func slotEncoded(pool *pgxpool.Pool, table string) func(context.Context, contentref.ContentRef, string, media.SlotListing) {
+	return func(ctx context.Context, ref contentref.ContentRef, slot string, l media.SlotListing) {
+		_, err := pool.Exec(ctx, `INSERT INTO `+table+` (kind, item_id, slot, listing) VALUES ($1,$2,$3,$4)
+			ON CONFLICT (kind, item_id, slot) DO UPDATE SET listing=EXCLUDED.listing, updated_at=NOW()`,
+			ref.ContentKind, ref.ContentID, slot, l)
 		if err != nil {
 			slog.Warn("record slot", "ref", ref.String(), "slot", slot, "err", err)
 		}
@@ -54,17 +52,17 @@ func (m *mediaService) slots(ctx context.Context, kind string, ids []string, nam
 	if err != nil {
 		return nil, err
 	}
-	rows, err := m.pool.Query(ctx, `SELECT item_id, slot, aspect FROM `+m.slotTable+` WHERE kind=$1 AND item_id=ANY($2) AND slot=ANY($3)`, kind, ids, names)
+	rows, err := m.pool.Query(ctx, `SELECT item_id, slot, listing FROM `+m.slotTable+` WHERE kind=$1 AND item_id=ANY($2) AND slot=ANY($3)`, kind, ids, names)
 	if err != nil {
 		return nil, err
 	}
-	var id, slot, aspect string
-	_, err = pgx.ForEachRow(rows, []any{&id, &slot, &aspect}, func() error {
+	var id, slot string
+	var listing media.SlotListing
+	_, err = pgx.ForEachRow(rows, []any{&id, &slot, &listing}, func() error {
 		if _, ok := k.Slots[slot]; !ok {
 			return nil
 		}
-		a, _ := media.ParseAspect(aspect)
-		man, err := m.reader.ListedSlot(m.ref(kind, id), slot, a)
+		man, err := m.reader.ListedSlot(m.ref(kind, id), slot, listing)
 		if err != nil {
 			return err
 		}
@@ -79,9 +77,9 @@ func (m *mediaService) deleteSlotsTx(ctx context.Context, tx pgx.Tx, kind, id st
 	return err
 }
 
-// videoImages sets each published post's poster, which ContentKit publishes
-// for every visible post (drafts nothing). URLs are fixed; public/ is served
-// no-cache. Playable videos preview inline from their HLS (SDK MediaGallery).
+// videoImages sets each published post's poster; drafts are hidden, so their
+// covers have no public copy. Playable videos preview inline from their HLS
+// (SDK MediaGallery).
 func (m *mediaService) videoImages(ctx context.Context, posts []post) error {
 	ids := make([]string, len(posts))
 	for i, p := range posts {

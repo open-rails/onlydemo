@@ -232,9 +232,10 @@ func newMedia(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth
 	if err != nil {
 		return nil, err
 	}
-	// Resolver publishes video posters by what anonymous viewers may see:
-	// drafts nothing, every visible post its poster (the teaser of paid ones).
-	if m.jobs, err = media.NewJobs(media.JobsConfig{Store: store, Kinds: kinds, Tenants: []string{mc.Tenant}, Limiter: m.limiter, Resolver: m}); err != nil {
+	// Resolver hides items anonymous viewers may not see (drafts): their
+	// covers lose their public copies. Paid posts keep a public cover.
+	if m.jobs, err = media.NewJobs(media.JobsConfig{Store: store, Kinds: kinds, Tenants: []string{mc.Tenant}, Limiter: m.limiter, Resolver: m,
+		Locker: media.PGLocker(pool), Hooks: media.Hooks{PublicRemoved: purgeCDN}}); err != nil {
 		return nil, err
 	}
 	if m.manifests, err = media.NewManifests(store, kinds, media.ManifestOptions{Locker: media.PGLocker(pool), Sweeps: m.jobs}); err != nil {
@@ -278,13 +279,21 @@ func (m *mediaService) postRef(id string) contentref.ContentRef {
 
 // createPost starts a new post's folder; a folder already holding objects
 // (a reused id) refuses the post instead of showing another post's media.
-func (m *mediaService) createPost(ctx context.Context, id string) error {
+// A draft starts hidden, so its covers are never public before it is.
+func (m *mediaService) createPost(ctx context.Context, id string, draft bool) error {
 	if m == nil {
 		return nil
 	}
-	_, err := m.manifests.Create(ctx, m.postRef(id))
+	ref := m.postRef(id)
+	if _, err := m.manifests.Create(ctx, ref); err != nil || !draft {
+		return err
+	}
+	_, err := m.manifests.EditRoot(ctx, ref, func(r *media.Root) error { r.Hidden = true; return nil })
 	return err
 }
+
+// purgeCDN is Hooks.PublicRemoved: no CDN fronts the demo's media host.
+func purgeCDN(context.Context, contentref.ContentRef, []string) {}
 
 func channelOwner(id string) string { return kindChannel + ":" + id }
 
@@ -498,9 +507,9 @@ func withMediaActor(next http.Handler) http.Handler {
 	})
 }
 
-// publishTx republishes posts' public video images after a change to what
-// anonymous viewers may see (publish, access policy).
-func (m *mediaService) publishTx(ctx context.Context, tx pgx.Tx, ids ...string) error {
+// exposeTx re-exposes posts' covers after a change to whether anonymous
+// viewers may see them (publish).
+func (m *mediaService) exposeTx(ctx context.Context, tx pgx.Tx, ids ...string) error {
 	if m == nil {
 		return nil
 	}
@@ -508,7 +517,7 @@ func (m *mediaService) publishTx(ctx context.Context, tx pgx.Tx, ids ...string) 
 	for i, id := range ids {
 		refs[i] = m.postRef(id)
 	}
-	return m.jobs.PublishTx(ctx, tx, refs...)
+	return m.jobs.ExposeTx(ctx, tx, refs...)
 }
 
 // deletePostsTx erases post folders in the caller's delete transaction and

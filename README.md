@@ -172,10 +172,10 @@ and channel folders with no row.
   upscaled). "Edit crop" re-renders the kept original
   (`edit-slot`); "Use as channel avatar/cover" on a post image copies it
   (`commit-slot-from-file` with `from`; the manager must be allowed to upload to
-  both). The `SlotEncoded` hook stores each slot's `SlotStamp` in
-  `media_slots.stamp`; listings rebuild every output with
-  `Reader.StampedSlot(ref, slot, stamp)` (immutable `?v=` URLs, no bucket
-  reads). SDK components pick the rendition for their rendered width × 2–3×
+  both). The `SlotEncoded` hook stores each slot's `SlotListing` in
+  `media_slots.listing`; listings build its URLs with
+  `Reader.ListedSlot(ref, slot, listing)` (hash-named, immutable files; no
+  bucket reads). SDK components pick the rendition for their rendered width × 2–3×
   density. After changing widths or variant specs, run `onlydemo media
   reprocess` (one `ProcessJob` per post, channel and user with media).
 - **Edits.** Crop and rotate are ContentKit's non-destructive file edits
@@ -229,12 +229,12 @@ and channel folders with no row.
   `GET /api/v1/media/upload/frame`, optionally cropped at the video's aspect, or
   an uploaded image) changes it. Frame posters reach the app's image job in the
   same worker; the app needs ffmpeg for `/frame`. `SlotEncoded` stores the
-  poster stamp like other slots, so listings carry `poster` URLs without reads.
-  It renders to ContentKit's token-gated `editor/` area and is copied to a
-  tokenless `public/` URL for every visible post (drafts nothing; members-only
-  or paid posts show it as the teaser). Publishing a draft or changing a post's
-  access policy republishes (`PublishTx` in the same transaction), and deleting
-  a post removes it first.
+  poster listing like other slots, so listings carry `poster` URLs without
+  reads. Covers render to ContentKit's token-gated `private/` and are copied to
+  `public/` unless the post is hidden: drafts start hidden, publishing one
+  exposes it (`ExposeTx` in the same transaction; members-only and paid posts
+  keep a public cover), and deleting a post removes its public copies first.
+  `Hooks.PublicRemoved` (a CDN purge) is a no-op here.
 - **Inline preview.** Videos the viewer can play preview in the feed with
   their own HLS, muted (mouse: after 500 ms of hover; touch: the most visible
   one), from the cover's frame or 10 % in (ContentKit `MediaGallery`). Locked
@@ -262,9 +262,9 @@ and channel folders with no row.
   `Cross-Origin-Resource-Policy: same-site`, which blocks other sites from
   hotlinking media.
 - Keep the bucket private. media-access gets a read-only key limited to
-  `*/blobs/*`, `*/editor/*` and `*/public/*`.
-- A CDN may cache `public/`. Never let a shared cache store `blobs/` or
-  `editor/`: those are token-gated.
+  `*/private/*` and `*/public/*`.
+- A CDN may cache `public/` (immutable names); wire `Hooks.PublicRemoved` to
+  purge it. Never let a shared cache store `private/`: it is token-gated.
 - To rotate `MEDIA_TOKEN_KEY`, give media-access the new key as
   `MEDIA_ACCESS_TOKEN_KEY` and the old one as `_PREVIOUS`, switch the app
   to the new key, and drop the old key after about 5 hours (token TTL plus

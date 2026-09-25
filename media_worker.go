@@ -47,7 +47,7 @@ func newMediaWorker(ctx context.Context, cfg Config, pool *pgxpool.Pool, tune fu
 		return nil, err
 	}
 	wc := worker.Config{Pool: pool, Store: store, Kinds: kinds, Specs: mediaSpecs, HostSchema: cfg.RiverSchema, Logger: slog.Default(),
-		Hooks: media.Hooks{Failed: mediaFailed, SlotEncoded: slotEncoded(pool, pgx.Identifier{appSchema(cfg), "media_slots"}.Sanitize())}}
+		Hooks: media.Hooks{Failed: mediaFailed, SlotEncoded: slotEncoded(pool, pgx.Identifier{appSchema(cfg), "media_slots"}.Sanitize()), PublicRemoved: purgeCDN}}
 	if err := tune(&wc); err != nil {
 		return nil, err
 	}
