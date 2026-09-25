@@ -59,7 +59,7 @@ const (
 	testWebhookSecret = "whsec_media_test_fake_only"
 	testPassword      = "Media-test-password-42!"
 	testQuota         = 3 << 20
-	testFilesPerHour  = 20
+	testFilesPerHour  = 40
 )
 
 func TestMediaEndToEnd(t *testing.T) {
@@ -210,12 +210,12 @@ func TestMediaEndToEnd(t *testing.T) {
 		chRef := map[string]string{"kind": kindChannel, "id": channelID}
 		editor.upload(chRef, "avatar", testPNG(t, 300, 300, color.White), "image/png", 403)
 		owner.upload(chRef, "avatar", testPNG(t, 300, 300, color.RGBA{0, 160, 0, 255}), "image/png", 200)
-		// Never upscaled: a 300px avatar has the 128 and 256 widths.
-		h.waitSlot(t, "channel avatar", h.channelSlot(anon, channelID, "avatar"), "", 128, 256)
+		// Never upscaled: a 300px avatar renders its 512 rung at 300.
+		h.waitSlot(t, "channel avatar", h.channelSlot(anon, channelID, "avatar"), "", 128, 300)
 
 		stranger.upload(map[string]string{"kind": media.UserKind, "id": owner.id}, "avatar", testPNG(t, 64, 64, color.White), "image/png", 403)
 		// The SDK crops before upload: commit-slot carries the edit (Aspect 1
-		// derives the height), so a 400px crop of a 600px image has no 512.
+		// derives the height), so a 400px crop of a 600px image renders 512 at 400.
 		_, got := stranger.uploadSlot(map[string]string{"kind": media.UserKind, "id": stranger.id}, "avatar", testPNG(t, 600, 600, color.Black),
 			map[string]any{"crop": map[string]int{"x": 100, "y": 150, "w": 400}, "rotate": 90})
 		if e := got["edit"].(map[string]any); e["crop"].(map[string]any)["h"] != float64(400) || e["rotate"] != float64(90) {
@@ -223,7 +223,7 @@ func TestMediaEndToEnd(t *testing.T) {
 		}
 		h.waitSlot(t, "user avatar", func() any {
 			return stranger.call("GET", "/api/v1/me", nil, "", 200)["user"].(map[string]any)["avatar"]
-		}, "", 128, 256)
+		}, "", 128, 400)
 	})
 
 	t.Run("mixed images and videos", func(t *testing.T) {
@@ -302,7 +302,7 @@ func TestMediaEndToEnd(t *testing.T) {
 		n, _ := strconv.ParseInt(length, 10, 64)
 		o, _ := strconv.ParseInt(offset, 10, 64)
 		h.expectRange(t, blob, r.cookie, o, n, 206)
-		h.expectRange(t, blob, "", o, n, 403)
+		h.expectRange(t, blob, "", o, n, 404)
 
 		// Videos keep ContentKit's default ladder (up to 2160p): the worker
 		// recorded that recipe.
@@ -361,8 +361,9 @@ func TestMediaEndToEnd(t *testing.T) {
 			t.Fatalf("3:1 video %+v", o[2])
 		}
 		r := h.read(member, id)
-		if f := r.res.Files[2]; f.HLS || f.Failed != "" {
-			t.Fatalf("reader sees the failure reason: %+v", f)
+		// Readers see only servable files: the failed video is left out.
+		if f := r.res.Files; len(f) != 2 || !f[0].HLS || !f[1].HLS || f[0].Failed != "" || f[1].Failed != "" {
+			t.Fatalf("reader files %+v", f)
 		}
 		man, _, err := h.srv.media.manifests.Get(ctx, h.srv.media.postRef(id))
 		if err != nil {
@@ -447,10 +448,10 @@ func TestMediaEndToEnd(t *testing.T) {
 		chRef := map[string]string{"kind": kindChannel, "id": channelID}
 		cover := h.channelSlot(anon, channelID, "cover")
 		owner.upload(chRef, "cover", testPNG(t, 1600, 1600, color.RGBA{200, 120, 0, 255}), "image/png", 200)
-		_, first := h.waitSlot(t, "cover", cover, "", 1500)
+		_, first := h.waitSlot(t, "cover", cover, "", 900, 1600)
 		// Narrower than the cover's MinWidth: refused, the served cover stays.
 		if res, raw := owner.do("POST", "/api/v1/media/upload/edit-slot", map[string]any{"ref": chRef, "slot": "cover",
-			"edit": map[string]any{"crop": map[string]int{"x": 0, "y": 0, "w": 900}}}, ""); res.StatusCode/100 != 4 {
+			"edit": map[string]any{"crop": map[string]int{"x": 0, "y": 0, "w": 500}}}, ""); res.StatusCode/100 != 4 {
 			t.Fatalf("narrow cover edit %d %s", res.StatusCode, raw)
 		}
 		// Rotated a quarter turn: the crop is in original pixels and its height
@@ -461,7 +462,7 @@ func TestMediaEndToEnd(t *testing.T) {
 		if crop := got["edit"].(map[string]any)["crop"].(map[string]any); crop["h"] != float64(1590) {
 			t.Fatalf("cover edit %+v", got)
 		}
-		h.waitSlot(t, "re-cropped cover", cover, first, 1500)
+		h.waitSlot(t, "re-cropped cover", cover, first, 900, 1590)
 	})
 
 	t.Run("channel avatar from a post image", func(t *testing.T) {
@@ -478,7 +479,7 @@ func TestMediaEndToEnd(t *testing.T) {
 		before := ""
 		if m, _ := avatar().(map[string]any); m != nil {
 			if outs, _ := m["outputs"].([]any); len(outs) > 0 {
-				before = publicSum(outs[0].(map[string]any)["url"].(string))
+				before = publicSum(outs[len(outs)-1].(map[string]any)["url"].(string))
 			}
 		}
 		got := owner.call("POST", "/api/v1/media/upload/commit-slot-from-file", slot, "", 200)
@@ -486,7 +487,7 @@ func TestMediaEndToEnd(t *testing.T) {
 		if crop := got["edit"].(map[string]any)["crop"].(map[string]any); crop["h"] != float64(480) {
 			t.Fatalf("avatar edit %+v", got)
 		}
-		h.waitSlot(t, "avatar from post image", avatar, before, 128, 256)
+		h.waitSlot(t, "avatar from post image", avatar, before, 128, 480)
 	})
 
 	t.Run("video poster", func(t *testing.T) {
@@ -1153,7 +1154,7 @@ func (h *mediaHarness) expectRead(t *testing.T, p peer, id string, level string)
 				t.Fatalf("full access file %+v", f)
 			}
 			h.expectFetch(t, f.URL, r.cookie, 200)
-			h.expectFetch(t, f.URL, "", 403)
+			h.expectFetch(t, f.URL, "", 404)
 		}
 		// The cookie never opens originals or manifests.
 		prefix := strings.TrimSuffix(r.res.Files[0].URL[:strings.Index(r.res.Files[0].URL, "/private/")], "/")
@@ -1175,7 +1176,7 @@ func (h *mediaHarness) expectRead(t *testing.T, p peer, id string, level string)
 				t.Fatalf("locked file leaked: %+v", f)
 			}
 			// The creator's plain URL and folder cookie are no use to this viewer.
-			h.expectFetch(t, owner.res.Files[i].URL, "", 403)
+			h.expectFetch(t, owner.res.Files[i].URL, "", 404)
 		}
 	}
 }
@@ -1251,14 +1252,20 @@ func (h *mediaHarness) channelSlot(p peer, channel, slot string) func() any {
 }
 
 // waitSlot polls an API slot manifest until it is encoded at exactly widths
-// with a first output other than prev (slots are rewritten in place), and
+// with a widest output other than prev (slots are rewritten in place), and
 // returns it with that output's digest.
 func (h *mediaHarness) waitSlot(t *testing.T, what string, get func() any, prev string, widths ...int) (media.SlotManifest, string) {
 	t.Helper()
 	var man media.SlotManifest
 	var sum string
+	var raw []byte
+	defer func() {
+		if t.Failed() {
+			t.Logf("%s last: %s", what, raw)
+		}
+	}()
 	eventually(t, what, func() bool {
-		raw, _ := json.Marshal(get())
+		raw, _ = json.Marshal(get())
 		man = media.SlotManifest{}
 		if json.Unmarshal(raw, &man) != nil || man.Pending || len(man.Outputs) != len(widths) {
 			return false
@@ -1268,7 +1275,7 @@ func (h *mediaHarness) waitSlot(t *testing.T, what string, get func() any, prev 
 				return false
 			}
 		}
-		sum = publicSum(man.Outputs[0].URL)
+		sum = publicSum(man.Outputs[len(man.Outputs)-1].URL)
 		return sum != "" && sum != prev
 	})
 	for _, o := range man.Outputs {

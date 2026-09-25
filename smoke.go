@@ -94,7 +94,7 @@ func smoke() error {
 	if err != nil {
 		return err
 	}
-	cfg := Config{PostDeletion: postDeletion, MembershipHours: membershipHours, Media: media, DatabaseURL: databaseURL, PublicURL: base, AuthIssuer: base, AuthAudience: "demo-smoke", PSPs: fakeStripePSP(smokeWebhookSecret), CheckoutPSP: "stripe"}
+	cfg := Config{PostDeletion: postDeletion, MembershipHours: membershipHours, Media: media, DatabaseURL: databaseURL, PublicURL: base, ReturnOrigins: []string{base}, AuthIssuer: base, AuthAudience: "demo-smoke", PSPs: fakeStripePSP(smokeWebhookSecret), CheckoutPSP: "stripe"}
 	if err = initializeDatabase(ctx, cfg, pool); err != nil {
 		return err
 	}
