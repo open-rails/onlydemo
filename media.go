@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/adaptor"
@@ -49,13 +50,13 @@ const (
 var (
 	imageTypes = []string{"image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"}
 	videoTypes = []string{"video/mp4", "video/webm", "video/quicktime", "video/x-matroska"}
-	// editorSpec is the whole source, ignoring crop/rotate, for the cropper;
-	// only editors (Resolution.Editor) are signed it.
-	editorSpec = media.Spec{Width: 1200, Height: 1200, Fit: media.FitInside, Quality: 80, Unedited: true, EditorOnly: true}
+	// editorView is the whole source, ignoring crop/rotate, that croppers draw
+	// on (read as variant=editor, or a slot's editor_url). It lives in temp/,
+	// only editors (Resolution.Editor) are signed it, and the sweep wipes it.
+	editorView = &media.Spec{Width: 1200, Height: 1200, Fit: media.FitInside, Quality: 80}
 	postSpecs  = map[string]media.Spec{
-		"large":  {Width: 1600, Height: 1600, Fit: media.FitInside, Quality: 85},
-		"thumb":  {Width: 480, Height: 480, Fit: media.FitCover, Quality: 80},
-		"editor": editorSpec,
+		"large": {Width: 1600, Height: 1600, Fit: media.FitInside, Quality: 85},
+		"thumb": {Width: 480, Height: 480, Fit: media.FitCover, Quality: 80},
 	}
 	teaserSpecs = map[string]media.Spec{
 		"blurred": {Width: 960, Height: 960, Fit: media.FitInside, Quality: 70, Blur: 24},
@@ -65,9 +66,9 @@ var (
 			TypeLimits: map[string]media.Limit{"image": {MaxBytes: maxImageBytes}, "video": {MaxFiles: maxPostVideos}},
 			// Default ladder (short sides up to 2160), aspects 1:2.4–2.4:1. Covers
 			// fill the ~620 px feed column at 2–3× (and a 390 px phone at 3×).
-			Specs: postSpecs, Video: &media.Video{PosterWidths: []int{640, 1280, 1920}}},
-		{Name: kindChannel, Types: imageTypes, MaxBytes: maxImageBytes, Slots: map[string]media.Slot{slotAvatar: avatarSlot, slotCover: coverSlot}},
-		{Name: media.UserKind, Types: imageTypes, MaxBytes: maxImageBytes, Slots: map[string]media.Slot{slotAvatar: avatarSlot}},
+			Specs: postSpecs, Editor: editorView, Video: &media.Video{PosterWidths: []int{640, 1280, 1920}}},
+		{Name: kindChannel, Types: imageTypes, MaxBytes: maxImageBytes, Editor: editorView, Slots: map[string]media.Slot{slotAvatar: avatarSlot, slotCover: coverSlot}},
+		{Name: media.UserKind, Types: imageTypes, MaxBytes: maxImageBytes, Editor: editorView, Slots: map[string]media.Slot{slotAvatar: avatarSlot}},
 	}
 	policyLevels = map[string]tiered.Level{
 		"public": tiered.Public, "membership": tiered.Members, "ppv": tiered.PPV, "members_ppv": tiered.MembersPPV,
@@ -90,6 +91,11 @@ type mediaConfig struct {
 	FilesPerHour     int
 	BytesPerDay      int64
 	ChannelQuota     int64
+	// temp/ retention and the sweep pass interval; zero keeps ContentKit's
+	// defaults (48 h, 7 days, 24 h).
+	TempUploadTTL time.Duration
+	EditorTTL     time.Duration
+	SweepInterval time.Duration
 }
 
 func loadMediaConfig(get func(string) string) (mediaConfig, error) {
@@ -128,6 +134,20 @@ func loadMediaConfig(get func(string) string) (mediaConfig, error) {
 	c.FilesPerHour = int(num("media_upload_files_per_hour", 60))
 	c.BytesPerDay = num("media_upload_bytes_per_day", 100<<30)
 	c.ChannelQuota = num("media_channel_quota_bytes", 500<<30)
+	dur := func(key string) time.Duration {
+		raw := or(key, "")
+		if raw == "" || err != nil {
+			return 0
+		}
+		d, e := time.ParseDuration(raw)
+		if e != nil || d < 0 {
+			err = fmt.Errorf("%s must be a non-negative duration", strings.ToUpper(key))
+		}
+		return d
+	}
+	c.TempUploadTTL = dur("media_temp_upload_ttl")
+	c.EditorTTL = dur("media_editor_ttl")
+	c.SweepInterval = dur("media_sweep_interval")
 	if err != nil {
 		return c, err
 	}
@@ -235,7 +255,8 @@ func newMedia(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth
 	// Resolver hides items anonymous viewers may not see (drafts): their
 	// covers lose their public copies. Paid posts keep a public cover.
 	if m.jobs, err = media.NewJobs(media.JobsConfig{Store: store, Kinds: kinds, Tenants: []string{mc.Tenant}, Limiter: m.limiter, Resolver: m,
-		Locker: media.PGLocker(pool), Hooks: media.Hooks{PublicRemoved: purgeCDN}}); err != nil {
+		Locker: media.PGLocker(pool), Hooks: media.Hooks{PublicRemoved: purgeCDN},
+		TempUploadTTL: mc.TempUploadTTL, EditorTTL: mc.EditorTTL, SweepInterval: mc.SweepInterval}); err != nil {
 		return nil, err
 	}
 	if m.manifests, err = media.NewManifests(store, kinds, media.ManifestOptions{Locker: media.PGLocker(pool), Sweeps: m.jobs}); err != nil {
@@ -261,7 +282,7 @@ func newMedia(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth
 		return nil, err
 	}
 	if m.reader, err = media.NewReader(media.ReaderOptions{Manifests: m.manifests, Kinds: kinds, Resolver: m, Hooks: hooks,
-		Progress: workqueue.NewProgressSource(pool),
+		Progress: workqueue.NewProgressSource(pool), Queue: queue,
 		Delivery: media.Delivery{Mode: mc.Delivery, BaseURL: mc.URL, CookieDomain: mc.CookieDomain, SigningKey: signing}}); err != nil {
 		return nil, err
 	}
@@ -365,8 +386,8 @@ func (m *mediaService) Resolve(ctx context.Context, refs []contentref.ContentRef
 
 // resolve is the one read decision for media: the same rule as the post API.
 // Channel editors and site admins read everything. Editors are whoever may
-// upload to the item: they alone get the uncropped editor variant and the
-// files' edits and source dims.
+// upload to the item: they alone get the editor views and the files' edits
+// and source dims.
 func (m *mediaService) resolve(ctx context.Context, ref contentref.ContentRef, actor access.Actor) (access.Resolution, error) {
 	switch ref.ContentKind {
 	case kindPost:
