@@ -59,7 +59,10 @@ jobs:
       - name: NMI billing end to end (nmimock)
         run: go test -run TestNMIBillingEndToEnd -count=1 -v -p 2 .
       - name: MinIO
-        run: docker run -d --name minio -p 9000:9000 quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+        # Upstream MinIO images and dl.min.io binaries are gone; Chainguard still builds it (RELEASE.2026-09-22T19-25-18Z).
+        run: >-
+          docker run -d --name minio -p 9000:9000 --tmpfs /data:uid=65532,gid=65532
+          cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 server /data
       - run: |
           go build -o /tmp/media-access github.com/open-rails/contentkit/cmd/media-access
           go build -o /tmp/media-worker github.com/open-rails/contentkit/cmd/media-worker
@@ -76,6 +79,5 @@ jobs:
           MEDIA_DELIVERY: url
           MEDIA_TOKEN_KEY: smoke:c21va2Utb25seS1ub3QtYS1zZWNyZXQtMzItYnl0ZXM=
         run: |
-          docker run --rm --network host --entrypoint sh quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z \
-            -c 'mc alias set local http://127.0.0.1:9000 minioadmin minioadmin && mc mb -p local/onlydemo-media'
+          curl -fsS --aws-sigv4 aws:amz:us-east-1:s3 --user minioadmin:minioadmin -X PUT http://127.0.0.1:9000/onlydemo-media
           go run -tags smoke .
