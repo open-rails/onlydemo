@@ -1,26 +1,25 @@
 package main
 
 // NMI billing end to end on real services: PostgreSQL (app, AuthKit,
-// OpenRails, River), an S3 backend for the media probe, and OpenRails's
-// nmimock gateway on loopback. One fake clock drives OpenRails and the
-// gateway, so a renewal is a clock step, not a wait.
+// OpenRails, River) and OpenRails's nmimock gateway on loopback; media only
+// needs its startup probe, served by an in-process S3. One fake clock drives
+// OpenRails and the gateway, so a renewal is a clock step, not a wait.
 //
 //	DEMO_TEST_DATABASE_URL   loopback PostgreSQL admin URL; a database is created and dropped
-//	DEMO_TEST_S3_ENDPOINT    e.g. http://127.0.0.1:9000; a bucket is created and emptied
-//	DEMO_TEST_S3_ACCESS_KEY, DEMO_TEST_S3_SECRET_KEY
 
 import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"net"
+	"net/http/httptest"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/google/uuid"
+	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/johannesboyne/gofakes3"
+	"github.com/johannesboyne/gofakes3/backend/s3mem"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/contentkit/media"
 	mediaS3 "github.com/open-rails/contentkit/media/s3"
@@ -121,9 +120,9 @@ func TestNMIBillingEndToEnd(t *testing.T) {
 }
 
 func newNMIHarness(t *testing.T) *nmiHarness {
-	dbURL, endpoint := os.Getenv("DEMO_TEST_DATABASE_URL"), os.Getenv("DEMO_TEST_S3_ENDPOINT")
-	if dbURL == "" || endpoint == "" {
-		t.Skip("DEMO_TEST_DATABASE_URL and DEMO_TEST_S3_ENDPOINT are required")
+	dbURL := os.Getenv("DEMO_TEST_DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("DEMO_TEST_DATABASE_URL is required")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	t.Cleanup(cancel)
@@ -142,17 +141,17 @@ func newNMIHarness(t *testing.T) *nmiHarness {
 	h.base = "http://" + listener.Addr().String()
 	key := make([]byte, 32)
 	_, _ = rand.Read(key)
-	h.bucket = "demo-nmi-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
-	access, secret := os.Getenv("DEMO_TEST_S3_ACCESS_KEY"), os.Getenv("DEMO_TEST_S3_SECRET_KEY")
+	h.bucket = "demo-nmi"
+	s3 := httptest.NewServer(gofakes3.New(s3mem.New()).Server())
+	t.Cleanup(s3.Close)
+	endpoint, access, secret := s3.URL, "nmi-test", "nmi-test-secret"
 	store, err := mediaS3.New(mediaS3.Config{Bucket: h.bucket, Endpoint: endpoint, AccessKeyID: access, SecretAccessKey: secret, UsePathStyle: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.s3 = store.Client()
-	if _, err = h.s3.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: &h.bucket}); err != nil {
+	if _, err = store.Client().CreateBucket(ctx, &awss3.CreateBucketInput{Bucket: &h.bucket}); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(h.removeBucket)
 
 	h.cfg = Config{MembershipHours: 720, DatabaseURL: pool.Config().ConnString(), PublicURL: h.base, ReturnOrigins: []string{h.base}, AuthIssuer: h.base, AuthAudience: "demo-nmi-test",
 		PSPs: map[string]openrailsembed.PSPConfig{"nmi": {"nmi": {AccountID: nmiTestAccount,

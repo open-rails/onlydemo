@@ -383,8 +383,9 @@ runs it locally.
 `TestNMIBillingEndToEnd` runs billing against OpenRails's `nmimock` NMI gateway
 on loopback, with one fake clock for OpenRails and the gateway: signup, a saved
 card buys a post and a membership, the membership renews, and a declined renewal
-enters dunning (`past_due`). `task dev:up && task test:nmi` runs it locally; CI
-runs it beside the media proof. CI runs on pull requests only, by changed paths: Go, module
+enters dunning (`past_due`). It needs only PostgreSQL (media's startup probe
+uses an in-process S3). `task dev:up && task test:nmi` runs it locally; CI runs
+it before the media proof. CI runs on pull requests only, by changed paths: Go, module
 or migration changes run vet, this proof and the smoke walkthrough; frontend
 changes lint and build the frontend; docs run nothing. Both workflows also
 run manually (`workflow_dispatch`). The libraries retain their full automated qualification. A real sandbox

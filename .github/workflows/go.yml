@@ -47,8 +47,6 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - name: MinIO
-        run: docker run -d --name minio -p 9000:9000 quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
       - name: Install libvips and ffmpeg
         run: |
           sudo rm -f /var/lib/man-db/auto-update
@@ -57,14 +55,17 @@ jobs:
         with:
           go-version: '1.26.6'
       - run: go vet ./...
+      # Needs only PostgreSQL: it runs before the S3-backed media proof.
+      - name: NMI billing end to end (nmimock)
+        run: go test -run TestNMIBillingEndToEnd -count=1 -v -p 2 .
+      - name: MinIO
+        run: docker run -d --name minio -p 9000:9000 quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
       - run: |
           go build -o /tmp/media-access github.com/open-rails/contentkit/cmd/media-access
           go build -o /tmp/media-worker github.com/open-rails/contentkit/cmd/media-worker
       - run: |
           timeout 60 sh -c 'until curl -fs http://127.0.0.1:9000/minio/health/live; do sleep 1; done'
           go test -run TestMediaEndToEnd -count=1 -v -p 2 .
-      - name: NMI billing end to end (nmimock)
-        run: go test -run TestNMIBillingEndToEnd -count=1 -v -p 2 .
       - name: Smoke
         env:
           SMOKE_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
