@@ -10,7 +10,7 @@ require (
 	github.com/knadh/koanf/v2 v2.3.6
 	github.com/open-rails/authkit v1.10.1
 	github.com/open-rails/migratekit v1.10.0
-	github.com/open-rails/openrails v0.233.2-0.20261009202802-68c8cbe13abd
+	github.com/open-rails/openrails v0.233.2
 	github.com/riverqueue/river v0.47.0
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.47.0 // indirect
 )

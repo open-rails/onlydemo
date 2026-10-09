@@ -1,5 +1,4 @@
 import type { PublicImage } from "@openrails/contentkit-upload";
-import type { PspConfig } from "@openrails/billing-ui";
 export type AccessPolicy = "public" | "membership" | "members_ppv" | "ppv";
 // An OpenRails offer: a product's current price for its entitlement.
 export interface Offer {
@@ -82,8 +81,6 @@ export interface AccountData {
   purchased_posts: Post[];
 }
 export interface AppConfig {
-  psps: PspConfig[];
-  billing_available: boolean;
   /** The buyer's country from a trusted edge header, else "". */
   country: string;
   /** The user avatar preset; a user's is this at their id. */

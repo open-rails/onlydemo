@@ -222,7 +222,7 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, c
 	app.Delete("/api/v1/channels/:id/members/:user_id", required, channels.members)
 	app.Get("/api/v1/me", required, posts.me)
 	app.Get("/api/v1/me/channels", required, channels.mine)
-	app.Get("/api/v1/config", publicConfiguration(billing, media, cfg.TrustedCountryHeader))
+	app.Get("/api/v1/config", publicConfiguration(media, cfg.TrustedCountryHeader))
 	app.Get("/api/v1/posts", optional, posts.list)
 	app.Post("/api/v1/posts", required, posts.create)
 	app.Get("/api/v1/posts/:code", optional, posts.get)

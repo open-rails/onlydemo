@@ -196,7 +196,6 @@ function Billing() {
     <AccountBillingScope>
       <AccountBilling
         plansHref={channelsPath}
-        psps={config.data?.psps}
         cardSetupReturnURL={(id) =>
           `${location.origin}/me?tab=billing&setup_id=${encodeURIComponent(id)}`
         }
