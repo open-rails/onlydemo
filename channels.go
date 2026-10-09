@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
-	authkitfiber "github.com/open-rails/authkit/adapters/fiber"
+	"github.com/open-rails/authkit/iam"
 	riverkit "github.com/open-rails/helpers/river"
 	"github.com/riverqueue/river"
 )
@@ -43,9 +43,11 @@ func (api *channelAPI) mount(app fiber.Router, required fiber.Handler) {
 	app.Delete("/api/v1/channels/:id", required, api.delete)
 }
 
+// create makes a channel: its row and its AuthKit group, owned by the viewer,
+// commit together or not at all.
 func (api *channelAPI) create(c fiber.Ctx) error {
-	user, ok := authkitfiber.UserClaims(c)
-	if !ok {
+	user := viewer(c)
+	if user == "" {
 		return clientError(c, http.StatusUnauthorized, "a user access token is required")
 	}
 	var input struct {
@@ -59,64 +61,35 @@ func (api *channelAPI) create(c fiber.Ctx) error {
 	if input.Slug == "" || input.Name == "" {
 		return clientError(c, http.StatusBadRequest, "slug and name are required")
 	}
-	if input.Slug == "new" {
-		return clientError(c, http.StatusBadRequest, "channel slug is reserved")
+	if input.Slug == "new" || !channelSlug.MatchString(input.Slug) {
+		return clientError(c, http.StatusBadRequest, "channel slug must be lowercase letters, digits, - and _ (and not reserved)")
 	}
-	ref := authkit.GroupRef{Persona: channelPersona, Instance: input.Slug}
-	group, err := api.auth.client.GroupInstanceForSlug(c.Context(), ref)
-	resuming := false
-	if errors.Is(err, authkit.ErrGroupNotFound) {
-		id, createErr := api.auth.client.CreatePermissionGroup(c.Context(), authkit.CreatePermissionGroupRequest{Persona: channelPersona, InstanceSlug: input.Slug, DisplayName: input.Name, OwnerSubjectID: user.UserID})
-		if createErr != nil {
-			return clientError(c, http.StatusConflict, "That channel slug is already taken. Choose another.")
-		}
-		group = authkit.GroupInstance{ID: id, Persona: channelPersona, InstanceSlug: input.Slug, DisplayName: input.Name}
-	} else if err != nil {
-		return clientError(c, http.StatusServiceUnavailable, "permission service is unavailable")
-	} else {
-		// Retry can finish a group created before an application DB failure,
-		// but never adopt another publisher's existing group.
-		allowed, err := api.auth.client.CanOnGroup(c.Context(), authkit.UserSubject(user.UserID), group.ID, "channel:settings:manage")
+	id, err := uuid.NewV7()
+	if err != nil {
+		return databaseError(c, err)
+	}
+	owner := iam.UserSubject(user)
+	err = pgx.BeginFunc(c.Context(), api.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(c.Context(), `INSERT INTO `+api.table+`(id,slug,name,created_by) VALUES($1,$2,$3,$4) ON CONFLICT (slug) DO NOTHING`, id, input.Slug, input.Name, user)
 		if err != nil {
-			return clientError(c, http.StatusServiceUnavailable, "permission service is unavailable")
+			return err
 		}
-		if !allowed {
-			return clientError(c, http.StatusConflict, "That channel slug is already taken. Choose another.")
+		if tag.RowsAffected() == 0 {
+			return errSlugTaken
 		}
-		resuming = true
+		_, err = api.auth.client.CreateGroup(c.Context(), iam.NewGroup{ID: id.String(), Persona: channelPersona.Persona, Owner: &owner}, authkit.InTx(tx))
+		return err
+	})
+	if errors.Is(err, errSlugTaken) {
+		return clientError(c, http.StatusConflict, "That channel slug is already taken. Choose another.")
 	}
-	release, err := api.lock(c.Context(), group.ID)
 	if err != nil {
-		return databaseError(c, err)
+		return clientError(c, http.StatusServiceUnavailable, "permission service is unavailable")
 	}
-	defer release()
-	// A concurrent accepted deletion may have removed the group while this
-	// request waited. Never recreate an application row for a deleted group.
-	group, err = api.auth.client.GroupInstanceByID(c.Context(), group.ID)
-	if err != nil {
-		return clientError(c, http.StatusConflict, "channel is no longer available")
-	}
-	// Only a half-created channel (group without row) may be resumed.
-	if resuming {
-		var exists bool
-		if err := api.pool.QueryRow(c.Context(), `SELECT EXISTS(SELECT 1 FROM `+api.table+` WHERE id=$1)`, group.ID).Scan(&exists); err != nil {
-			return databaseError(c, err)
-		}
-		if exists {
-			return clientError(c, http.StatusConflict, "That channel slug is already taken. Choose another.")
-		}
-	}
-	_, err = api.pool.Exec(c.Context(), `INSERT INTO `+api.table+`(id,created_by) VALUES($1,$2) ON CONFLICT(id) DO NOTHING`, group.ID, user.UserID)
-	if err != nil {
-		return databaseError(c, err)
-	}
-	if active, err := api.active(c.Context(), group.ID); err != nil {
-		return databaseError(c, err)
-	} else if !active {
-		return clientError(c, http.StatusConflict, "channel is deleted")
-	}
-	return c.Status(http.StatusCreated).JSON(channel{ID: group.ID, Slug: group.InstanceSlug, Name: group.DisplayName})
+	return c.Status(http.StatusCreated).JSON(channel{ID: id.String(), Slug: input.Slug, Name: input.Name})
 }
+
+var errSlugTaken = errors.New("channel slug taken")
 
 func (api *channelAPI) active(ctx context.Context, id string) (bool, error) {
 	var active bool
@@ -124,7 +97,7 @@ func (api *channelAPI) active(ctx context.Context, id string) (bool, error) {
 	return active, err
 }
 
-func (api *channelAPI) allowed(ctx context.Context, userID, channelID string, permission authkit.Perm) (bool, error) {
+func (api *channelAPI) allowed(ctx context.Context, userID, channelID string, permission iam.Perm) (bool, error) {
 	if userID == "" {
 		return false, nil
 	}
@@ -132,14 +105,14 @@ func (api *channelAPI) allowed(ctx context.Context, userID, channelID string, pe
 	if err != nil || !active {
 		return false, err
 	}
-	return api.auth.client.CanOnGroup(ctx, authkit.UserSubject(userID), channelID, permission)
+	return api.auth.can(ctx, userID, iam.GroupByID(channelID), permission)
 }
 
-// accountLive is CanOnGroup's account gate for callers that read grants in
-// bulk: deleted, banned and reserved accounts hold no authority.
-func (api *channelAPI) accountLive(ctx context.Context, user string) (bool, error) {
-	live, err := api.auth.client.UserLivenessByIDs(ctx, []string{user})
-	return live[user].Allowed, err
+// name is a channel's display name.
+func (api *channelAPI) name(ctx context.Context, id string) (string, error) {
+	var name string
+	err := api.pool.QueryRow(ctx, `SELECT name FROM `+api.table+` WHERE id=$1`, id).Scan(&name)
+	return name, err
 }
 
 // A separate session keeps the one-connection application pool available while
@@ -209,8 +182,8 @@ func (api *channelAPI) RiverJobs() riverkit.Contribution {
 }
 
 func (api *channelAPI) delete(c fiber.Ctx) error {
-	user, ok := authkitfiber.UserClaims(c)
-	if !ok {
+	user := viewer(c)
+	if user == "" {
 		return clientError(c, http.StatusUnauthorized, "a user access token is required")
 	}
 	id, err := channelID(c.Params("id"))
@@ -222,7 +195,7 @@ func (api *channelAPI) delete(c fiber.Ctx) error {
 		return databaseError(c, err)
 	}
 	defer release()
-	allowed, err := api.allowed(c.Context(), user.UserID, id, "channel:settings:manage")
+	allowed, err := api.allowed(c.Context(), user, id, channelSettingsManage)
 	if err != nil {
 		return clientError(c, http.StatusServiceUnavailable, "permission service is unavailable")
 	}
@@ -259,20 +232,14 @@ func (api *channelAPI) delete(c fiber.Ctx) error {
 	return c.Status(http.StatusAccepted).JSON(fiber.Map{"id": id, "status": "deleted"})
 }
 
+// retireGroup soft-deletes the channel's group: its roles grant nothing and
+// its last owner can delete their account. The row's deleted_at starts the
+// one retention clock.
 func (api *channelAPI) retireGroup(ctx context.Context, id string) error {
-	group, err := api.auth.client.SoftDeleteGroupInstanceByID(ctx, id)
-	if errors.Is(err, authkit.ErrGroupNotFound) {
+	err := api.auth.client.DeleteGroup(ctx, iam.GroupByID(id))
+	if errors.Is(err, iam.ErrGroupNotFound) {
 		return nil // A prior due purge may have removed the group before a retry.
 	}
-	if err != nil {
-		return err
-	}
-	if group.DeletedAt == nil {
-		return errors.New("identity group retirement returned no timestamp")
-	}
-	// AuthKit's timestamp is stable on retries and starts the one retention
-	// clock. No application transaction is held during the library operation.
-	_, err = api.pool.Exec(ctx, `UPDATE `+api.table+` SET deleted_at=$2 WHERE id=$1 AND deleted_at IS NOT NULL`, id, *group.DeletedAt)
 	return err
 }
 
@@ -296,8 +263,16 @@ func (api *channelAPI) finishDeletion(ctx context.Context, id string) error {
 	if err = api.retireGroup(ctx, id); err != nil {
 		return err
 	}
-	if err = api.billing.ArchiveChannelCatalog(ctx, id); err != nil {
-		return fmt.Errorf("archive channel catalog: %w", err)
+	rows, err := api.pool.Query(ctx, `SELECT id::text FROM `+api.posts+` WHERE channel_id=$1`, id)
+	if err != nil {
+		return err
+	}
+	posts, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return err
+	}
+	if err = api.billing.archiveChannel(ctx, id, posts); err != nil {
+		return fmt.Errorf("archive channel products: %w", err)
 	}
 	var seconds float64
 	if err = api.pool.QueryRow(ctx, `SELECT EXTRACT(EPOCH FROM deleted_at + INTERVAL '30 days' - clock_timestamp())::double precision FROM `+api.table+` WHERE id=$1`, id).Scan(&seconds); err != nil {
@@ -325,7 +300,7 @@ func (api *channelAPI) finishDeletion(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if err = api.auth.client.DeleteGroupInstanceByID(ctx, id, authkit.DeletePermissionGroupOptions{}); err != nil && !errors.Is(err, authkit.ErrGroupNotFound) {
+	if err = api.auth.client.PurgeGroup(ctx, iam.GroupByID(id)); err != nil && !errors.Is(err, iam.ErrGroupNotFound) {
 		return err
 	}
 	_, err = api.pool.Exec(ctx, `DELETE FROM `+api.table+` WHERE id=$1 AND deleted_at <= clock_timestamp()-INTERVAL '30 days'`, id)

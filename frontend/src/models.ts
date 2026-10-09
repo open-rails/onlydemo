@@ -1,17 +1,18 @@
 import type { SlotManifest } from "@openrails/contentkit-upload";
 import type { PspConfig } from "@openrails/billing-ui";
 export type AccessPolicy = "public" | "membership" | "members_ppv" | "ppv";
+// An OpenRails offer: a product's current price for its entitlement.
 export interface Offer {
   product_id: string;
   product_key: string;
-  product_name: string;
+  product_display_name: string;
   price_id: string;
   price_key: string;
   unit_amount: string;
   currency: string;
-  kind: string;
-  access_duration_hours?: number | null;
-  auto_renew: boolean;
+  kind: "permanent" | "finite" | "recurring";
+  access_duration_hours: number | null;
+  billing_interval_hours: number | null;
 }
 export interface Channel {
   id: string;
@@ -80,42 +81,6 @@ export interface AccountData {
   manageable_channels: Channel[];
   purchased_posts: Post[];
 }
-export interface Checkout {
-  id: string;
-  status: string;
-  url?: string | null;
-  mode: string;
-  amount?: string;
-  currency?: string;
-  metadata?: Record<string, string>;
-  membership_quote?: { product_name: string; cycle_hours: number };
-  operation?: { id: string; status: string };
-  failure?: { reason: string; message: string; field?: string };
-  subscription_id?: string;
-  payment_method_id?: string;
-  payment_id?: string;
-  payment?: { rail: string };
-  rail_data?: { rail?: string };
-}
-export interface PaymentMethod {
-  id: string;
-  rail: string;
-  psp_id: string;
-  card?: {
-    brand?: string;
-    last4?: string;
-    exp_month?: number;
-    exp_year?: number;
-  };
-  health?: { active: boolean };
-}
-export interface PaymentOptionsDocument {
-  plan: import("@openrails/billing-ui").CheckoutPlan;
-  /** OpenRails' advertised checkout options, passed through (openrails#1078). */
-  options: import("@openrails/billing-ui").CheckoutRailOffer[];
-  price_id: string;
-  product_id: string;
-}
 export interface AppConfig {
   psps: PspConfig[];
   billing_available: boolean;
@@ -128,5 +93,3 @@ export const visibilityLabels: Record<AccessPolicy, string> = {
   members_ppv: "Members only, for sale",
   ppv: "For sale",
 };
-export const terminalCheckout = (status?: string) =>
-  ["succeeded", "failed", "expired", "canceled"].includes(status || "");

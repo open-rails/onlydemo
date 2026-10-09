@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"net/url"
-	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -13,7 +12,7 @@ import (
 	"github.com/knadh/koanf/providers/env/v2"
 	"github.com/knadh/koanf/v2"
 	"github.com/open-rails/openrails"
-	openrailsembed "github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/billing"
 )
 
 type Config struct {
@@ -30,10 +29,8 @@ type Config struct {
 	AppSchema     string
 	BillingSchema string
 	RiverSchema   string
-	PSPs          map[string]openrailsembed.PSPConfig
-	// CheckoutPSP takes every new purchase and new card; the other PSPs stay
-	// declared for their existing cards and subscriptions.
-	CheckoutPSP string
+	// Merchant is the seller and its PSPs, from merchant.yaml (MERCHANT_FILE).
+	Merchant openrails.MerchantDeclaration
 	// TrustedCountryHeader names the edge header carrying the buyer's country
 	// (e.g. CF-IPCountry). Unset: the header is never trusted.
 	TrustedCountryHeader string
@@ -46,7 +43,7 @@ type Config struct {
 
 // postDeletionPolicy is what deleting a paid post does to its recent purchases.
 type postDeletionPolicy struct {
-	Action openrails.PurchaseAction
+	Action billing.PurchaseAction
 	Window time.Duration
 }
 
@@ -65,10 +62,10 @@ func loadConfig() (Config, error) {
 				return strings.ToLower(key), value
 			case "DATABASE_URL":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
-			case "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_KEYS_PATH", "AUTH_SCHEMA", "APP_SCHEMA", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA", "BILLING_PSPS":
+			case "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_KEYS_PATH", "AUTH_SCHEMA", "APP_SCHEMA", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
 			default:
-				if key == "CONTENT_SCHEMA" || key == "POST_DELETION_REFUND" || key == "POST_DELETION_REFUND_WINDOW" || key == "MEMBERSHIP_PERIOD" || key == "BILLING_CHECKOUT_PSP" || key == "TRUSTED_COUNTRY_HEADER" || key == "RETURN_ORIGINS" || strings.HasPrefix(key, "MEDIA_") {
+				if key == "CONTENT_SCHEMA" || key == "POST_DELETION_REFUND" || key == "POST_DELETION_REFUND_WINDOW" || key == "MEMBERSHIP_PERIOD" || key == "MERCHANT_FILE" || key == "TRUSTED_COUNTRY_HEADER" || key == "RETURN_ORIGINS" || strings.HasPrefix(key, "MEDIA_") {
 					return strings.ToLower(key), value
 				}
 				return "", nil
@@ -113,9 +110,16 @@ func loadConfig() (Config, error) {
 		return Config{}, err
 	}
 
-	psps, err := loadPSPs(k.String("billing.psps"), os.LookupEnv)
+	merchantFile := strings.TrimSpace(k.String("merchant_file"))
+	if merchantFile == "" {
+		merchantFile = "merchant.yaml"
+	}
+	merchant, err := openrails.ReadMerchantFile(merchantFile)
 	if err != nil {
-		return Config{}, err
+		return Config{}, fmt.Errorf("read %s (copy merchant.example.yaml): %w", merchantFile, err)
+	}
+	if len(merchant.PSPs) == 0 {
+		return Config{}, fmt.Errorf("%s must declare at least one PSP", merchantFile)
 	}
 
 	cfg := Config{
@@ -130,13 +134,10 @@ func loadConfig() (Config, error) {
 		AppSchema:     strings.TrimSpace(k.String("app.schema")),
 		BillingSchema: strings.TrimSpace(k.String("billing.schema")),
 		RiverSchema:   strings.TrimSpace(k.String("river.schema")),
-		PSPs:          psps,
+		Merchant:      merchant,
 		ContentSchema: strings.TrimSpace(k.String("content_schema")),
 
 		TrustedCountryHeader: strings.TrimSpace(k.String("trusted_country_header")),
-	}
-	if cfg.CheckoutPSP, err = checkoutPSP(k.String("billing_checkout_psp"), psps); err != nil {
-		return Config{}, err
 	}
 	if cfg.PostDeletion, err = parsePostDeletionPolicy(k.String("post_deletion_refund"), k.String("post_deletion_refund_window")); err != nil {
 		return Config{}, err
@@ -176,49 +177,12 @@ func parseReturnOrigins(publicURL, raw string) ([]string, error) {
 	return origins, nil
 }
 
-// loadPSPs declares each provider listed in BILLING_PSPS from its own
-// variables; OpenRails knows each rail's credentials and settings.
-func loadPSPs(raw string, lookup func(string) (string, bool)) (map[string]openrailsembed.PSPConfig, error) {
-	psps := map[string]openrailsembed.PSPConfig{}
-	for _, key := range strings.Split(raw, ",") {
-		if key = strings.ToLower(strings.TrimSpace(key)); key == "" {
-			continue
-		}
-		if _, dup := psps[key]; dup {
-			return nil, fmt.Errorf("BILLING_PSPS: duplicate provider %q", key)
-		}
-		psp, err := openrailsembed.PSPFromEnv(key, lookup)
-		if err != nil {
-			return nil, fmt.Errorf("BILLING_PSPS: %w", err)
-		}
-		psps[key] = psp
-	}
-	if len(psps) == 0 {
-		return nil, fmt.Errorf("BILLING_PSPS must list at least one provider")
-	}
-	return psps, nil
-}
-
-// checkoutPSP is the declared PSP new checkouts use; implied when only one is.
-func checkoutPSP(raw string, psps map[string]openrailsembed.PSPConfig) (string, error) {
-	key := strings.ToLower(strings.TrimSpace(raw))
-	if key == "" && len(psps) == 1 {
-		for only := range psps {
-			return only, nil
-		}
-	}
-	if _, ok := psps[key]; !ok {
-		return "", fmt.Errorf("BILLING_CHECKOUT_PSP must name one of BILLING_PSPS")
-	}
-	return key, nil
-}
-
 // parsePostDeletionPolicy defaults to refunding purchases from the last 30 days.
 func parsePostDeletionPolicy(action, window string) (postDeletionPolicy, error) {
-	policy := postDeletionPolicy{Action: openrails.PurchaseActionRefund, Window: 720 * time.Hour}
-	switch a := openrails.PurchaseAction(strings.ToLower(strings.TrimSpace(action))); a {
+	policy := postDeletionPolicy{Action: billing.PurchaseActionRefund, Window: 720 * time.Hour}
+	switch a := billing.PurchaseAction(strings.ToLower(strings.TrimSpace(action))); a {
 	case "":
-	case openrails.PurchaseActionRefund, openrails.PurchaseActionReview, openrails.PurchaseActionNone:
+	case billing.PurchaseActionRefund, billing.PurchaseActionReview, billing.PurchaseActionNone:
 		policy.Action = a
 	default:
 		return policy, fmt.Errorf("POST_DELETION_REFUND must be refund, review or none")

@@ -62,7 +62,7 @@ export function PostPage() {
       request<Channel>(`/api/v1/channels/${post.data!.channel_id}`),
     enabled: !!post.data,
   });
-  const offer = post.data?.offers?.find((value) => !value.auto_renew);
+  const offer = post.data?.offers?.find((value) => value.kind !== "recurring");
   const joinFree = useJoinFree(post.data?.channel_id || "");
   const canonical = post.data && postPath(post.data);
   useEffect(() => {

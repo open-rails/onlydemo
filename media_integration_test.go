@@ -46,13 +46,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/contentkit/media"
 	mediaS3 "github.com/open-rails/contentkit/media/s3"
 	"github.com/open-rails/contentkit/media/token"
 	"github.com/open-rails/contentkit/media/video"
 	"github.com/open-rails/contentkit/media/worker"
 	"github.com/open-rails/openrails"
-	openrailsembed "github.com/open-rails/openrails/embed"
 )
 
 const (
@@ -111,21 +111,14 @@ func TestMediaEndToEnd(t *testing.T) {
 		h.waitDerived(owner, id)
 	}
 
-	// Entitlements live only in OpenRails: a membership window, and real
-	// purchases through checkout and a signed provider webhook.
-	membershipKey := membershipResource(channelID)
-	if _, err := h.srv.billing.client.GrantEntitlement(ctx, member.id, openrails.GrantEntitlementRequest{Entitlement: membershipKey}); err != nil {
-		t.Fatal(err)
-	}
+	// Entitlements live only in OpenRails: a free membership, and real
+	// purchases through checkout and a signed provider webhook. The loyal
+	// buyer bought a members-only post while a member, then left.
+	member.call("POST", "/api/v1/channels/"+channelID+"/join", nil, "", 200)
 	h.purchase(buyer, posts["ppv"])
-	loyalMembership, err := h.srv.billing.client.GrantEntitlement(ctx, loyal.id, openrails.GrantEntitlementRequest{Entitlement: membershipKey})
-	if err != nil {
-		t.Fatal(err)
-	}
+	loyal.call("POST", "/api/v1/channels/"+channelID+"/join", nil, "", 200)
 	h.purchase(loyal, posts["members_ppv"])
-	if err := h.srv.billing.client.RevokeEntitlement(ctx, loyal.id, loyalMembership.ID); err != nil {
-		t.Fatal(err)
-	}
+	loyal.call("POST", "/api/v1/channels/"+channelID+"/leave", nil, "", 200)
 
 	full, teaser := "full", "teaser"
 	want := map[string]map[*peer]string{
@@ -759,8 +752,7 @@ func newMediaHarness(t *testing.T) *mediaHarness {
 	worker := startMediaAccess(t, endpoint, h.bucket, access, secret, tokenKey)
 
 	h.cfg = Config{MembershipHours: 720, DatabaseURL: pool.Config().ConnString(), PublicURL: h.base, ReturnOrigins: []string{h.base}, AuthIssuer: h.base, AuthAudience: "demo-media-test",
-		PSPs: map[string]openrailsembed.PSPConfig{"stripe": {"stripe": {AccountID: "acct_demo_test",
-			Secrets: map[string]string{"secret_key": "sk_test_fake_only", "webhook_signing_secret": testWebhookSecret}}}}, CheckoutPSP: "stripe", AuthKeysPath: "",
+		Merchant: testMerchant(openrails.StripePSP{AccountID: testStripeAccount, SecretKey: "sk_test_fake_only", WebhookSigningSecret: testWebhookSecret}.PSPConfig()), AuthKeysPath: "",
 		Media: mediaConfig{Tenant: "o", S3Endpoint: endpoint, S3PublicEndpoint: endpoint, S3Bucket: h.bucket, S3Region: "us-east-1",
 			S3AccessKeyID: access, S3SecretKey: secret, URL: worker, Delivery: media.DeliverCookie, CookieDomain: "localhost",
 			TokenKey: tokenKey, FilesPerHour: testFilesPerHour, BytesPerDay: 1 << 30, ChannelQuota: testQuota}}
@@ -771,19 +763,15 @@ func newMediaHarness(t *testing.T) *mediaHarness {
 		t.Skip("the media worker needs ffmpeg")
 	}
 	startMediaWorker(t, ctx, h.cfg, pool)
-	if h.srv, err = startServer(ctx, h.cfg, pool, billingOptions{Test: func(o *openrailsembed.Options) { o.StripeTransport = h.stripe }}); err != nil {
+	if h.srv, err = startServer(ctx, h.cfg, pool, billingOptions{Test: func(d *openrails.Deps) { d.StripeTransport = h.stripe }}); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(h.srv.Close)
-	h.srv.auth.client = countingAuth{Client: h.srv.auth.client, n: &h.calls.auth}
+	h.srv.auth.observe = func(ctx context.Context) { inRequest(ctx, &h.calls.auth) }
 	h.srv.billing.reads = countingReads{entitlementReads: h.srv.billing.reads, n: &h.calls.billing}
 	go func() { _ = h.srv.app.Listener(listener) }()
 	t.Cleanup(func() { _ = h.srv.app.Shutdown() })
-	for _, route := range h.srv.app.GetRoutes(true) {
-		if route.Method == "POST" && strings.Contains(route.Path, "webhooks/") {
-			h.hook = strings.NewReplacer(":merchant", billingMerchantSlug, ":provider", "stripe", ":account_id", "acct_demo_test").Replace(route.Path)
-		}
-	}
+	h.hook = "/billing/v1/webhooks/stripe/" + testStripeAccount
 	return h
 }
 
@@ -964,12 +952,16 @@ type peer struct {
 
 func (h *mediaHarness) register(name, ip string) peer {
 	p := peer{h: h, name: name, client: h.client(ip)}
-	p.call("POST", "/auth/v1/register", map[string]any{"identifier": name + "@example.test", "username": name, "password": testPassword}, "", 202)
+	res, raw := p.do("POST", "/auth/v1/register", map[string]any{"identifier": name + "@example.test", "username": name, "password": testPassword}, "")
+	if res.StatusCode/100 != 2 {
+		h.t.Fatalf("register %s: %d %s", name, res.StatusCode, raw)
+	}
 	login := p.call("POST", "/auth/v1/password/login", map[string]any{"identifier": name + "@example.test", "password": testPassword}, "", 200)
-	p.token, _ = login["access_token"].(string)
-	user, err := h.srv.auth.client.GetUserByUsername(h.ctx, name)
+	tokens, _ := login["token_set"].(map[string]any)
+	p.token, _ = tokens["access_token"].(string)
+	user, err := h.srv.auth.client.User(h.ctx, iam.UserByUsername(name))
 	if err != nil || p.token == "" {
-		h.t.Fatalf("register %s: %v", name, err)
+		h.t.Fatalf("register %s: %v %v", name, err, login)
 	}
 	p.id = user.ID
 	return p
@@ -1313,8 +1305,9 @@ func (h *mediaHarness) waitPublic(t *testing.T, u string) {
 	})
 }
 
-// purchase buys a post through the app's checkout and settles it with a
-// signed provider webhook.
+// purchase buys a post through the app's checkout: the app mints the
+// session, the buyer pays it on the customer surface (a hosted Stripe page
+// without Elements) and a signed provider webhook settles it.
 func (h *mediaHarness) purchase(p peer, id string) {
 	path := fmt.Sprintf("/api/v1/posts/%s", id)
 	var post map[string]any
@@ -1323,11 +1316,30 @@ func (h *mediaHarness) purchase(p peer, id string) {
 		return post["offer_status"] == "active" && len(post["offers"].([]any)) > 0
 	})
 	price := post["offers"].([]any)[0].(map[string]any)["price_id"]
-	p.call("POST", path+"/checkout", map[string]any{"price_id": price, "payment": map[string]string{"rail": "stripe"}}, "buy-"+p.name, 201)
+	session := p.call("POST", path+"/checkout", map[string]any{"price_id": price}, "", 201)
+	h.pay(p, session["id"].(string))
 	if err := h.stripe.settleLatest(h.ctx, h.base+h.hook); err != nil {
 		h.t.Fatal(err)
 	}
 	eventually(h.t, p.name+" purchase", func() bool { return p.call("GET", path, nil, "", 200)["purchased"] == true })
+}
+
+// pay pays a minted session with its first payment option, as billing-ui does.
+func (h *mediaHarness) pay(p peer, session string) map[string]any {
+	path := "/billing/v1/me/checkout-sessions/" + session
+	options, _ := p.call("GET", path, nil, "", 200)["options"].([]any)
+	if len(options) == 0 {
+		h.t.Fatalf("session %s offers no payment option", session)
+	}
+	option := options[0].(map[string]any)["id"]
+	return p.call("POST", path+"/pay", map[string]any{"option_id": option}, "", 200)
+}
+
+const testStripeAccount = "acct_demo_test"
+
+// testMerchant is the demo merchant selling through psp, keyed by its rail.
+func testMerchant(psp openrails.PSPConfig) openrails.MerchantDeclaration {
+	return openrails.MerchantDeclaration{Slug: "onlydemo", DisplayName: "OnlyDemo", PSPs: map[string]openrails.PSPConfig{string(psp.Rail): psp}}
 }
 
 func eventually(t *testing.T, what string, ok func() bool) {
@@ -1382,7 +1394,7 @@ func (s *fakeStripe) RoundTrip(req *http.Request) (*http.Response, error) {
 		data = map[string]any{"object": "balance", "available": []any{}, "pending": []any{}, "livemode": false}
 	case "GET /v1/customers/search":
 		data = map[string]any{"object": "search_result", "data": []any{}, "has_more": false}
-	case "GET /v1/subscriptions", "GET /v1/webhook_endpoints":
+	case "GET /v1/subscriptions", "GET /v1/webhook_endpoints", "GET /v1/charges", "GET /v1/refunds", "GET /v1/invoices", "GET /v1/payment_intents", "GET /v1/events":
 		data = map[string]any{"object": "list", "data": []any{}, "has_more": false}
 	case "POST /v1/customers":
 		s.customers++
@@ -1392,6 +1404,11 @@ func (s *fakeStripe) RoundTrip(req *http.Request) (*http.Response, error) {
 		data = map[string]any{"id": fmt.Sprintf("cs_media%d", len(s.sessions)), "object": "checkout.session", "status": "open", "payment_status": "unpaid",
 			"url": fmt.Sprintf("https://checkout.stripe.com/c/pay/cs_media%d", len(s.sessions))}
 	default:
+		// A provider read of a list (refresh windows) finds nothing.
+		if req.Method == "GET" && strings.Count(req.URL.Path, "/") == 2 {
+			data = map[string]any{"object": "list", "data": []any{}, "has_more": false}
+			break
+		}
 		return nil, fmt.Errorf("unexpected fake provider request %s %s", req.Method, req.URL.Path)
 	}
 	encoded, err := json.Marshal(data)

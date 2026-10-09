@@ -176,7 +176,7 @@ export function PostForm({
   const saved = useQuery({ queryKey: ["post-files", post?.id], queryFn: () => postFiles(post!.id), enabled: !!post });
   const hasMedia = draftMedia > 0 || !!saved.data?.files.some((f) => f.name !== "teaser");
   const needsText = !hasMedia && !hasText;
-  const offer = post?.offers?.find((value) => !value.auto_renew);
+  const offer = post?.offers?.find((value) => value.kind !== "recurring");
   const save = useMutation({
     mutationFn: (body: object) =>
       request<Post>(post ? `/api/v1/posts/${post.id}` : "/api/v1/posts", {

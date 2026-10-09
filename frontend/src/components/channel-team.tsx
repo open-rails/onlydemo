@@ -37,11 +37,13 @@ import { Spinner } from "@/components/ui/spinner";
 import { EmptyState, ErrorState, FormError, Loading } from "./states";
 import { date } from "../format";
 
+// AuthKit's group member: role text is qualified (channel:owner).
 interface Member {
-  subject_id: string;
-  subject_kind: string;
+  subject: { id: string; kind: string };
   role: string;
+  user?: { username: string } | null;
 }
+const roleName = (role: string) => role.replace(/^channel:/, "");
 interface Invite {
   id: string;
   role: string;
@@ -50,7 +52,8 @@ interface Invite {
   revoked_at?: string;
 }
 export function ChannelTeam({ channel }: { channel: Channel }) {
-  const root = `/auth/v1/channel/${encodeURIComponent(channel.slug)}`;
+  // The channel's AuthKit group has the channel's id.
+  const root = `/auth/v1/groups/${encodeURIComponent(channel.id)}`;
   const client = useQueryClient();
   const [error, setError] = useState("");
   const [remove, setRemove] = useState<Member | null>(null);
@@ -58,11 +61,11 @@ export function ChannelTeam({ channel }: { channel: Channel }) {
   const [copied, setCopied] = useState(false);
   const members = useQuery({
     queryKey: ["team", channel.id],
-    queryFn: () => request<Page<Member>>(`${root}/members`),
+    queryFn: () => request<Page<Member>>(`${root}/members?expand=user`),
   });
   const invites = useQuery({
     queryKey: ["invites", channel.id],
-    queryFn: () => request<Page<Invite>>(`${root}/invites/links`),
+    queryFn: () => request<Page<Invite>>(`${root}/invitations`),
     enabled: channel.can_manage,
   });
   const mutate = useMutation({
@@ -87,9 +90,12 @@ export function ChannelTeam({ channel }: { channel: Channel }) {
   });
   const invite = useMutation({
     mutationFn: () =>
-      request<{ code: string }>(`${root}/invites/links`, {
+      request<{ code: string }>(`${root}/invitations`, {
         method: "POST",
-        body: JSON.stringify({ role: "editor", expires_in_seconds: 604800 }),
+        body: JSON.stringify({
+          role: "channel:editor",
+          expires_at: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
+        }),
       }),
     onSuccess: (data) => {
       setInvitation(
@@ -138,33 +144,34 @@ export function ChannelTeam({ channel }: { channel: Channel }) {
             {members.data?.data.map((member) => (
               <div
                 className="data-row"
-                key={`${member.subject_id}:${member.role}`}
+                key={`${member.subject.id}:${member.role}`}
               >
                 <span className="avatar">
                   <HugeiconsIcon icon={UserIcon} size={16} />
                 </span>
                 <div className="data-row-main">
-                  <h3 className="truncate">{member.subject_id}</h3>
+                  <h3 className="truncate">{member.user?.username ?? member.subject.id}</h3>
                   <p>
-                    {member.subject_kind === "user"
+                    {member.subject.kind === "user"
                       ? "Editorial member"
                       : "Application"}
                   </p>
                 </div>
-                <Badge>{member.role}</Badge>
-                {channel.can_manage && member.subject_kind === "user" && (
+                <Badge>{roleName(member.role)}</Badge>
+                {channel.can_manage && member.subject.kind === "user" && (
                   <div className="data-row-actions">
                     <Button
                       variant="outline"
-                      disabled={member.role === "owner" || mutate.isPending}
+                      disabled={roleName(member.role) === "owner" || mutate.isPending}
                       onClick={() =>
                         mutate.mutate({
-                          path: `${root}/members/${encodeURIComponent(member.subject_id)}/roles/owner`,
+                          path: `${root}/members/user/${encodeURIComponent(member.subject.id)}`,
                           method: "PUT",
+                          body: { role: "channel:owner" },
                         })
                       }
                     >
-                      {member.role === "owner" ? "Owner" : "Add owner role"}
+                      {roleName(member.role) === "owner" ? "Owner" : "Add owner role"}
                     </Button>
                     <Button variant="ghost" onClick={() => setRemove(member)}>
                       Remove
@@ -294,7 +301,7 @@ export function ChannelTeam({ channel }: { channel: Channel }) {
                       disabled={mutate.isPending}
                       onClick={() =>
                         mutate.mutate({
-                          path: `${root}/invites/links/${link.id}`,
+                          path: `${root}/invitations/${link.id}`,
                           method: "DELETE",
                         })
                       }
@@ -334,7 +341,7 @@ export function ChannelTeam({ channel }: { channel: Channel }) {
             onClick={() => {
               if (remove)
                 mutate.mutate({
-                  path: `/api/v1/channels/${channel.id}/members/${remove.subject_id}`,
+                  path: `/api/v1/channels/${channel.id}/members/${remove.subject.id}`,
                   method: "DELETE",
                 });
             }}
@@ -353,7 +360,7 @@ export function InvitePage() {
   const [accepted, setAccepted] = useState(false);
   const redeem = useMutation({
     mutationFn: () =>
-      request("/auth/v1/invites/redeem", {
+      request("/auth/v1/invitations/redeem", {
         method: "POST",
         body: JSON.stringify({ code }),
       }),

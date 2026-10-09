@@ -19,7 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
-	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/authkit/verify"
 	"github.com/open-rails/contentkit/access"
 	"github.com/open-rails/contentkit/contentref"
@@ -30,6 +30,7 @@ import (
 	"github.com/open-rails/contentkit/media/video"
 	"github.com/open-rails/contentkit/media/workqueue"
 	"github.com/open-rails/contentkit/migrations"
+	helpersauth "github.com/open-rails/helpers/auth"
 )
 
 // Media kinds. Post folders hold ordered images and videos plus an optional
@@ -334,19 +335,16 @@ func (m *mediaService) grants(ctx context.Context, user, channel string) (grants
 	if user == "" {
 		return nil, nil
 	}
-	perms, err := m.auth.client.EffectivePermissionsForGroups(ctx, authkit.UserSubject(user), []string{channel})
-	if err != nil || len(perms[channel]) == 0 {
-		return nil, err
-	}
-	if live, err := m.channels.accountLive(ctx, user); err != nil || !live {
+	perms, err := m.auth.effective(ctx, user, []string{channel})
+	if err != nil {
 		return nil, err
 	}
 	return perms[channel], nil
 }
 
-type grants []authkit.Perm
+type grants []iam.Perm
 
-func (g grants) can(perm authkit.Perm) bool { return slices.ContainsFunc(g, perm.Matches) }
+func (g grants) can(perm iam.Perm) bool { return slices.ContainsFunc(g, perm.Matches) }
 
 // postAccess loads a live post (found false otherwise) and the actor's upload
 // grant and grants on its channel.
@@ -442,13 +440,9 @@ func (m *mediaService) CanUpload(ctx context.Context, actor access.Actor, ref co
 		}
 		g, err := m.grants(ctx, user, ref.ContentID)
 		admin := g.can(postEditPermission)
-		return media.UploadGrant{Owner: channelOwner(ref.ContentID), Exempt: admin, Allowed: admin || g.can("channel:settings:manage")}, err
+		return media.UploadGrant{Owner: channelOwner(ref.ContentID), Exempt: admin, Allowed: admin || g.can(channelSettingsManage)}, err
 	case media.UserKind:
-		root, err := m.auth.client.ListEffectivePermissions(ctx, authkit.UserSubject(user), authkit.RootGroup())
-		admin := err == nil && grants(root).can(postEditPermission)
-		if admin {
-			admin, err = m.channels.accountLive(ctx, user)
-		}
+		admin, err := m.auth.can(ctx, user, iam.RootGroup(), postEditPermission)
 		return media.UploadGrant{Exempt: admin, Allowed: user == ref.ContentID}, err
 	}
 	return media.UploadGrant{}, nil
@@ -534,8 +528,8 @@ func withMediaActor(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		a := access.Actor{Anonymous: true}
 		if fc, ok := adaptor.LocalContextFromHTTPRequest(r); ok {
-			if cl, ok := verify.UserClaimsFromContext(fc); ok {
-				a = actorFor(cl.UserID)
+			if id, ok := verify.IdentityFromContext(fc); ok && id.SubjectKind == helpersauth.SubjectUser {
+				a = actorFor(id.Subject)
 			}
 		}
 		if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {

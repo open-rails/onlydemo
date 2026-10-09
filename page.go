@@ -5,89 +5,64 @@ import (
 	"slices"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/contentkit/media"
 )
+
+// channelInfo is a live channel's address and name.
+type channelInfo struct {
+	Slug, Name string
+}
 
 // page is what a listing shows its viewer about its channels, read in a fixed
 // number of queries and calls however many items it holds.
 type page struct {
-	groups map[string]authkit.GroupInstance
-	states map[string]membershipState // live channels only
+	channels map[string]channelInfo
+	states   map[string]membershipState // live channels only
 	// perms are the viewer's grants on each channel, root grants included.
-	perms  map[string][]authkit.Perm
+	perms  map[string][]iam.Perm
 	slots  map[slotKey]*media.SlotManifest
 	access map[string]bool
 }
 
-func (pg *page) can(channel string, perm authkit.Perm) bool {
+func (pg *page) can(channel string, perm iam.Perm) bool {
 	return slices.ContainsFunc(pg.perms[channel], perm.Matches)
 }
 
-// live reports a channel whose row and AuthKit group both still exist.
+// live reports a channel whose row is not deleted.
 func (pg *page) live(channel string) bool {
 	_, ok := pg.states[channel]
-	g, found := pg.groups[channel]
-	return ok && found && g.DeletedAt == nil
+	return ok
 }
 
-// loadPage reads channels (known: groups the caller already has), the
-// viewer's grants on them, the named channel slots and the viewer's
-// entitlements among keys.
-func (api *channelAPI) loadPage(ctx context.Context, user string, ids []string, known map[string]authkit.GroupInstance, keys []string, slots ...string) (*page, error) {
-	pg := &page{groups: map[string]authkit.GroupInstance{}, states: map[string]membershipState{}, perms: map[string][]authkit.Perm{}}
+// loadPage reads channels, the viewer's grants on them, the named channel
+// slots and the viewer's entitlements among keys.
+func (api *channelAPI) loadPage(ctx context.Context, user string, ids []string, keys []string, slots ...string) (*page, error) {
+	pg := &page{channels: map[string]channelInfo{}, states: map[string]membershipState{}, perms: map[string][]iam.Perm{}}
 	ids = unique(ids)
 	var err error
 	if pg.access, err = api.billing.access(ctx, user, keys); err != nil || len(ids) == 0 {
 		pg.slots = map[slotKey]*media.SlotManifest{}
 		return pg, err
 	}
-	rows, err := api.pool.Query(ctx, `SELECT id::text,membership,membership_free,membership_sync,membership_revision FROM `+api.table+` WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL`, ids)
+	rows, err := api.pool.Query(ctx, `SELECT id::text,slug,name,membership,membership_free,membership_sync,membership_revision FROM `+api.table+` WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL`, ids)
 	if err != nil {
 		return nil, err
 	}
 	var id string
+	var info channelInfo
 	var s membershipState
-	if _, err = pgx.ForEachRow(rows, []any{&id, &s.Status, &s.Free, &s.Sync, &s.Revision}, func() error { pg.states[id] = s; return nil }); err != nil {
+	if _, err = pgx.ForEachRow(rows, []any{&id, &info.Slug, &info.Name, &s.Status, &s.Free, &s.Sync, &s.Revision}, func() error {
+		pg.states[id], pg.channels[id] = s, info
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 	if pg.slots, err = api.media.slots(ctx, kindChannel, ids, slots...); err != nil {
 		return nil, err
 	}
-	missing := []string{}
-	for _, id := range ids {
-		if g, ok := known[id]; ok {
-			pg.groups[id] = g
-		} else {
-			missing = append(missing, id)
-		}
-	}
-	for chunk := range slices.Chunk(missing, authkit.MaxGroupBatch) {
-		groups, err := api.auth.client.GroupInstancesByIDs(ctx, chunk)
-		if err != nil {
-			return nil, err
-		}
-		for id, g := range groups {
-			pg.groups[id] = g
-		}
-	}
-	if user == "" {
-		return pg, nil
-	}
-	for chunk := range slices.Chunk(ids, authkit.MaxGroupBatch) {
-		perms, err := api.auth.client.EffectivePermissionsForGroups(ctx, authkit.UserSubject(user), chunk)
-		if err != nil {
-			return nil, err
-		}
-		for id, p := range perms {
-			pg.perms[id] = p
-		}
-	}
-	if len(pg.perms) > 0 {
-		if live, err := api.accountLive(ctx, user); err != nil || !live {
-			pg.perms = map[string][]authkit.Perm{}
-			return pg, err
-		}
+	if pg.perms, err = api.auth.effective(ctx, user, ids); err != nil {
+		return nil, err
 	}
 	return pg, nil
 }

@@ -18,12 +18,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/open-rails/authkit"
-	authkitfiber "github.com/open-rails/authkit/adapters/fiber"
+	"github.com/open-rails/authkit/iam"
+	"github.com/open-rails/authkit/verify"
 	"github.com/open-rails/contentkit/contentref"
 	"github.com/open-rails/contentkit/media"
 	"github.com/open-rails/contentkit/media/tiered"
-	"github.com/open-rails/openrails"
+	helpersauth "github.com/open-rails/helpers/auth"
+	"github.com/open-rails/openrails/billing"
 	"github.com/riverqueue/river"
 )
 
@@ -57,16 +58,16 @@ type post struct {
 	// processing: its editors alone see it) or "published".
 	State string `json:"state"`
 	// MediaReadiness is a publishing post's media processing, for its editors.
-	MediaReadiness     *media.Readiness         `json:"media_readiness,omitempty"`
-	CanRead            bool                     `json:"can_read"`
-	CanEdit            bool                     `json:"can_edit"`
-	Purchased          bool                     `json:"purchased"`
-	SubscriptionActive bool                     `json:"has_membership"`
-	ChannelAvatar      *media.SlotManifest      `json:"channel_avatar,omitempty"`
-	Poster             *media.SlotManifest      `json:"poster,omitempty"`
-	CreatedAt          time.Time                `json:"created_at"`
-	UpdatedAt          time.Time                `json:"updated_at"`
-	Offers             []openrails.CatalogOffer `json:"offers"`
+	MediaReadiness     *media.Readiness    `json:"media_readiness,omitempty"`
+	CanRead            bool                `json:"can_read"`
+	CanEdit            bool                `json:"can_edit"`
+	Purchased          bool                `json:"purchased"`
+	SubscriptionActive bool                `json:"has_membership"`
+	ChannelAvatar      *media.SlotManifest `json:"channel_avatar,omitempty"`
+	Poster             *media.SlotManifest `json:"poster,omitempty"`
+	CreatedAt          time.Time           `json:"created_at"`
+	UpdatedAt          time.Time           `json:"updated_at"`
+	Offers             []billing.Offer     `json:"offers"`
 }
 type postInput struct {
 	ChannelID    *string     `json:"channel_id"`
@@ -130,9 +131,11 @@ func fillSlug(p *post) {
 	}
 	p.Slug = s
 }
+
+// viewer is the signed-in user AuthKit's gate verified, or "".
 func viewer(c fiber.Ctx) string {
-	if cl, ok := authkitfiber.UserClaims(c); ok {
-		return cl.UserID
+	if id, ok := verify.IdentityFromContext(c.Context()); ok && id.SubjectKind == helpersauth.SubjectUser {
+		return id.Subject
 	}
 	return ""
 }
@@ -148,7 +151,7 @@ func (api *postAPI) decorate(c fiber.Ctx, posts []post, withOffers bool) error {
 			keys = append(keys, postResource(p.ID), membershipResource(p.ChannelID))
 		}
 	}
-	pg, err := api.channels.loadPage(ctx, user, channels, nil, keys, slotAvatar)
+	pg, err := api.channels.loadPage(ctx, user, channels, keys, slotAvatar)
 	if err != nil {
 		return err
 	}
@@ -174,8 +177,8 @@ func (api *postAPI) decorate(c fiber.Ctx, posts []post, withOffers bool) error {
 	selling := []string{}
 	for i := range posts {
 		p := &posts[i]
-		g := pg.groups[p.ChannelID]
-		p.ChannelSlug, p.ChannelName = g.InstanceSlug, g.DisplayName
+		g := pg.channels[p.ChannelID]
+		p.ChannelSlug, p.ChannelName = g.Slug, g.Name
 		p.Purchased = pg.access[postResource(p.ID)]
 		p.SubscriptionActive = pg.access[membershipResource(p.ChannelID)]
 		// Channel grants include the viewer's site-wide (root) grants.
@@ -189,13 +192,13 @@ func (api *postAPI) decorate(c fiber.Ctx, posts []post, withOffers bool) error {
 			selling = append(selling, postResource(p.ID))
 		}
 	}
-	offers, err := api.billing.offers(ctx, openrails.OfferPermanent, selling, 100)
+	offers, err := api.billing.offers(ctx, billing.OfferPermanent, selling, 100)
 	if err != nil {
 		return err
 	}
 	for i := range posts {
 		if posts[i].Offers = offers[postResource(posts[i].ID)]; posts[i].Offers == nil {
-			posts[i].Offers = []openrails.CatalogOffer{}
+			posts[i].Offers = []billing.Offer{}
 		}
 	}
 	return nil
@@ -274,11 +277,11 @@ func (api *postAPI) get(c fiber.Ctx) error {
 // getBySlug serves /c/<channel>/<post>: post slugs are unique within a channel.
 func (api *postAPI) getBySlug(c fiber.Ctx) error {
 	channel, err := api.channels.resolve(c.Context(), c.Params("channel"))
-	if errors.Is(err, authkit.ErrGroupNotFound) {
+	if errors.Is(err, errNoChannel) {
 		return clientError(c, 404, "post not found")
 	}
 	if err != nil {
-		return billingUnavailable(c)
+		return databaseError(c, err)
 	}
 	return api.show(c, api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE channel_id=$1 AND slug=$2 AND deleted_at IS NULL`+shown+` AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL)`, channel, strings.ToLower(c.Params("slug"))))
 }
@@ -685,12 +688,12 @@ func (api *postAPI) editsChannel(ctx context.Context, user, channel string) (boo
 	if user == "" {
 		return false, nil
 	}
-	for _, perm := range []authkit.Perm{channelEditPermission, channelCreatePermission} {
+	for _, perm := range []iam.Perm{channelEditPermission, channelCreatePermission} {
 		if ok, err := api.channels.allowed(ctx, user, channel, perm); err != nil || ok {
 			return ok, err
 		}
 	}
-	return api.auth.client.Can(ctx, authkit.UserSubject(user), authkit.RootGroup(), authkit.Perm(postEditPermission))
+	return api.auth.can(ctx, user, iam.RootGroup(), postEditPermission)
 }
 
 // visible is a live post (or draft) on a live channel.
@@ -733,7 +736,7 @@ func (api *postAPI) settled(c fiber.Ctx, status int, id string, job *postOfferAr
 	if err != nil {
 		return databaseError(c, err)
 	}
-	p.CanRead, p.CanEdit, p.Offers = true, true, []openrails.CatalogOffer{}
+	p.CanRead, p.CanEdit, p.Offers = true, true, []billing.Offer{}
 	if p.State == statePublishing {
 		if p.MediaReadiness, err = api.media.readiness(c.Context(), p.ID); err != nil {
 			return clientError(c, 500, "media store error")
@@ -742,11 +745,9 @@ func (api *postAPI) settled(c fiber.Ctx, status int, id string, job *postOfferAr
 	if avatars, e := api.media.slots(c.Context(), kindChannel, []string{p.ChannelID}, slotAvatar); e == nil {
 		p.ChannelAvatar = avatars[slotKey{p.ChannelID, slotAvatar}]
 	}
-	if g, e := api.auth.client.GroupInstanceByID(c.Context(), p.ChannelID); e == nil {
-		p.ChannelSlug, p.ChannelName = g.InstanceSlug, g.DisplayName
-	}
+	_ = api.pool.QueryRow(c.Context(), `SELECT slug,name FROM `+api.channels.table+` WHERE id=$1`, p.ChannelID).Scan(&p.ChannelSlug, &p.ChannelName)
 	if paidPolicy(p.AccessPolicy) && p.OfferStatus == "active" {
-		if offers, e := api.billing.offers(c.Context(), openrails.OfferPermanent, []string{postResource(p.ID)}, 100); e == nil && offers[postResource(p.ID)] != nil {
+		if offers, e := api.billing.offers(c.Context(), billing.OfferPermanent, []string{postResource(p.ID)}, 100); e == nil && offers[postResource(p.ID)] != nil {
 			p.Offers = offers[postResource(p.ID)]
 		}
 	}
@@ -768,11 +769,8 @@ func writeError(c fiber.Ctx, err error) error {
 	}
 	return databaseError(c, err)
 }
-func (api *postAPI) canModerate(c fiber.Ctx, user, permission string) (bool, error) {
-	if user == "" {
-		return false, nil
-	}
-	return api.auth.client.Can(c.Context(), authkit.UserSubject(user), authkit.RootGroup(), authkit.Perm(permission))
+func (api *postAPI) canModerate(c fiber.Ctx, user string, permission iam.Perm) (bool, error) {
+	return api.auth.can(c.Context(), user, iam.RootGroup(), permission)
 }
 func clientError(c fiber.Ctx, status int, message string) error {
 	return c.Status(status).JSON(fiber.Map{"error": message})

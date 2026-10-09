@@ -24,9 +24,8 @@ import (
 	"github.com/open-rails/contentkit/media"
 	mediaS3 "github.com/open-rails/contentkit/media/s3"
 	"github.com/open-rails/openrails"
-	openrailsconfig "github.com/open-rails/openrails/config"
-	openrailsembed "github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/nmimock"
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/openrailstest/nmimock"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 )
@@ -39,8 +38,9 @@ type nmiHarness struct {
 	clock *clockwork.FakeClock
 }
 
-// TestNMIBillingEndToEnd: signup, a saved card buys a post and a membership,
-// the membership renews, and a declined renewal enters dunning.
+// TestNMIBillingEndToEnd: signup, a saved card buys a post and a membership
+// through app-minted checkout sessions, the membership renews, and a declined
+// renewal enters dunning.
 func TestNMIBillingEndToEnd(t *testing.T) {
 	h := newNMIHarness(t)
 	ctx := h.ctx
@@ -56,14 +56,13 @@ func TestNMIBillingEndToEnd(t *testing.T) {
 	included := owner.call("POST", "/api/v1/posts", map[string]any{"channel_id": channelID, "slug": "nmi-members", "title": "Members", "body": "Members read this", "access_policy": "membership"}, "", 201)
 	postPath, includedPath := "/api/v1/posts/"+post["id"].(string), "/api/v1/posts/"+included["id"].(string)
 
-	rails, err := h.srv.billing.client.ListCheckoutRailOptions(ctx, membershipPrice)
-	if err != nil || len(rails) == 0 {
-		t.Fatalf("membership rails: %v %v", rails, err)
+	psps, err := h.srv.billing.client.ListPSPs(ctx, billing.PSPListParams{})
+	if err != nil || len(psps.Items) != 1 {
+		t.Fatalf("PSPs: %v %v", psps, err)
 	}
-	saved := buyer.call("POST", "/billing/v1/me/payment-methods", map[string]any{"provider": "nmi", "psp_id": rails[0].PSPID,
-		"payment_token": h.nmi.Tokenize(visa), "name_on_card": "NMI Buyer"}, "save-card", 200)
-	method := unwrapData(saved)["id"].(string)
-	payWith := map[string]any{"rail": "nmi", "psp_id": rails[0].PSPID, "payment_method_id": method}
+	saved := buyer.call("POST", "/billing/v1/me/payment-methods", map[string]any{"psp_id": psps.Items[0].ID,
+		"payment_token": h.nmi.Tokenize(visa), "billing_details": map[string]any{"name": "NMI Buyer"}}, "save-card", 201)
+	method := saved["id"].(string)
 
 	// A permanent post purchase: one sale at NMI, then access.
 	var offered map[string]any
@@ -72,13 +71,13 @@ func TestNMIBillingEndToEnd(t *testing.T) {
 		return offered["offer_status"] == "active" && len(offered["offers"].([]any)) > 0
 	})
 	postPrice := offered["offers"].([]any)[0].(map[string]any)["price_id"]
-	session := buyer.call("POST", postPath+"/checkout", map[string]any{"price_id": postPrice, "payment": payWith}, "buy-post", 201)
-	h.confirm(buyer, session["id"].(string))
+	session := buyer.call("POST", postPath+"/checkout", map[string]any{"price_id": postPrice}, "", 201)
+	h.confirm(buyer, session["id"].(string), method)
 	eventually(t, "post purchase", func() bool { return buyer.call("GET", postPath, nil, "", 200)["purchased"] == true })
 
-	// A membership: quoted, confirmed, charged once.
-	quote := buyer.call("POST", "/api/v1/channels/"+channelID+"/subscribe", map[string]any{"price_id": membershipPrice, "payment": payWith}, "join", 201)
-	h.confirm(buyer, quote["id"].(string))
+	// A membership: minted, paid with the saved card, charged once.
+	quote := buyer.call("POST", "/api/v1/channels/"+channelID+"/subscribe", map[string]any{"price_id": membershipPrice}, "", 201)
+	h.confirm(buyer, quote["id"].(string), method)
 	h.settle()
 	if buyer.call("GET", includedPath, nil, "", 200)["can_read"] != true {
 		t.Fatal("membership did not grant access")
@@ -154,19 +153,18 @@ func newNMIHarness(t *testing.T) *nmiHarness {
 	}
 
 	h.cfg = Config{MembershipHours: 720, DatabaseURL: pool.Config().ConnString(), PublicURL: h.base, ReturnOrigins: []string{h.base}, AuthIssuer: h.base, AuthAudience: "demo-nmi-test",
-		PSPs: map[string]openrailsembed.PSPConfig{"nmi": {"nmi": {AccountID: nmiTestAccount,
-			Secrets:  map[string]string{"security_key": "nmimock-security-key", "webhook_signing_secret": "nmimock-webhook-secret"},
-			Settings: map[string]any{"tokenization_key": "nmimock-tokenization"}}}}, CheckoutPSP: "nmi",
+		Merchant: testMerchant(openrails.NMIPSP{AccountID: nmiTestAccount, SecurityKey: "nmimock-security-key",
+			WebhookSigningSecret: "nmimock-webhook-secret", TokenizationKey: "nmimock-tokenization"}.PSPConfig()),
 		Media: mediaConfig{Tenant: "o", S3Endpoint: endpoint, S3PublicEndpoint: endpoint, S3Bucket: h.bucket, S3Region: "us-east-1",
 			S3AccessKeyID: access, S3SecretKey: secret, URL: "http://127.0.0.1:9", Delivery: media.DeliverCookie, CookieDomain: "localhost",
 			TokenKey: "k1:" + base64.StdEncoding.EncodeToString(key), FilesPerHour: testFilesPerHour, BytesPerDay: 1 << 30, ChannelQuota: testQuota}}
 	if err = initializeDatabase(ctx, h.cfg, pool); err != nil {
 		t.Fatal(err)
 	}
-	h.srv, err = startServer(ctx, h.cfg, pool, billingOptions{Test: func(o *openrailsembed.Options) {
-		o.Clock = clock
-		o.Config.ProviderSandbox = &openrailsconfig.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()}
-	}})
+	h.srv, err = startServer(ctx, h.cfg, pool, billingOptions{
+		Test:    func(d *openrails.Deps) { d.Clock = clock },
+		Sandbox: &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,21 +174,31 @@ func newNMIHarness(t *testing.T) *nmiHarness {
 	return h
 }
 
-// confirm pays a quoted checkout with the saved card it names.
-func (h *nmiHarness) confirm(p peer, session string) {
-	done := unwrapData(p.call("POST", "/billing/v1/me/checkout/"+session+"/confirm", map[string]any{"payment": map[string]string{"rail": "nmi"}}, "", 200))
+// confirm pays a minted session with the buyer's saved card.
+func (h *nmiHarness) confirm(p peer, session, method string) {
+	path := "/billing/v1/me/checkout-sessions/" + session
+	options, _ := p.call("GET", path, nil, "", 200)["options"].([]any)
+	if len(options) == 0 {
+		h.t.Fatalf("session %s offers no payment option", session)
+	}
+	option := options[0].(map[string]any)["id"]
+	done := p.call("POST", path+"/pay", map[string]any{"option_id": option, "payment_method_id": method}, "", 200)
 	if done["status"] != "succeeded" {
 		h.t.Fatalf("checkout %s: %v", session, done)
 	}
 }
 
-func (h *nmiHarness) subscription(customer string) openrails.Subscription {
+func (h *nmiHarness) subscription(customer string) billing.Subscription {
 	h.t.Helper()
-	subs, err := h.srv.billing.client.ListSubscriptions(h.ctx, openrails.SubscriptionFilter{CustomerID: customer})
-	if err != nil || len(subs.Data) != 1 {
+	id, err := billing.ParseCustomerID(customer)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	subs, err := h.srv.billing.client.ListSubscriptions(h.ctx, billing.SubscriptionListParams{CustomerID: id})
+	if err != nil || len(subs.Items) != 1 {
 		h.t.Fatalf("subscriptions of %s: %v %v", customer, subs, err)
 	}
-	return subs.Data[0]
+	return subs.Items[0]
 }
 
 type duePass struct{}
@@ -202,7 +210,7 @@ func (duePass) Kind() string { return "openrails.dunning" }
 func (h *nmiHarness) renewAt(end time.Time) {
 	h.t.Helper()
 	h.clock.Advance(end.Sub(h.clock.Now()) + time.Second)
-	res, err := h.srv.jobs.Insert(h.ctx, duePass{}, &river.InsertOpts{Queue: openrailsembed.QueueBilling})
+	res, err := h.srv.jobs.Insert(h.ctx, duePass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -232,11 +240,4 @@ func (h *nmiHarness) settle() {
 			States(rivertype.JobStateAvailable, rivertype.JobStateRunning, rivertype.JobStatePending).First(10))
 		return err == nil && len(busy.Jobs) == 0
 	})
-}
-
-func unwrapData(v map[string]any) map[string]any {
-	if data, ok := v["data"].(map[string]any); ok {
-		return data
-	}
-	return v
 }

@@ -132,7 +132,7 @@ func (api *postAPI) syncOffer(ctx context.Context, args postOfferArgs) error {
 	if strings.TrimSpace(title) == "" {
 		title = "Post " + args.PostID
 	}
-	if err = api.billing.setOffer(ctx, channel, postResource(args.PostID), title, args.Price, false, false); err != nil {
+	if err = api.billing.setOffer(ctx, postResource(args.PostID), title, args.Price, false); err != nil {
 		return err
 	}
 	_, err = api.pool.Exec(ctx, `UPDATE `+api.table+` SET offer_status='active' WHERE id=$1 AND offer_revision=$2`, args.PostID, args.Revision)

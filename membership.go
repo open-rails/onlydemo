@@ -3,14 +3,10 @@ package main
 import (
 	"context"
 	"errors"
-	"slices"
-	"time"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/authkit"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/riverqueue/river"
 )
 
@@ -23,7 +19,6 @@ const (
 	membershipClosed = "closed"
 	// Free membership grants carry no payment; paid ones must be at least $1.00.
 	minMembershipPrice int64 = 1_000_000
-	adminGrant               = "admin"
 )
 
 type membershipState struct {
@@ -44,10 +39,10 @@ func (api *channelAPI) membershipState(ctx context.Context, q interface {
 // channelMembership is the public membership view of a channel. Offer is the
 // purchasable price while a paid membership is open.
 type channelMembership struct {
-	Status string                  `json:"status"`
-	Free   bool                    `json:"free"`
-	Sync   string                  `json:"sync"`
-	Offer  *openrails.CatalogOffer `json:"offer"`
+	Status string         `json:"status"`
+	Free   bool           `json:"free"`
+	Sync   string         `json:"sync"`
+	Offer  *billing.Offer `json:"offer"`
 	// Member: the viewer holds a paid subscription or free grant.
 	Member bool `json:"member"`
 	// FreeMember: the viewer holds a free grant, which they can leave.
@@ -110,7 +105,7 @@ func (api *channelAPI) setMembership(c fiber.Ctx) error {
 		return databaseError(c, err)
 	}
 	defer release()
-	allowed, err := api.allowed(c.Context(), viewer(c), id, "channel:settings:manage")
+	allowed, err := api.allowed(c.Context(), viewer(c), id, channelSettingsManage)
 	if err != nil {
 		return billingUnavailable(c)
 	}
@@ -157,7 +152,7 @@ func (api *channelAPI) setMembership(c fiber.Ctx) error {
 func (api *channelAPI) syncMembership(ctx context.Context, args membershipSyncArgs) error {
 	s, err := api.membershipState(ctx, api.pool, args.ChannelID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil // Channel deletion archives the catalog.
+		return nil // Channel deletion archives its products.
 	}
 	if err != nil {
 		return err
@@ -168,12 +163,11 @@ func (api *channelAPI) syncMembership(ctx context.Context, args membershipSyncAr
 	resource := membershipResource(args.ChannelID)
 	switch {
 	case s.Status == membershipOpen && !s.Free:
-		group, err := api.auth.client.GroupInstanceByID(ctx, args.ChannelID)
+		name, err := api.name(ctx, args.ChannelID)
 		if err != nil {
 			return err
 		}
-		err = api.billing.setOffer(ctx, args.ChannelID, resource, group.DisplayName+" membership", args.Price, true, false)
-		if err != nil {
+		if err = api.billing.setOffer(ctx, resource, name+" membership", args.Price, true); err != nil {
 			return err
 		}
 	default:
@@ -197,90 +191,109 @@ func (api *channelAPI) syncMembership(ctx context.Context, args membershipSyncAr
 // renewing at the end of the paid period. Change this one function to change
 // the policy.
 func (b *billingService) paidToFree(ctx context.Context, channelID string) error {
-	resource := membershipResource(channelID)
-	customers, err := b.client.ListCustomersWithEntitlement(ctx, resource, time.Time{})
+	paid, err := b.client.GetProductByKey(ctx, membershipResource(channelID))
+	if errors.Is(err, billing.ErrNotFound) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
-	for batch := range slices.Chunk(customers, 500) {
-		held, err := b.client.ListActiveEntitlements(ctx, batch, time.Time{})
+	params := billing.EntitlementCustomerListParams{PageRequest: billing.PageRequest{Limit: 100}}
+	for {
+		page, err := b.client.ListEntitlementCustomers(ctx, membershipResource(channelID), params)
 		if err != nil {
 			return err
 		}
-		for _, customer := range batch {
-			subs := []openrails.SubscriptionID{}
-			for _, e := range held[customer] {
-				// A renewing or past-due (grace) subscription grants the membership.
-				if e.Entitlement == resource && (e.SourceType == "subscription" || e.SourceType == "grace") && e.SourceID != nil && e.RevokedAt == nil {
-					id, err := subscriptionID(*e.SourceID)
-					if err != nil {
-						return err
-					}
-					if !slices.Contains(subs, id) {
-						subs = append(subs, id)
-					}
-				}
-			}
-			// Only renewing subscriptions move to a free grant; one whose
-			// member already scheduled its cancellation is left to end.
-			renewing := []openrails.SubscriptionID{}
-			for _, id := range subs {
-				sub, err := b.client.GetSubscription(ctx, id)
-				if err != nil {
-					return err
-				}
-				if !sub.CancelScheduled && (sub.Status == "active" || sub.Status == "past_due") {
-					renewing = append(renewing, id)
-				}
+		for _, customer := range page.Items {
+			renewing, err := b.renewing(ctx, customer, paid.ID)
+			if err != nil {
+				return err
 			}
 			if len(renewing) == 0 {
 				continue
 			}
-			if len(freeGrants(held[customer], channelID)) == 0 {
-				if _, err = b.client.GrantEntitlement(ctx, customer, openrails.GrantEntitlementRequest{Entitlement: resource}); err != nil {
-					return err
-				}
+			if err = b.grantFree(ctx, customer.String(), channelID); err != nil {
+				return err
 			}
 			for _, id := range renewing {
-				if err = b.client.CancelSubscription(ctx, id, openrails.CancelSubscriptionRequest{Reason: "membership became free"}); err != nil {
+				if _, err = b.client.CancelSubscription(ctx, id, billing.CancelSubscriptionParams{Reason: "membership became free"}); err != nil {
 					return err
 				}
 			}
 		}
-	}
-	return nil
-}
-
-// subscriptionID reads an entitlement's subscription source (bare or sub_ id).
-func subscriptionID(source string) (openrails.SubscriptionID, error) {
-	if u, err := uuid.Parse(source); err == nil {
-		return openrails.SubscriptionID(u), nil
-	}
-	return openrails.ParseSubscriptionID(source)
-}
-
-func freeGrants(held []openrails.EntitlementRecord, channelID string) []openrails.EntitlementRecord {
-	grants := []openrails.EntitlementRecord{}
-	for _, e := range held {
-		if e.Entitlement == membershipResource(channelID) && e.SourceType == adminGrant && e.RevokedAt == nil {
-			grants = append(grants, e)
+		if page.Next == "" {
+			return nil
 		}
+		params.Cursor = page.Next
 	}
-	return grants
 }
 
-func (b *billingService) freeGrants(ctx context.Context, user, channelID string) ([]openrails.EntitlementRecord, error) {
-	held, err := b.reads.ListEntitlements(ctx, user, time.Time{})
-	return freeGrants(held, channelID), err
+// renewing are the customer's subscriptions to product still set to renew:
+// one whose member already scheduled its cancellation is left to end.
+func (b *billingService) renewing(ctx context.Context, customer billing.CustomerID, product billing.ProductID) ([]billing.SubscriptionID, error) {
+	out := []billing.SubscriptionID{}
+	params := billing.SubscriptionListParams{CustomerID: customer, PageRequest: billing.PageRequest{Limit: 100}}
+	for {
+		page, err := b.client.ListSubscriptions(ctx, params)
+		if err != nil {
+			return nil, err
+		}
+		for _, sub := range page.Items {
+			if sub.ProductID == product && !sub.CancelScheduled && (sub.Status == billing.SubscriptionActive || sub.Status == billing.SubscriptionPastDue) {
+				out = append(out, sub.ID)
+			}
+		}
+		if page.Next == "" {
+			return out, nil
+		}
+		params.Cursor = page.Next
+	}
+}
+
+// freeGrants are user's live grants of the channel's free membership.
+func (b *billingService) freeGrants(ctx context.Context, user, channelID string) ([]billing.ProductAccessGrant, error) {
+	customer, err := customerID(user)
+	if err != nil {
+		return nil, err
+	}
+	out := []billing.ProductAccessGrant{}
+	params := billing.ProductAccessListParams{LiveOnly: true, PageRequest: billing.PageRequest{Limit: 100}}
+	for {
+		page, err := b.client.ListProductAccess(ctx, customer, params)
+		if err != nil {
+			return nil, err
+		}
+		for _, grant := range page.Items {
+			if grant.ProductKey == freeMembershipProduct(channelID) && grant.SourceType == billing.ProductAccessSourceGrant {
+				out = append(out, grant)
+			}
+		}
+		if page.Next == "" {
+			return out, nil
+		}
+		params.Cursor = page.Next
+	}
 }
 
 // grantFree requires the channel lock; it grants at most one free membership.
 func (b *billingService) grantFree(ctx context.Context, user, channelID string) error {
-	grants, err := b.freeGrants(ctx, user, channelID)
-	if err != nil || len(grants) > 0 {
+	customer, err := customerID(user)
+	if err != nil {
 		return err
 	}
-	_, err = b.client.GrantEntitlement(ctx, user, openrails.GrantEntitlementRequest{Entitlement: membershipResource(channelID)})
+	held, err := b.reads.CheckProductAccess(ctx, customer, billing.CheckProductAccessParams{ProductKeys: []string{freeMembershipProduct(channelID)}})
+	if err != nil || held[freeMembershipProduct(channelID)] {
+		return err
+	}
+	product, err := b.ensureProduct(ctx, freeMembershipProduct(channelID), "Free membership", membershipResource(channelID))
+	if err != nil {
+		return err
+	}
+	// The check above under the channel lock keeps it to one grant; a key
+	// would replay a grant the member has since left.
+	_, err = b.client.CreateProductAccess(ctx, billing.CreateProductAccessBatchParams{
+		Items: []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Reason: billing.GrantReasonComp}},
+	})
 	return err
 }
 
@@ -335,14 +348,18 @@ func (api *channelAPI) freeMembership(c fiber.Ctx, joining bool) error {
 		if err != nil {
 			return billingUnavailable(c)
 		}
+		customer, err := customerID(user)
+		if err != nil {
+			return clientError(c, 401, "a user access token is required")
+		}
 		for _, g := range grants {
-			if err = api.billing.client.RevokeEntitlement(c.Context(), user, g.ID); err != nil {
+			if err = api.billing.client.DeleteProductAccess(c.Context(), customer, g.ID); err != nil {
 				return billingUnavailable(c)
 			}
 		}
 	}
 	v, err := api.view(c, id)
-	if errors.Is(err, authkit.ErrGroupNotFound) {
+	if errors.Is(err, errNoChannel) {
 		return clientError(c, 404, "channel not found")
 	}
 	if err != nil {

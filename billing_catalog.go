@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
@@ -11,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/open-rails/contentkit/media/tiered"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 )
 
 type offerPrice struct {
@@ -21,19 +19,38 @@ type offerPrice struct {
 	Currency   string `json:"currency"`
 }
 
+// Products are keyed by the resource they grant: one per post, and per
+// channel one sold membership and one free (never sold) membership.
 func postResource(key string) string      { return "post:" + key }
 func membershipResource(id string) string { return "channel:" + id + ":membership" }
+func freeMembershipProduct(id string) string {
+	return membershipResource(id) + ":free"
+}
+
+// A product sells through one price key; a new price under it archives the
+// previous one, so accepted terms stay valid.
+const (
+	purchasePriceKey   = "purchase"
+	membershipPriceKey = "membership"
+)
+
+func customerID(user string) (billing.CustomerID, error) { return billing.ParseCustomerID(user) }
+
 func (b *billingService) access(ctx context.Context, user string, keys []string) (map[string]bool, error) {
 	result := map[string]bool{}
 	if user == "" {
 		return result, nil
 	}
-	for chunk := range slices.Chunk(unique(keys), openrails.MaxEntitlementChecks) {
-		page, err := b.reads.CheckEntitlements(ctx, user, chunk, time.Time{})
+	customer, err := customerID(user)
+	if err != nil {
+		return nil, err
+	}
+	for chunk := range slices.Chunk(unique(keys), billing.MaxEntitlementChecks) {
+		check, err := b.reads.CheckEntitlements(ctx, customer, billing.CheckEntitlementsParams{Entitlements: chunk, At: time.Now()})
 		if err != nil {
 			return nil, err
 		}
-		maps.Copy(result, page)
+		maps.Copy(result, check.Entitlements)
 	}
 	return result, nil
 }
@@ -45,16 +62,16 @@ func (b *billingService) checker() tiered.Checker {
 
 // offers lists each key's active offers, preferred currency first; limit
 // bounds each key's list.
-func (b *billingService) offers(ctx context.Context, kind openrails.OfferKind, keys []string, limit int) (map[string][]openrails.CatalogOffer, error) {
-	out := map[string][]openrails.CatalogOffer{}
-	for chunk := range slices.Chunk(unique(keys), openrails.MaxEntitlementChecks) {
-		lists, err := b.reads.ListOffersForEntitlements(ctx, chunk, openrails.OfferListParams{Kind: kind, PreferredCurrency: "USD", Limit: limit})
+func (b *billingService) offers(ctx context.Context, kind billing.OfferKind, keys []string, limit int) (map[string][]billing.Offer, error) {
+	out := map[string][]billing.Offer{}
+	for chunk := range slices.Chunk(unique(keys), billing.MaxEntitlementChecks) {
+		pages, err := b.reads.ListOffers(ctx, billing.OfferListParams{Entitlements: chunk, Kind: kind, PreferredCurrency: "USD", Limit: limit})
 		if err != nil {
 			return nil, err
 		}
-		for key, list := range lists {
-			if list.Data != nil {
-				out[key] = list.Data
+		for key, page := range pages {
+			if len(page.Items) > 0 {
+				out[key] = page.Items
 			}
 		}
 	}
@@ -78,53 +95,56 @@ func checkPrice(price *offerPrice, min int64) (string, error) {
 	return currency, nil
 }
 
-// The host has already authorized the publisher against the channel. Catalog
-// owns offer versions and history; no commercial fields are stored on a post.
-func (b *billingService) setOffer(ctx context.Context, channelID, resource, title string, price *offerPrice, recurring, archived bool) error {
-	catalog, err := b.client.EnsureCatalogForOwner(ctx, channelID)
+// ensureProduct is the live product keyed by resource, granting resource.
+func (b *billingService) ensureProduct(ctx context.Context, key, title, resource string) (*billing.Product, error) {
+	product, err := b.client.EnsureProduct(ctx, billing.CreateProductParams{Key: key, DisplayName: title, Entitlements: []string{resource}})
+	if err != nil {
+		return nil, err
+	}
+	if product.Archived || product.DisplayName != title || !slices.Equal(product.Entitlements, []string{resource}) {
+		return b.client.UpdateProduct(ctx, product.ID, billing.UpdateProductParams{
+			DisplayName: catalog.Value(title), Entitlements: catalog.Value([]string{resource}), Archived: catalog.Value(false),
+		})
+	}
+	return product, nil
+}
+
+// setOffer sells resource at price: a post forever, a membership renewing
+// every membership period. The host has already authorized the publisher;
+// no commercial fields are stored on a post or channel. Repeating it with the
+// same terms changes nothing.
+func (b *billingService) setOffer(ctx context.Context, resource, title string, price *offerPrice, recurring bool) error {
+	floor, key := minPostPrice, purchasePriceKey
+	if recurring {
+		floor, key = minMembershipPrice, membershipPriceKey
+	}
+	currency, err := checkPrice(price, floor)
 	if err != nil {
 		return err
 	}
-	product := openrails.CatalogApplyProduct{Key: resource, Archived: openrails.CatalogValue(archived)}
-	if !archived {
-		floor := minPostPrice
-		if recurring {
-			floor = minMembershipPrice
-		}
-		currency, err := checkPrice(price, floor)
-		if err != nil {
-			return err
-		}
-		product.DisplayName = openrails.CatalogValue(title)
-		product.EntitlementsSpec = openrails.CatalogValue(map[string]*int{resource: nil})
-		duration := openrails.CatalogNull[int]()
-		if recurring {
-			duration = openrails.CatalogValue(b.membershipHours)
-		}
-		product.Prices = []openrails.CatalogApplyPrice{{Key: resource + ":purchase", Currency: openrails.CatalogValue(currency), UnitAmount: openrails.CatalogValue(price.UnitAmount), AccessDurationHours: duration, AutoRenew: openrails.CatalogValue(recurring), Archived: openrails.CatalogValue(false), PSPs: openrails.CatalogValue(b.psps)}}
+	product, err := b.ensureProduct(ctx, resource, title, resource)
+	if err != nil {
+		return err
 	}
-	for attempts := 0; attempts < 3; attempts++ {
-		rev, err := b.client.Catalog.Revision(ctx)
-		if err != nil {
-			return err
-		}
-		_, err = b.client.Catalog.Apply(ctx, &openrails.CatalogApplyParams{SchemaVersion: 1, ApplicationID: uuid.NewString(), ExpectedRevision: &rev.Revision, CatalogID: catalog.ID.String(), Products: []openrails.CatalogApplyProduct{product}})
-		if !errors.Is(err, openrails.ErrConflict) {
-			return err
-		}
+	params := billing.CreatePriceParams{ProductID: product.ID, Key: key, UnitAmount: price.UnitAmount, Currency: currency, PSPs: b.psps}
+	if recurring {
+		hours := b.membershipHours
+		params.AccessDurationHours, params.BillingIntervalHours = &hours, &hours
 	}
-	return openrails.ErrConflict
+	_, err = b.client.CreatePrice(ctx, params)
+	return err
 }
+
+// archiveResource stops new sales of resource; buyers and members keep access.
 func (b *billingService) archiveResource(ctx context.Context, resource string) error {
-	product, err := b.client.Products.RetrieveByKey(ctx, resource)
-	if errors.Is(err, openrails.ErrNotFound) {
+	product, err := b.client.GetProductByKey(ctx, resource)
+	if errors.Is(err, billing.ErrNotFound) {
 		return nil
 	}
-	if err != nil {
+	if err != nil || product.Archived {
 		return err
 	}
-	yes := true
-	_, err = b.client.Products.Update(ctx, product.ID, &openrails.ProductUpdateParams{Archived: &yes})
+	_, err = b.client.UpdateProduct(ctx, product.ID, billing.UpdateProductParams{Archived: catalog.Value(true)})
 	return err
 }
 
@@ -134,14 +154,14 @@ func (b *billingService) archiveResource(ctx context.Context, resource string) e
 // and the job replay one operation; each call is capped, so replay until done.
 func (b *billingService) archivePostProduct(ctx context.Context, resource string, deletedAt time.Time) error {
 	policy := b.postDeletion
-	params := openrails.ArchiveProductParams{ProductKey: resource, Action: policy.Action, Reason: "post deleted",
+	params := billing.ArchiveProductParams{ProductKey: resource, PurchaseAction: policy.Action, Reason: "post deleted",
 		IdempotencyKey: fmt.Sprintf("post-archive:%s:%s:%s", resource, policy.Action, policy.Window)}
-	if policy.Action != openrails.PurchaseActionNone {
-		params.PurchasedSince = deletedAt.Add(-policy.Window)
+	if policy.Action != billing.PurchaseActionNone {
+		params.PurchaseWindowStartsAt = deletedAt.Add(-policy.Window)
 	}
 	for {
 		archive, err := b.client.ArchiveProduct(ctx, params)
-		if errors.Is(err, openrails.ErrNotFound) {
+		if errors.Is(err, billing.ErrNotFound) {
 			return nil
 		}
 		if err != nil || archive.Complete {
@@ -149,33 +169,35 @@ func (b *billingService) archivePostProduct(ctx context.Context, resource string
 		}
 	}
 }
-func (b *billingService) ArchiveChannelCatalog(ctx context.Context, id string) error {
-	catalog, err := b.client.GetCatalogForOwner(ctx, id)
-	if errors.Is(err, openrails.ErrNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	no, yes := false, true
-	for {
-		page, err := b.client.Products.List(ctx, &openrails.ProductListParams{PageOptions: openrails.PageOptions{Limit: 100}, CatalogID: catalog.ID.String(), Archived: &no})
-		if err != nil {
+
+// archiveChannel stops every sale of a deleted channel: its memberships and posts.
+func (b *billingService) archiveChannel(ctx context.Context, id string, posts []string) error {
+	for _, resource := range append([]string{membershipResource(id), freeMembershipProduct(id)}, mapped(posts, postResource)...) {
+		if err := b.archiveResource(ctx, resource); err != nil {
 			return err
 		}
-		if len(page.Items) == 0 {
-			return nil
-		}
-		for _, product := range page.Items {
-			if _, err = b.client.Products.Update(ctx, product.ID, &openrails.ProductUpdateParams{Archived: &yes}); err != nil {
-				return err
-			}
-		}
 	}
+	return nil
 }
 
-// Card payments settle in the page; a redirect-only PSP returns to the library.
-func checkoutRequest(user, resource, key, priceID string, payment openrails.CheckoutPaymentOptions, kind openrails.OfferKind, publicURL string) openrails.CreateCheckoutSessionRequest {
-	digest := sha256.Sum256([]byte(user + "\x00" + resource + "\x00" + key))
-	return openrails.CreateCheckoutSessionRequest{OfferKind: kind, Customer: openrails.CheckoutCustomerIdentity{ID: user}, Entitlement: resource, PriceID: priceID, IdempotencyKey: "demo-" + hex.EncodeToString(digest[:]), PaymentOptions: payment, SuccessURL: publicURL + "/me?tab=library", CancelURL: publicURL + "/me?tab=library", Metadata: map[string]string{"resource": resource}}
+func mapped(in []string, f func(string) string) []string {
+	out := make([]string, len(in))
+	for i, v := range in {
+		out[i] = f(v)
+	}
+	return out
+}
+
+// checkoutRequest mints the customer's checkout session for one price. A
+// session moves no money until the customer pays it.
+func checkoutRequest(user, username, email string, price billing.PriceID, publicURL string) (billing.CreateCheckoutSessionParams, error) {
+	customer, err := customerID(user)
+	if err != nil {
+		return billing.CreateCheckoutSessionParams{}, err
+	}
+	return billing.CreateCheckoutSessionParams{
+		Customer:   billing.CheckoutCustomerIdentity{ID: customer, Username: username, VerifiedEmail: email},
+		PriceID:    price,
+		SuccessURL: publicURL + "/me?tab=library",
+	}, nil
 }

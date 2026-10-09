@@ -7,62 +7,19 @@ import (
 	"slices"
 	"sync/atomic"
 	"testing"
-	"time"
 
-	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/contentkit/media"
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
-// countingAuth and countingReads count the AuthKit and OpenRails reads made
-// while serving a request (background jobs are not counted).
-type countingAuth struct {
-	authkit.Client
-	n *atomic.Int64
-}
-
+// inRequest counts an AuthKit or OpenRails read made while serving a request
+// (background jobs are not counted).
 func inRequest(ctx context.Context, n *atomic.Int64) {
 	if ctx.Value(queryCountKey{}) != nil {
 		n.Add(1)
 	}
-}
-
-func (a countingAuth) GroupInstanceForSlug(ctx context.Context, g authkit.GroupRef) (authkit.GroupInstance, error) {
-	inRequest(ctx, a.n)
-	return a.Client.GroupInstanceForSlug(ctx, g)
-}
-func (a countingAuth) GroupInstancesByIDs(ctx context.Context, ids []string) (map[string]authkit.GroupInstance, error) {
-	inRequest(ctx, a.n)
-	return a.Client.GroupInstancesByIDs(ctx, ids)
-}
-func (a countingAuth) GroupInstanceByID(ctx context.Context, id string) (authkit.GroupInstance, error) {
-	inRequest(ctx, a.n)
-	return a.Client.GroupInstanceByID(ctx, id)
-}
-func (a countingAuth) ListSubjectGroups(ctx context.Context, s authkit.Subject) ([]authkit.SubjectGroupMembership, error) {
-	inRequest(ctx, a.n)
-	return a.Client.ListSubjectGroups(ctx, s)
-}
-func (a countingAuth) Can(ctx context.Context, s authkit.Subject, g authkit.GroupRef, p authkit.Perm) (bool, error) {
-	inRequest(ctx, a.n)
-	return a.Client.Can(ctx, s, g, p)
-}
-func (a countingAuth) CanOnGroup(ctx context.Context, s authkit.Subject, id string, p authkit.Perm) (bool, error) {
-	inRequest(ctx, a.n)
-	return a.Client.CanOnGroup(ctx, s, id, p)
-}
-func (a countingAuth) EffectivePermissionsForGroups(ctx context.Context, s authkit.Subject, ids []string) (map[string][]authkit.Perm, error) {
-	inRequest(ctx, a.n)
-	return a.Client.EffectivePermissionsForGroups(ctx, s, ids)
-}
-func (a countingAuth) ListEffectivePermissions(ctx context.Context, s authkit.Subject, g authkit.GroupRef) ([]authkit.Perm, error) {
-	inRequest(ctx, a.n)
-	return a.Client.ListEffectivePermissions(ctx, s, g)
-}
-
-func (a countingAuth) UserLivenessByIDs(ctx context.Context, ids []string) (map[string]authkit.UserLiveness, error) {
-	inRequest(ctx, a.n)
-	return a.Client.UserLivenessByIDs(ctx, ids)
 }
 
 type countingReads struct {
@@ -70,17 +27,21 @@ type countingReads struct {
 	n *atomic.Int64
 }
 
-func (r countingReads) CheckEntitlements(ctx context.Context, user string, keys []string, at time.Time, o ...openrails.RequestOption) (map[string]bool, error) {
+func (r countingReads) CheckEntitlements(ctx context.Context, customer billing.CustomerID, params billing.CheckEntitlementsParams, o ...openrails.RequestOption) (*billing.EntitlementCheck, error) {
 	inRequest(ctx, r.n)
-	return r.entitlementReads.CheckEntitlements(ctx, user, keys, at, o...)
+	return r.entitlementReads.CheckEntitlements(ctx, customer, params, o...)
 }
-func (r countingReads) ListEntitlements(ctx context.Context, user string, at time.Time, o ...openrails.RequestOption) ([]openrails.EntitlementRecord, error) {
+func (r countingReads) ListCustomerEntitlements(ctx context.Context, customer billing.CustomerID, params billing.CustomerEntitlementListParams, o ...openrails.RequestOption) (*billing.ListPage[billing.CustomerEntitlement], error) {
 	inRequest(ctx, r.n)
-	return r.entitlementReads.ListEntitlements(ctx, user, at, o...)
+	return r.entitlementReads.ListCustomerEntitlements(ctx, customer, params, o...)
 }
-func (r countingReads) ListOffersForEntitlements(ctx context.Context, keys []string, params openrails.OfferListParams, o ...openrails.RequestOption) (map[string]openrails.OfferList, error) {
+func (r countingReads) ListOffers(ctx context.Context, params billing.OfferListParams, o ...openrails.RequestOption) (billing.OfferPages, error) {
 	inRequest(ctx, r.n)
-	return r.entitlementReads.ListOffersForEntitlements(ctx, keys, params, o...)
+	return r.entitlementReads.ListOffers(ctx, params, o...)
+}
+func (r countingReads) CheckProductAccess(ctx context.Context, customer billing.CustomerID, params billing.CheckProductAccessParams, o ...openrails.RequestOption) (map[string]bool, error) {
+	inRequest(ctx, r.n)
+	return r.entitlementReads.CheckProductAccess(ctx, customer, params, o...)
 }
 
 type cost struct{ queries, auth, billing int64 }
@@ -192,7 +153,7 @@ func (h *mediaHarness) testListingCost(t *testing.T, purchasedPost string, buyer
 	if edit, read, media := rights(); !edit || !read || !media {
 		t.Fatalf("editor rights before deletion: edit %t read %t media %t", edit, read, media)
 	}
-	if _, err := h.srv.auth.client.SoftDeleteUsers(h.ctx, []string{helper.id}); err != nil {
+	if _, err := h.srv.auth.client.DeleteUsers(h.ctx, iam.SystemIdentity(), []string{helper.id}); err != nil {
 		t.Fatal(err)
 	}
 	if edit, read, media := rights(); edit || read || media {

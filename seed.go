@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/open-rails/authkit/iam"
 )
 
 const seedPassword = "OnlyDemo-seed-42!"
@@ -110,12 +112,13 @@ func seed(ctx context.Context, base string, out io.Writer) error {
 func markSeedCreatorsVerified(ctx context.Context) error {
 	return withAuth(ctx, func(a *appAuth) error {
 		for _, creator := range seedCreators {
-			user, err := a.client.GetUserByEmail(ctx, creator.username+"@example.test")
-			if err != nil || user == nil {
+			user, err := a.client.User(ctx, iam.UserByEmail(creator.username+"@example.test"))
+			if err != nil {
 				return fmt.Errorf("%s: account not found: %v", creator.username, err)
 			}
 			if !user.EmailVerified {
-				if err := a.client.MarkEmailVerified(ctx, user.ID); err != nil {
+				verified := true
+				if _, err := a.client.UpdateUser(ctx, iam.SystemIdentity(), user.ID, iam.UserUpdate{EmailVerified: &verified}); err != nil {
 					return fmt.Errorf("%s verify: %w", creator.username, err)
 				}
 			}

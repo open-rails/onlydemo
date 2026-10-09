@@ -9,6 +9,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/authkit"
 	authkitfiber "github.com/open-rails/authkit/adapters/fiber"
 	"github.com/riverqueue/river"
 )
@@ -156,11 +157,14 @@ func startServer(ctx context.Context, config Config, pool *pgxpool.Pool, opts bi
 			log.Printf("close background jobs: %v", err)
 		}
 	})
+	if err = s.auth.client.Start(ctx, authkit.WithRiverClient(s.jobs)); err != nil {
+		return nil, fmt.Errorf("start AuthKit: %w", err)
+	}
+	if err = s.billing.Start(ctx, s.jobs); err != nil {
+		return nil, fmt.Errorf("start OpenRails: %w", err)
+	}
 	if err = s.billing.requireReady(ctx); err != nil {
 		return nil, err
-	}
-	if err = s.auth.runtime.Start(ctx); err != nil {
-		return nil, fmt.Errorf("start AuthKit: %w", err)
 	}
 	if err = s.jobs.Start(ctx); err != nil {
 		return nil, fmt.Errorf("start application jobs: %w", err)
@@ -196,8 +200,8 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, c
 		})
 	})
 
-	optional := authkitfiber.Optional(authService.runtime.Verifier())
-	required := authkitfiber.Required(authService.runtime.Verifier())
+	optional := authkitfiber.Optional(authService.client)
+	required := authkitfiber.Required(authService.client)
 	channels.mount(app, required)
 	app.Get("/api/v1/channels", optional, channels.list)
 	app.Get("/api/v1/channels/:id", optional, channels.publicGet)
@@ -212,7 +216,6 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, c
 	app.Get("/api/v1/me", required, posts.me)
 	app.Get("/api/v1/me/channels", required, channels.mine)
 	app.Get("/api/v1/config", publicConfiguration(billing, cfg.TrustedCountryHeader))
-	app.Get("/api/v1/checkout/options", checkoutOptions(billing))
 	app.Get("/api/v1/posts", optional, posts.list)
 	app.Post("/api/v1/posts", required, posts.create)
 	app.Get("/api/v1/posts/:id", optional, posts.get)
@@ -222,17 +225,13 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, c
 		return posts.checkout(c, returnOrigin(c, cfg.PublicURL))
 	})
 	media.mount(app, optional)
-	billingOperatorAPI{auth: authService, billing: billing}.mount(app, required)
-	if err := billing.Mount(app.Group("/billing")); err != nil {
+	// Site admins work on customers' billing through the merchant API.
+	if err := billing.Mount(app, authService.client); err != nil {
 		return nil, err
 	}
 
 	// Register AuthKit endpoints on Fiber so they appear in its route table.
-	authRoutes, err := authkitfiber.Routes(authService.runtime)
-	if err != nil {
-		return nil, err
-	}
-	if err := authRoutes.Mount(app); err != nil {
+	if err := authkitfiber.Mount(app, authService.client); err != nil {
 		return nil, err
 	}
 	mountFrontend(app)

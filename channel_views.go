@@ -5,14 +5,13 @@ import (
 	"errors"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/contentkit/media"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 var channelSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,99}$`)
@@ -29,29 +28,30 @@ type channelView struct {
 	Membership channelMembership   `json:"membership"`
 }
 
+var errNoChannel = errors.New("channel not found")
+
 // view renders one live channel for the viewer, with their free grant.
 func (api *channelAPI) view(c fiber.Ctx, id string) (channelView, error) {
-	views, err := api.views(c.Context(), viewer(c), []string{id}, nil, true)
+	views, err := api.views(c.Context(), viewer(c), []string{id}, true)
 	if err != nil {
 		return channelView{}, err
 	}
 	if len(views) == 0 {
-		return channelView{}, authkit.ErrGroupNotFound
+		return channelView{}, errNoChannel
 	}
 	return views[0], nil
 }
 
-// views renders the live channels among ids, in order, from one page load;
-// known carries groups the caller already read. grants reports free
-// memberships, which costs one entitlement listing.
-func (api *channelAPI) views(ctx context.Context, user string, ids []string, known map[string]authkit.GroupInstance, grants bool) ([]channelView, error) {
+// views renders the live channels among ids, in order, from one page load.
+// grants reports free memberships, which costs one product-access check.
+func (api *channelAPI) views(ctx context.Context, user string, ids []string, grants bool) ([]channelView, error) {
 	keys := []string{}
 	if user != "" {
 		for _, id := range ids {
 			keys = append(keys, membershipResource(id))
 		}
 	}
-	pg, err := api.loadPage(ctx, user, ids, known, keys, slotAvatar, slotCover)
+	pg, err := api.loadPage(ctx, user, ids, keys, slotAvatar, slotCover)
 	if err != nil {
 		return nil, err
 	}
@@ -60,8 +60,8 @@ func (api *channelAPI) views(ctx context.Context, user string, ids []string, kno
 		if !pg.live(id) {
 			continue
 		}
-		g, s, key := pg.groups[id], pg.states[id], membershipResource(id)
-		v := channelView{ID: id, Slug: g.InstanceSlug, Name: g.DisplayName, CanManage: pg.can(id, "channel:settings:manage"), CanEdit: pg.can(id, channelEditPermission),
+		g, s, key := pg.channels[id], pg.states[id], membershipResource(id)
+		v := channelView{ID: id, Slug: g.Slug, Name: g.Name, CanManage: pg.can(id, channelSettingsManage), CanEdit: pg.can(id, channelEditPermission),
 			Avatar: pg.slots[slotKey{id, slotAvatar}], Cover: pg.slots[slotKey{id, slotCover}],
 			Membership: channelMembership{Status: s.Status, Free: s.Free, Sync: s.Sync, Member: pg.access[key]}}
 		if v.CanManage {
@@ -75,14 +75,26 @@ func (api *channelAPI) views(ctx context.Context, user string, ids []string, kno
 		}
 		out = append(out, v)
 	}
-	offers, err := api.billing.offers(ctx, openrails.OfferRecurring, selling, 1)
+	offers, err := api.billing.offers(ctx, billing.OfferRecurring, selling, 1)
 	if err != nil {
 		return nil, err
 	}
-	var held []openrails.EntitlementRecord
+	free := map[string]bool{}
 	if grants && user != "" && len(out) > 0 {
-		if held, err = api.billing.reads.ListEntitlements(ctx, user, time.Time{}); err != nil {
-			return nil, err
+		products := []string{}
+		for _, v := range out {
+			if v.Membership.Member {
+				products = append(products, freeMembershipProduct(v.ID))
+			}
+		}
+		if len(products) > 0 {
+			customer, err := customerID(user)
+			if err != nil {
+				return nil, err
+			}
+			if free, err = api.billing.reads.CheckProductAccess(ctx, customer, billing.CheckProductAccessParams{ProductKeys: products}); err != nil {
+				return nil, err
+			}
 		}
 	}
 	for i := range out {
@@ -90,7 +102,7 @@ func (api *channelAPI) views(ctx context.Context, user string, ids []string, kno
 		if list := offers[membershipResource(v.ID)]; len(list) > 0 {
 			v.Membership.Offer = &list[0]
 		}
-		v.Membership.FreeMember = v.Membership.Member && len(freeGrants(held, v.ID)) > 0
+		v.Membership.FreeMember = v.Membership.Member && free[freeMembershipProduct(v.ID)]
 	}
 	return out, nil
 }
@@ -124,7 +136,7 @@ func (api *channelAPI) list(c fiber.Ctx) error {
 	if more {
 		ids = ids[:25]
 	}
-	data, err := api.views(c.Context(), viewer(c), ids, nil, false)
+	data, err := api.views(c.Context(), viewer(c), ids, false)
 	if err != nil {
 		return billingUnavailable(c)
 	}
@@ -136,31 +148,32 @@ func (api *channelAPI) list(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{"data": data, "has_more": more, "next_cursor": next})
 }
 
-// resolve addresses a channel by its AuthKit group slug (or former-name alias) or its id.
+// resolve addresses a live channel by its slug or its id.
 func (api *channelAPI) resolve(ctx context.Context, raw string) (string, error) {
 	if id, err := channelID(raw); err == nil {
 		return id, nil
 	}
 	slug := strings.ToLower(raw)
 	if !channelSlug.MatchString(slug) {
-		return "", authkit.ErrGroupNotFound
+		return "", errNoChannel
 	}
-	group, err := api.auth.client.GroupInstanceForSlug(ctx, authkit.GroupRef{Persona: channelPersona, Instance: slug})
-	if err != nil {
-		return "", err
+	var id string
+	err := api.pool.QueryRow(ctx, `SELECT id::text FROM `+api.table+` WHERE slug=$1 AND deleted_at IS NULL`, slug).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", errNoChannel
 	}
-	return group.ID, nil
+	return id, err
 }
 func (api *channelAPI) publicGet(c fiber.Ctx) error {
 	id, err := api.resolve(c.Context(), c.Params("id"))
-	if errors.Is(err, authkit.ErrGroupNotFound) {
+	if errors.Is(err, errNoChannel) {
 		return clientError(c, 404, "channel not found")
 	}
 	if err != nil {
-		return billingUnavailable(c)
+		return databaseError(c, err)
 	}
 	v, err := api.view(c, id)
-	if errors.Is(err, authkit.ErrGroupNotFound) {
+	if errors.Is(err, errNoChannel) {
 		return clientError(c, 404, "channel not found")
 	}
 	if err != nil {
@@ -169,6 +182,9 @@ func (api *channelAPI) publicGet(c fiber.Ctx) error {
 	c.Set("Cache-Control", "no-store")
 	return c.JSON(v)
 }
+
+// members lists, sets or removes a channel's owners and editors; AuthKit
+// checks the manager's own authority over each role.
 func (api *channelAPI) members(c fiber.Ctx) error {
 	if viewer(c) == "" {
 		return clientError(c, 401, "a user access token is required")
@@ -177,40 +193,34 @@ func (api *channelAPI) members(c fiber.Ctx) error {
 	if err != nil {
 		return clientError(c, 400, "invalid channel id")
 	}
-	allowed, err := api.allowed(c.Context(), viewer(c), id, "channel:settings:manage")
+	allowed, err := api.allowed(c.Context(), viewer(c), id, channelSettingsManage)
 	if err != nil {
 		return billingUnavailable(c)
 	}
 	if !allowed {
 		return clientError(c, 404, "channel not found")
 	}
-	g, err := api.auth.client.GroupInstanceByID(c.Context(), id)
-	if err != nil {
-		return clientError(c, 404, "channel not found")
-	}
-	ref := authkit.GroupRef{Persona: channelPersona, Instance: g.InstanceSlug}
-	if c.Method() == "GET" {
-		members, e := api.auth.client.ListGroupMembers(c.Context(), ref)
-		if e != nil {
-			return billingUnavailable(c)
-		}
+	ref, manager := iam.GroupByID(id), iam.UserIdentity(viewer(c))
+	switch c.Method() {
+	case "GET":
 		data := []fiber.Map{}
-		for _, m := range members {
-			data = append(data, fiber.Map{"user_id": m.SubjectID, "subject_kind": m.SubjectKind, "role": m.Role})
-		}
-		return c.JSON(fiber.Map{"data": data})
-	}
-	if c.Method() == "DELETE" {
-		members, e := api.auth.client.ListGroupMembers(c.Context(), ref)
-		if e != nil {
-			return billingUnavailable(c)
-		}
-		for _, m := range members {
-			if m.SubjectID == c.Params("user_id") && m.SubjectKind == authkit.SubjectKindUser {
-				if e = api.auth.client.UnassignGroupRoleAs(c.Context(), viewer(c), ref, authkit.UserSubject(m.SubjectID), m.Role); e != nil {
-					return clientError(c, 409, "member cannot be removed; an active owner is required")
-				}
+		query := iam.MemberQuery{Kinds: []iam.SubjectKind{iam.SubjectKindUser}, Page: iam.PageRequest{Limit: 100}}
+		for {
+			page, err := api.auth.client.ListGroupMembers(c.Context(), ref, query)
+			if err != nil {
+				return billingUnavailable(c)
 			}
+			for _, m := range page.Items {
+				data = append(data, fiber.Map{"user_id": m.Subject.ID, "subject_kind": m.Subject.Kind, "role": roleName(m.Role)})
+			}
+			if page.Next == "" {
+				return c.JSON(fiber.Map{"data": data})
+			}
+			query.Page.Cursor = page.Next
+		}
+	case "DELETE":
+		if err = api.auth.client.RemoveGroupMember(c.Context(), manager, ref, iam.UserSubject(c.Params("user_id"))); err != nil {
+			return clientError(c, 409, "member cannot be removed; an active owner is required")
 		}
 		return c.SendStatus(204)
 	}
@@ -221,26 +231,38 @@ func (api *channelAPI) members(c fiber.Ctx) error {
 	if err = c.Bind().Body(&in); err != nil {
 		return clientError(c, 400, "invalid JSON")
 	}
-	if in.Role != "owner" && in.Role != "editor" {
+	role, ok := map[string]iam.Role{"owner": channelOwnerRole, "editor": channelEditorRole}[in.Role]
+	if !ok {
 		return clientError(c, 400, "role must be owner or editor")
 	}
-	user, err := api.auth.client.GetUserByUsername(c.Context(), strings.TrimSpace(in.Username))
-	if err != nil || user == nil {
+	user, err := api.auth.client.User(c.Context(), iam.UserByUsername(strings.TrimSpace(in.Username)))
+	if err != nil {
 		return clientError(c, 404, "user not found")
 	}
-	if err = api.auth.client.AssignGroupRoleAs(c.Context(), viewer(c), ref, authkit.UserSubject(user.ID), authkit.Role(in.Role)); err != nil {
+	if _, err = api.auth.client.SetGroupRole(c.Context(), manager, ref, iam.UserSubject(user.ID), role); err != nil {
 		return clientError(c, 403, "member could not be assigned")
 	}
 	return c.Status(201).JSON(fiber.Map{"user_id": user.ID, "role": in.Role})
 }
+
+// roleName is a channel role's name without its persona: owner or editor.
+func roleName(role iam.Role) string {
+	_, name, _ := strings.Cut(role.String(), ":")
+	return name
+}
+
 func (api *postAPI) me(c fiber.Ctx) error {
 	if viewer(c) == "" {
 		return clientError(c, 401, "a user access token is required")
 	}
 	user := viewer(c)
-	profile, err := api.auth.client.AdminGetUser(c.Context(), user)
+	profile, err := api.auth.user(c.Context(), user)
 	if err != nil {
 		return billingUnavailable(c)
+	}
+	customer, err := customerID(user)
+	if err != nil {
+		return clientError(c, 401, "a user access token is required")
 	}
 	managed, err := api.channels.editable(c, user)
 	if err != nil {
@@ -248,15 +270,22 @@ func (api *postAPI) me(c fiber.Ctx) error {
 	}
 	before, _ := parsePostID(c.Query("before"))
 	// The library is every post the viewer holds a purchase of.
-	held, err := api.billing.reads.ListEntitlements(c.Context(), user, time.Time{})
-	if err != nil {
-		return billingUnavailable(c)
-	}
 	keys := []string{}
-	for _, e := range held {
-		if key, ok := strings.CutPrefix(e.Entitlement, postResource("")); ok && e.RevokedAt == nil && uuid.Validate(key) == nil {
-			keys = append(keys, key)
+	params := billing.CustomerEntitlementListParams{Prefix: postResource(""), PageRequest: billing.PageRequest{Limit: 100}}
+	for {
+		held, err := api.billing.reads.ListCustomerEntitlements(c.Context(), customer, params)
+		if err != nil {
+			return billingUnavailable(c)
 		}
+		for _, e := range held.Items {
+			if key, ok := strings.CutPrefix(e.Entitlement, postResource("")); ok && uuid.Validate(key) == nil {
+				keys = append(keys, key)
+			}
+		}
+		if held.Next == "" {
+			break
+		}
+		params.Cursor = held.Next
 	}
 	rows, err := api.pool.Query(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=ANY($2::uuid[]) AND deleted_at IS NULL`+published+` AND ($1::text='' OR id<$1::uuid) AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL) ORDER BY id DESC LIMIT 51`, before, keys)
 	if err != nil {
@@ -275,11 +304,11 @@ func (api *postAPI) me(c fiber.Ctx) error {
 	if err = api.decorate(c, purchased, false); err != nil {
 		return billingUnavailable(c)
 	}
-	subscriptions, err := api.billing.client.ListSubscriptions(c.Context(), openrails.SubscriptionFilter{CustomerID: user, PageOptions: openrails.PageOptions{Limit: 50}})
+	subscriptions, err := api.billing.client.ListSubscriptions(c.Context(), billing.SubscriptionListParams{CustomerID: customer, PageRequest: billing.PageRequest{Limit: 50}})
 	if err != nil {
 		return billingUnavailable(c)
 	}
-	payments, err := api.billing.client.ListPayments(c.Context(), openrails.PaymentFilter{CustomerID: user, PageOptions: openrails.PageOptions{Limit: 50}})
+	payments, err := api.billing.client.ListPayments(c.Context(), billing.PaymentListParams{CustomerID: customer, PageRequest: billing.PageRequest{Limit: 50}})
 	if err != nil {
 		return billingUnavailable(c)
 	}
@@ -288,23 +317,16 @@ func (api *postAPI) me(c fiber.Ctx) error {
 		return databaseError(c, err)
 	}
 	c.Set("Cache-Control", "no-store")
-	return c.JSON(fiber.Map{"user": fiber.Map{"id": profile.ID, "username": profile.Username, "email": profile.Email, "avatar": avatar[slotKey{profile.ID, slotAvatar}]}, "manageable_channels": managed, "purchased_posts": purchased, "has_more": more, "next_cursor": next, "subscriptions": subscriptions.Data, "payments": payments.Data})
+	return c.JSON(fiber.Map{"user": fiber.Map{"id": profile.ID, "username": profile.Username, "email": profile.Email, "avatar": avatar[slotKey{profile.ID, slotAvatar}]}, "manageable_channels": managed, "purchased_posts": purchased, "has_more": more, "next_cursor": next, "subscriptions": subscriptions.Items, "payments": payments.Items})
 }
 
 // editable lists the channels the user can publish to.
 func (api *channelAPI) editable(c fiber.Ctx, user string) ([]channelView, error) {
-	groups, err := api.auth.client.ListSubjectGroups(c.Context(), authkit.UserSubject(user))
+	ids, err := api.auth.channels(c.Context(), user)
 	if err != nil {
 		return nil, err
 	}
-	ids, known := []string{}, map[string]authkit.GroupInstance{}
-	for _, g := range groups {
-		if g.Persona == channelPersona {
-			ids = append(ids, g.GroupID)
-			known[g.GroupID] = authkit.GroupInstance{ID: g.GroupID, Persona: g.Persona, InstanceSlug: g.InstanceSlug, DisplayName: g.DisplayName}
-		}
-	}
-	views, err := api.views(c.Context(), user, ids, known, false)
+	views, err := api.views(c.Context(), user, ids, false)
 	if err != nil {
 		return nil, err
 	}

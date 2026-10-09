@@ -1,57 +1,43 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"net/http"
+
 	"github.com/gofiber/fiber/v3"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
-	"net/http"
-	"strings"
+	"github.com/open-rails/openrails/billing"
 )
 
 type checkoutInput struct {
-	PriceID string                           `json:"price_id"`
-	Payment openrails.CheckoutPaymentOptions `json:"payment"`
+	PriceID billing.PriceID `json:"price_id"`
 }
 
-func checkoutBody(c fiber.Ctx) (checkoutInput, string, error) {
+func checkoutBody(c fiber.Ctx) (checkoutInput, error) {
 	var in checkoutInput
-	if len(c.Body()) > 0 {
-		if err := bindJSON(c, &in); err != nil {
-			return in, "", err
-		}
+	if err := bindJSON(c, &in); err != nil {
+		return in, err
 	}
-	key := strings.TrimSpace(c.Get("Idempotency-Key"))
-	if key == "" || len(key) > 200 || in.PriceID == "" {
-		return in, key, errors.New("price_id and Idempotency-Key are required")
+	if in.PriceID.IsZero() {
+		return in, errors.New("price_id is required")
 	}
-	return in, key, nil
+	return in, nil
 }
+
 func checkoutError(c fiber.Ctx, err error) error {
-	// A definite decline: the buyer may correct the card or use another one.
-	if failure, ok := openrails.PaymentFailureFrom(err); ok {
-		return c.Status(http.StatusPaymentRequired).JSON(fiber.Map{"error": fiber.Map{"code": openrails.CodeCardDeclined, "message": failure.Message, "metadata": fiber.Map{"failure": failure}}})
-	}
+	var status *billing.StatusError
 	switch {
-	case errors.Is(err, openrails.ErrPaymentMethodRequired):
-		return paymentMethodRequired(c)
-	case errors.Is(err, openrails.ErrPaymentMethodStale):
-		return clientError(c, http.StatusPaymentRequired, "this saved card can no longer be used; add it again")
-	case errors.Is(err, openrails.ErrConflict), errors.Is(err, openrails.ErrIdempotencyKeyReused):
-		return clientError(c, 409, "checkout conflicts with an earlier request")
-	case errors.Is(err, openrails.ErrInvalid):
-		return clientError(c, 400, "invalid checkout request")
-	case errors.Is(err, openrails.ErrDenied):
-		return clientError(c, 403, "checkout is not permitted")
-	case errors.Is(err, openrails.ErrNotFound):
+	case errors.As(err, &status) && status.Status < 500:
+		return c.Status(status.Status).JSON(fiber.Map{"error": fiber.Map{"code": status.Code, "message": status.Message}})
+	case errors.Is(err, billing.ErrNotFound):
 		return clientError(c, 404, "offer not found")
+	case errors.Is(err, billing.ErrInvalid):
+		return clientError(c, 400, "invalid checkout request")
+	case errors.Is(err, billing.ErrDenied):
+		return clientError(c, 403, "checkout is not permitted")
 	}
 	return billingUnavailable(c)
-}
-
-// paymentMethodRequired: a charge names its card; none is implied (#1087).
-func paymentMethodRequired(c fiber.Ctx) error {
-	return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": fiber.Map{"code": openrails.CodePaymentMethodRequired, "param": "payment_method_id", "message": "choose a saved card or enter a new one"}})
 }
 
 // returnOrigin returns the buyer to the site origin they checked out from;
@@ -63,11 +49,37 @@ func returnOrigin(c fiber.Ctx, publicURL string) string {
 	return publicURL
 }
 
+// mintCheckout mints the viewer's checkout session for price. The browser
+// pays it on the customer billing surface (billing-ui's checkout).
+func (api *channelAPI) mintCheckout(c fiber.Ctx, price billing.PriceID, publicURL string) error {
+	user := viewer(c)
+	account, err := api.auth.user(c.Context(), user)
+	if err != nil {
+		return billingUnavailable(c)
+	}
+	email := ""
+	if account.Email != nil && account.EmailVerified {
+		email = *account.Email
+	}
+	request, err := checkoutRequest(user, account.Username, email, price, publicURL)
+	if err != nil {
+		return clientError(c, 401, "a user access token is required")
+	}
+	session, err := api.billing.client.CreateCheckoutSession(c.Context(), request)
+	if err != nil {
+		return checkoutError(c, err)
+	}
+	c.Set("Cache-Control", "no-store")
+	return c.Status(http.StatusCreated).JSON(session)
+}
+
+// checkout is POST /api/v1/posts/:id/checkout {price_id}: the app's content
+// rules decide who may buy; OpenRails decides the offer and payment.
 func (api *postAPI) checkout(c fiber.Ctx, publicURL string) error {
 	if viewer(c) == "" {
 		return clientError(c, 401, "a user access token is required")
 	}
-	in, key, err := checkoutBody(c)
+	in, err := checkoutBody(c)
 	if err != nil {
 		return clientError(c, 400, err.Error())
 	}
@@ -75,35 +87,20 @@ func (api *postAPI) checkout(c fiber.Ctx, publicURL string) error {
 	if err != nil {
 		return clientError(c, 404, err.Error())
 	}
-	// Identity-only lookup includes soft-deleted content so accepted exact-key
-	// retries can resolve before mutable content/membership admission checks.
-	post, err := scanPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1`, id))
+	var channel string
+	err = api.pool.QueryRow(c.Context(), `SELECT channel_id::text FROM `+api.table+` WHERE id=$1`, id).Scan(&channel)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, 404, "post not found")
 	}
 	if err != nil {
 		return databaseError(c, err)
 	}
-	request := checkoutRequest(viewer(c), postResource(post.ID), key, in.PriceID, in.Payment, openrails.OfferPermanent, publicURL)
-	replay, err := api.billing.client.LookupCheckoutSession(c.Context(), request)
-	if err == nil {
-		if replay.Status == "created" {
-			replay, err = api.billing.client.CreateCheckoutSession(c.Context(), request)
-			if err != nil {
-				return checkoutError(c, err)
-			}
-		}
-		return c.Status(201).JSON(replay)
-	}
-	if !errors.Is(err, openrails.ErrNotFound) {
-		return checkoutError(c, err)
-	}
-	release, err := api.channels.lock(c.Context(), post.ChannelID)
+	release, err := api.channels.lock(c.Context(), channel)
 	if err != nil {
 		return databaseError(c, err)
 	}
 	defer release()
-	post, err = scanPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1 AND deleted_at IS NULL`+published+` AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL)`, id))
+	post, err := scanPost(api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1 AND deleted_at IS NULL`+published+` AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL)`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, 404, "post not found")
 	}
@@ -115,6 +112,9 @@ func (api *postAPI) checkout(c fiber.Ctx, publicURL string) error {
 	}
 	if post.OfferStatus != "active" {
 		return clientError(c, 409, "post price is pending")
+	}
+	if err := api.sold(c.Context(), postResource(post.ID), billing.OfferPermanent, in.PriceID); err != nil {
+		return checkoutError(c, err)
 	}
 	editorial, err := api.channels.allowed(c.Context(), viewer(c), post.ChannelID, channelReadPermission)
 	if err != nil {
@@ -132,38 +132,41 @@ func (api *postAPI) checkout(c fiber.Ctx, publicURL string) error {
 			return clientError(c, 403, "active channel membership is required to buy this post")
 		}
 	}
-	result, err := api.billing.client.CreateCheckoutSession(c.Context(), request)
-	if err != nil {
-		return checkoutError(c, err)
-	}
-	c.Set("Cache-Control", "no-store")
-	return c.Status(201).JSON(result)
+	return api.channels.mintCheckout(c, in.PriceID, publicURL)
 }
+
+// sold requires price to be one of resource's current offers: a checkout
+// sells only what the app put on sale.
+func (api *postAPI) sold(ctx context.Context, resource string, kind billing.OfferKind, price billing.PriceID) error {
+	return api.channels.sold(ctx, resource, kind, price)
+}
+
+func (api *channelAPI) sold(ctx context.Context, resource string, kind billing.OfferKind, price billing.PriceID) error {
+	offers, err := api.billing.offers(ctx, kind, []string{resource}, 100)
+	if err != nil {
+		return err
+	}
+	for _, offer := range offers[resource] {
+		if offer.PriceID == price && offer.ProductKey == resource {
+			return nil
+		}
+	}
+	return billing.ErrNotFound
+}
+
+// subscribe is POST /api/v1/channels/:id/subscribe {price_id}: a paid
+// membership open to join, for someone without editorial access.
 func (api *channelAPI) subscribe(c fiber.Ctx, publicURL string) error {
 	if viewer(c) == "" {
 		return clientError(c, 401, "a user access token is required")
 	}
-	in, key, err := checkoutBody(c)
+	in, err := checkoutBody(c)
 	if err != nil {
 		return clientError(c, 400, err.Error())
 	}
 	id, err := channelID(c.Params("id"))
 	if err != nil {
 		return clientError(c, 400, "invalid channel id")
-	}
-	request := checkoutRequest(viewer(c), membershipResource(id), key, in.PriceID, in.Payment, openrails.OfferRecurring, publicURL)
-	replay, err := api.billing.client.LookupCheckoutSession(c.Context(), request)
-	if err == nil {
-		if replay.Status == "created" {
-			replay, err = api.billing.client.CreateCheckoutSession(c.Context(), request)
-			if err != nil {
-				return checkoutError(c, err)
-			}
-		}
-		return c.Status(201).JSON(replay)
-	}
-	if !errors.Is(err, openrails.ErrNotFound) {
-		return checkoutError(c, err)
 	}
 	release, err := api.lock(c.Context(), id)
 	if err != nil {
@@ -180,6 +183,9 @@ func (api *channelAPI) subscribe(c fiber.Ctx, publicURL string) error {
 	if state.Status != membershipOpen || state.Free {
 		return clientError(c, 409, "this channel has no paid membership open to join")
 	}
+	if err := api.sold(c.Context(), membershipResource(id), billing.OfferRecurring, in.PriceID); err != nil {
+		return checkoutError(c, err)
+	}
 	editorial, err := api.allowed(c.Context(), viewer(c), id, channelReadPermission)
 	if err != nil {
 		return billingUnavailable(c)
@@ -187,12 +193,5 @@ func (api *channelAPI) subscribe(c fiber.Ctx, publicURL string) error {
 	if editorial {
 		return clientError(c, 409, "you already have editorial access to this channel")
 	}
-	if in.Payment.PaymentMethodID == "" {
-		return paymentMethodRequired(c)
-	}
-	result, err := api.billing.client.CreateCheckoutSession(c.Context(), request)
-	if err != nil {
-		return checkoutError(c, err)
-	}
-	return c.Status(201).JSON(result)
+	return api.mintCheckout(c, in.PriceID, publicURL)
 }

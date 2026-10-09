@@ -69,7 +69,7 @@ export function PostView({
   const unlockRef = useRef<HTMLDivElement>(null);
   const [watchMedia, mediaNear] = useNear(full);
   const policy = post.access_policy;
-  const price = post.offers?.find((offer) => !offer.auto_renew);
+  const price = post.offers?.find((offer) => offer.kind !== "recurring");
   const needsMembership = policy === "membership" || (policy === "members_ppv" && !post.has_membership);
   const name = post.channel_name || "Creator";
   const label = post.title || `Post by ${name}`;

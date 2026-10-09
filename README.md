@@ -11,10 +11,11 @@ directory is `/dev/routes`. AuthKit protocol anchors stay at
 
 ## Run locally
 
-Prerequisites: Docker, Go 1.26.6, Node 24 with pnpm 11, libvips (`libvips-dev`;
+Prerequisites: Docker, Go 1.26.9, Node 24 with pnpm 11, libvips (`libvips-dev`;
 the media worker's image jobs are CGO) and ffmpeg with ffprobe (its video jobs). Copy
 `.env.example` to `.env` and set `MEDIA_TOKEN_KEY`
-(`echo "dev:$(openssl rand -base64 32)"`), then:
+(`echo "dev:$(openssl rand -base64 32)"`), copy `merchant.example.yaml` to
+`merchant.yaml` with your sandbox PSP, then:
 
 ```sh
 task dev:up   # PostgreSQL (with PGroonga) and MinIO with the media bucket; idempotent
@@ -40,22 +41,21 @@ The frontend follows the shared UI standard: shadcn `base-vega` on
 hand-edit them except for `// Local:` deltas. `frontend/dist` is committed and
 embedded, so rebuild it with every frontend change.
 
-Billing is required and sandbox-only. Enabling a provider is configuration only:
-list its key in `BILLING_PSPS` (e.g. `stripe,nmi`) and set its variables.
-OpenRails's `embed.PSPFromEnv` reads `<KEY>_ACCOUNT_ID` plus the rail's secrets and
-settings (`<KEY>_RAIL` when the key is not the rail name) and refuses a missing
-required secret; startup refuses a PSP whose credentials are not sandbox. The
+Billing is required and sandbox-only. The seller and its PSPs live in
+`merchant.yaml` (copy `merchant.example.yaml`; it holds secrets and is
+gitignored), read with `openrails.ReadMerchantFile`. Enabling a provider is
+adding it there; startup refuses a PSP whose credentials are not sandbox. The
 browser receives OpenRails's browser-safe PSP config and `@openrails/billing-ui`
 picks each flow (Collect.js, Stripe Elements, hosted redirect); there is no
-provider-specific code here. `BILLING_CHECKOUT_PSP` picks the one PSP for new
-purchases and new cards (applied as OpenRails's checkout routing); the others keep
-serving their existing cards and subscriptions. Buyers see one payment modal:
-saved cards, an inline new card (always saved), one Pay button.
+provider-specific code here. With several PSPs, `settings.checkout_routing`
+picks the one for new purchases and new cards; the others keep serving their
+existing cards and subscriptions. Buyers see one payment modal: saved cards,
+an inline new card (always saved), one Pay button.
 
-| Provider | Variables |
+| Provider | `merchant.yaml` |
 | --- | --- |
-| Stripe | `STRIPE_ACCOUNT_ID`, `STRIPE_SECRET_KEY` (`sk_test_`/`rk_test_`), `STRIPE_WEBHOOK_SIGNING_SECRET`, `STRIPE_PUBLISHABLE_KEY` (`pk_test_`, for in-page card setup) |
-| NMI | `NMI_ACCOUNT_ID` (gateway ID), `NMI_SECURITY_KEY` (test mode), `NMI_WEBHOOK_SIGNING_SECRET`, `NMI_TOKENIZATION_KEY`, optional `NMI_TOKENIZATION_URL`, `NMI_ENDPOINT_DEPLOYMENT` (`gateway` or `sandbox`) |
+| Stripe | `account_id`; secrets `secret_key` (`sk_test_`/`rk_test_`), `webhook_signing_secret`; setting `publishable_key` (`pk_test_`, for in-page card entry) |
+| NMI | `account_id` (gateway ID); secrets `security_key` (test mode), `webhook_signing_secret`; settings `tokenization_key`, optional `tokenization_url`, `endpoint_deployment` (`gateway` or `sandbox`) |
 
 Declared PSP settings seed a new database; an existing PSP row keeps its stored
 settings.
@@ -64,11 +64,12 @@ The local sandbox has OpenRails's destructive-action switch armed, so terminal d
 cancels, revocations and provider-schedule cancels execute; an operator disables them
 with `UPDATE billing.destructive_action_switch SET enabled=false, updated_by='<you>', reason='<why>', updated_at=now();`.
 
-Webhooks go to `/billing/v1/webhooks/<rail>/<ACCOUNT_ID>`. For Stripe run
-`task stripe:listen`, copy its `whsec_...` into `STRIPE_WEBHOOK_SIGNING_SECRET` and
+Webhooks go to `/billing/v1/webhooks/<rail>/<account_id>`. For Stripe export
+`STRIPE_SECRET_KEY` and `STRIPE_ACCOUNT_ID` (as in `merchant.yaml`), run
+`task stripe:listen`, copy its `whsec_...` into `merchant.yaml` and
 keep it running (it finds `stripe` on PATH, then `.runtime/bin/stripe`; restricted
 keys need Debugging Tools: Write). NMI posts only to a public HTTPS URL: register
-`https://<public-host>/billing/v1/webhooks/nmi/<NMI_ACCOUNT_ID>` in the NMI portal
+`https://<public-host>/billing/v1/webhooks/nmi/<account_id>` in the NMI portal
 with the signing key, through a tunnel when local. Locally it is optional: NMI
 results are synchronous and OpenRails reconciles from the gateway.
 
@@ -80,8 +81,7 @@ results are synchronous and OpenRails reconciles from the gateway.
 | `AUTH_ISSUER`, `AUTH_AUDIENCE` | Token issuer/audience; origin issuer matches root discovery |
 | `AUTH_KEYS_PATH` | Dev signing and TOTP key directory (default `.runtime/auth`), so sessions and authenticator apps survive restarts |
 | `AUTH_SCHEMA`, `APP_SCHEMA`, `BILLING_SCHEMA`, `RIVER_SCHEMA` | Optional independent schema names; shared `public` is supported |
-| `BILLING_PSPS` | Enabled PSP keys, e.g. `stripe,nmi`; each needs its variables (above) |
-| `BILLING_CHECKOUT_PSP` | PSP for new purchases and cards; required with several `BILLING_PSPS` |
+| `MERCHANT_FILE` | The merchant declaration (default `merchant.yaml`) |
 | `TRUSTED_COUNTRY_HEADER` | Edge header with the buyer's country (e.g. `CF-IPCountry`) to preselect the billing country; unset = never trusted, the browser locale is used |
 | `MEMBERSHIP_PERIOD` | Renewal period of membership prices set afterwards, in whole hours (default `720h`; e.g. `1h` to test rebilling) |
 | `POST_DELETION_REFUND`, `POST_DELETION_REFUND_WINDOW` | Deleting a paid post: `refund` (default), `review` or `none` for one-time purchases made within the window before deletion (default `720h`). A post that becomes free refunds nothing |
@@ -92,10 +92,12 @@ results are synchronous and OpenRails reconciles from the gateway.
 | `MEDIA_UPLOAD_FILES_PER_HOUR`, `MEDIA_UPLOAD_BYTES_PER_DAY`, `MEDIA_CHANNEL_QUOTA_BYTES` | Upload limits (defaults 60, 100 GiB, 500 GiB) |
 
 There is no separate billing database URL or billing encryption key. Credentials
-are supplied as a host-owned snapshot. The app and billing library use fresh
-pre-v1 schema baselines: use a new database when the baseline changes, preserving
-old databases and receipts. Startup validates checksums and never rewrites them.
-AuthKit owns its forward migrations; River owns the shared worker schema.
+are supplied as a host-owned snapshot (`merchant.yaml`). `onlydemo migrate`
+applies the app's and ContentKit's schemas and the shared River tables;
+`authkit.New` and `openrails.New` create or upgrade their own when the server
+starts. OpenRails v1 and AuthKit v1 do not upgrade older baselines: use a new
+database, preserving old databases and receipts. Startup validates checksums and
+never rewrites them.
 
 ## Channels and reading
 
@@ -120,9 +122,13 @@ Posts have one of four content policies:
 A purchased post stays readable permanently, even after membership ends or the
 post's access policy changes. Deleted content is hidden. Payment history remains.
 
-The application stores content and its access policy, not a duplicate product,
-price or sales ledger. OpenRails products grant opaque resource keys such as
-`post:<stable-id>` and `channel:<channel-id>:membership`. Catalog offers own native
+The application stores content, its access policy and each channel's slug and
+name (AuthKit holds only the channel's permission group, with the channel's id),
+not a duplicate product, price or sales ledger. One merchant catalog holds a
+product per sold resource, keyed by the entitlement it grants:
+`post:<stable-id>` and `channel:<channel-id>:membership`, plus
+`channel:<channel-id>:membership:free`, the never-sold product a free member is
+granted. Catalog offers own native
 currency amounts, availability and immutable price versions. USD offers appear
 first; another displayed currency is charged only when explicitly selected.
 A channel has no membership until its owner creates one (`PUT
@@ -131,8 +137,8 @@ A channel has no membership until its owner creates one (`PUT
 require one. States:
 
 - **Open, paid:** new members subscribe; repricing affects new members only.
-- **Open, free:** `POST /join` grants the membership resource directly (no card);
-  `POST /leave` revokes it. Making a paid membership free stops paid renewals at
+- **Open, free:** `POST /join` grants the free membership product (no card);
+  `POST /leave` revokes the grant. Making a paid membership free stops paid renewals at
   period end and grants those members the free membership.
 - **Closed** (`enabled: false`): no new joins. Existing members keep access,
   including new membership posts, and keep renewing at their accepted price.
@@ -274,41 +280,35 @@ and channel folders with no row.
 
 ## Buying and membership
 
-One-time purchases go from the frontend to the post purchase endpoint, then through the
-portable OpenRails Client to the provider's hosted page or an in-page card form.
-The host checks only content
-and channel policy; OpenRails decides offer validity, repeat purchase eligibility,
-accepted terms and payment state. An exact idempotency lookup happens before
-mutable admission checks, so retrying an accepted attempt does not create a new
-payment or lose its original terms. The UI persists the attempt key.
-After a post is physically removed, its purchase endpoint returns 404; an already
-accepted checkout and its financial history remain available by checkout ID.
-
-Membership uses in-page customer card setup, a saved method, an immutable
-membership quote and an explicit payer confirmation. The browser uses the native
-`/billing/v1/me/checkout/:id` read/confirm routes. Generic billing checkout creation
-is omitted from this profile, so it cannot bypass the app's admission rules.
-A redirect is never proof of payment; the UI reads the verified session state.
+A purchase or a membership starts at the app: `POST /api/v1/posts/:id/checkout`
+or `POST /api/v1/channels/:id/subscribe` with `{price_id}`. The app checks its
+content and channel policy (members-only purchases need a membership, editors
+buy nothing, the price must be one of the offers it put on sale), then mints the
+buyer's checkout session with the Go client's `CreateCheckoutSession`. The
+browser pays it in `@openrails/billing-ui`'s `CheckoutModal` on the customer
+surface (`/billing/v1/me/checkout-sessions/:id`), where saved cards pay too.
+OpenRails decides offer validity, repeat purchase eligibility, accepted terms
+and payment state; a redirect is never proof of payment, the modal reads the
+verified session. Customers cannot start a checkout of their own
+(`Customers: CustomerBillingManagement`), so nothing bypasses the app's rules.
+After a post is physically removed, its purchase endpoint returns 404; an
+already paid session and its financial history remain.
 
 `/me` shows managed channels and a paginated purchased-post library. Its Billing
 tab is `@openrails/billing-ui`'s `AccountBilling` on the embedded `/billing/v1/me`
 API: subscriptions (cancel with feedback, resume, change card), saved cards
-(add with any PSP that supports in-page card setup, remove, default) and payment history.
-Checkout success/cancel URLs return to the request's `Origin` (else
-`PUBLIC_URL`); OpenRails refuses any origin outside `PUBLIC_URL` + `RETURN_ORIGINS`.
+(add with any PSP that supports in-page card setup, remove) and payment history.
+Return URLs name `PUBLIC_URL` or the request's `Origin`; OpenRails refuses any
+origin outside `PUBLIC_URL` + `RETURN_ORIGINS`.
 
-Site admins (`root:billing:operate`) run merchant operations on
-`/api/v1/admin/billing`, e.g. migrating a legacy NMI book
-([OpenRails runbook](https://github.com/open-rails/openrails/blob/master/docs/batch-import.md)):
-
-| Route | OpenRails call |
-| --- | --- |
-| `POST /import` | `ImportBilling` (a `DeclaredBilling` book) |
-| `POST /provider-refresh` | `RefreshProviders` |
-| `POST /subscriptions/:id/takeover[/preview\|/abandon]`, `GET …/takeover` | `TakeOverBilling` (`Idempotency-Key`), `PreviewEngineTakeover`, `AbandonEngineTakeover`, `GetEngineTakeover` |
-| `POST /takeovers` | `TakeOverBillingBatch` |
-| `POST /subscriptions/:id/change-tier[/preview]` | `ChangeTier` (`Idempotency-Key`), `PreviewTierChange` |
-| `POST /payments/:id/refunds` | `RefundPayment` (`Idempotency-Key`; `revoke_access` ends access) |
+Site admins (the root `admin` role: `root:customers:read`, `root:customers:update`)
+work on customers' billing through the OpenRails merchant API at
+`/billing/v1/merchant/*`, guarded by those permissions (`Routes.Guards`
+`StaffReads`, `StaffWrites`): billing import
+([runbook](https://github.com/open-rails/openrails/blob/master/docs/batch-import.md)),
+provider refresh, tier changes, refunds and the rest of the
+[route table](https://github.com/open-rails/openrails/blob/master/docs/api/routes.md).
+Grant the role with `task admin:grant USER_ID=<id>`.
 
 ## Deletion and identity
 

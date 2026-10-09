@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/open-rails/authkit/embedded"
 	riverkit "github.com/open-rails/helpers/river"
 	"github.com/open-rails/migratekit"
 )
@@ -15,8 +14,8 @@ import (
 //go:embed migrations/postgres/*.sql
 var migrationFiles embed.FS
 
-// initializeDatabase uses the same owning pool as the API and shared workers.
-// Each library initializes its own private storage through its public API.
+// initializeDatabase applies the app's and ContentKit's schemas and the host
+// fleet's River tables. AuthKit and OpenRails migrate themselves in New.
 func initializeDatabase(ctx context.Context, cfg Config, pool *pgxpool.Pool) error {
 	ctx, cancelMigration := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancelMigration()
@@ -26,13 +25,10 @@ func initializeDatabase(ctx context.Context, cfg Config, pool *pgxpool.Pool) err
 	if err := applyContentMigrations(ctx, pool, cfg); err != nil {
 		return fmt.Errorf("ContentKit migrations: %w", err)
 	}
-	if err := riverkit.ApplyMigrations(ctx, pool, cfg.RiverSchema); err != nil {
+	if err := riverkit.ApplyMigrations(ctx, pool, riverSchema(cfg)); err != nil {
 		return fmt.Errorf("host River migrations: %w", err)
 	}
-	if err := embedded.ApplyMigrations(ctx, pool, cfg.AuthSchema, embedded.MigrationOptions{River: embedded.RiverFromHost()}); err != nil {
-		return fmt.Errorf("AuthKit migrations: %w", err)
-	}
-	return initializeBilling(ctx, cfg, pool)
+	return nil
 }
 
 func applyMigrations(ctx context.Context, pool *pgxpool.Pool, cfg Config) error {

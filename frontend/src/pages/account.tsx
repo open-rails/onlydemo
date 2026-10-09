@@ -200,7 +200,7 @@ function Billing() {
         cardSetupReturnURL={(id) =>
           `${location.origin}/me?tab=billing&setup_id=${encodeURIComponent(id)}`
         }
-        defaultCurrency="USD"
+        collectionCurrency="USD"
         defaultCountry={config.data?.country || undefined}
       />
     </AccountBillingScope>
