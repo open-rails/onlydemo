@@ -206,9 +206,13 @@ type duePass struct{}
 func (duePass) Kind() string { return "openrails.dunning" }
 
 // renewAt steps the shared clock just past end and runs OpenRails's
-// scheduled due pass once, then waits for the work it accepted.
+// scheduled due pass once, then waits for the work it accepted. OpenRails
+// holds renewals on a PSP without fresh provider coverage, so the PSP is
+// refreshed first, as its two-hourly refresh would have been.
 func (h *nmiHarness) renewAt(end time.Time) {
 	h.t.Helper()
+	h.clock.Advance(end.Add(-time.Minute).Sub(h.clock.Now()))
+	h.refresh()
 	h.clock.Advance(end.Sub(h.clock.Now()) + time.Second)
 	res, err := h.srv.jobs.Insert(h.ctx, duePass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
 	if err != nil {
@@ -217,6 +221,30 @@ func (h *nmiHarness) renewAt(end time.Time) {
 	eventually(h.t, "due pass", func() bool {
 		job, err := h.srv.jobs.JobGet(h.ctx, res.Job.ID)
 		return err == nil && job.State == rivertype.JobStateCompleted
+	})
+	h.settle()
+}
+
+// refresh runs a provider refresh of the PSPs to completion. Its bounded
+// catch-up snoozes between history windows; due snoozes are promoted at once.
+func (h *nmiHarness) refresh() {
+	h.t.Helper()
+	res, err := h.srv.billing.client.RefreshPSPs(h.ctx)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	eventually(h.t, "provider refresh", func() bool {
+		job, err := h.srv.jobs.JobGet(h.ctx, res.JobID)
+		if err != nil {
+			return false
+		}
+		if job.State == rivertype.JobStateDiscarded {
+			h.t.Fatalf("provider refresh failed: %v", job.Errors)
+		}
+		if job.State == rivertype.JobStateScheduled && !job.ScheduledAt.After(time.Now()) {
+			_, _ = h.srv.jobs.JobRetry(h.ctx, job.ID)
+		}
+		return job.State == rivertype.JobStateCompleted
 	})
 	h.settle()
 }
