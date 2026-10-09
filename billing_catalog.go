@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/contentkit/media/tiered"
+	"github.com/open-rails/contentkit/access"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 )
@@ -19,12 +19,25 @@ type offerPrice struct {
 	Currency   string `json:"currency"`
 }
 
-// Products are keyed by the resource they grant: one per post, and per
-// channel one sold membership and one free (never sold) membership.
-func postResource(key string) string      { return "post:" + key }
-func membershipResource(id string) string { return "channel:" + id + ":membership" }
+// Products are keyed by the ContentKit entitlement they grant: one per post
+// (owning it), and per channel one sold membership and one free (never sold)
+// membership granting the same key.
+func postResource(id string) string       { return access.Own(postRef(id)).String() }
+func membershipResource(id string) string { return access.Members(ref(kindChannel, id)).String() }
 func freeMembershipProduct(id string) string {
 	return membershipResource(id) + ":free"
+}
+
+// policyLevels maps a post's access policy to ContentKit's paywall levels.
+var policyLevels = map[string]access.Level{
+	"public": access.Public, "membership": access.MembersLevel, "ppv": access.PPV, "members_ppv": access.MembersPPV,
+}
+
+// postRule is a post's paywall: owning the post unlocks it at every level, so
+// buyers keep access after policy or membership changes; members_ppv sells
+// the post to members only.
+func postRule(p post) access.Rule {
+	return access.Rule{Level: policyLevels[p.AccessPolicy], Scope: ref(kindChannel, p.ChannelID)}
 }
 
 // A product sells through one price key; a new price under it archives the
@@ -55,9 +68,46 @@ func (b *billingService) access(ctx context.Context, user string, keys []string)
 	return result, nil
 }
 
-// checker adapts OpenRails entitlements to media/tiered.
-func (b *billingService) checker() tiered.Checker {
-	return tiered.CheckerFunc(b.access)
+// held answers the viewer's own and members keys among keys from f (the
+// request's one entitlement read), reading exactly only the keys of a
+// keyspace f holds incompletely.
+func (b *billingService) held(ctx context.Context, user string, f *access.Filter, keys []string) (map[string]bool, error) {
+	out := map[string]bool{}
+	if user == "" {
+		return out, nil
+	}
+	type keyspace struct {
+		own  bool
+		kind string
+	}
+	sets := map[keyspace]map[string]bool{}
+	var exact []string
+	for _, s := range unique(keys) {
+		k, err := access.ParseKey(s)
+		r, ok := k.Ref()
+		if err != nil || !ok || !f.Complete(r.ContentKind) {
+			exact = append(exact, s)
+			continue
+		}
+		ks := keyspace{k.Kind() == access.KeyOwn, r.ContentKind}
+		if sets[ks] == nil {
+			ids := f.Members(ks.kind)
+			if ks.own {
+				ids = f.Owned(ks.kind)
+			}
+			sets[ks] = make(map[string]bool, len(ids))
+			for _, id := range ids {
+				sets[ks][id] = true
+			}
+		}
+		out[s] = sets[ks][r.ContentID]
+	}
+	if len(exact) == 0 {
+		return out, nil
+	}
+	read, err := b.access(ctx, user, exact)
+	maps.Copy(out, read)
+	return out, err
 }
 
 // offers lists each key's active offers, preferred currency first; limit

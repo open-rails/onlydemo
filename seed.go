@@ -15,7 +15,7 @@ import (
 
 const seedPassword = "OnlyDemo-seed-42!"
 
-type seedPost struct{ slug, title, body, policy, price string }
+type seedPost struct{ title, body, policy, price string }
 
 // membership is "" for none, "free", or a paid price in micro-units.
 type seedCreator struct {
@@ -25,28 +25,28 @@ type seedCreator struct {
 
 var seedCreators = []seedCreator{
 	{"lunarose", "lunarose", "Luna Rose", "9990000", []seedPost{
-		{"welcome", "Welcome to my channel", "Hi everyone! This is where I share behind-the-scenes photos from every shoot.", "public", ""},
-		{"golden-hour", "Golden hour set", "The full golden hour set from last weekend, forty unedited frames.", "membership", ""},
-		{"studio-diary", "Studio diary: lighting notes", "Every light, modifier and setting I used this month, with diagrams.", "ppv", "4990000"},
+		{"Welcome to my channel", "Hi everyone! This is where I share behind-the-scenes photos from every shoot.", "public", ""},
+		{"Golden hour set", "The full golden hour set from last weekend, forty unedited frames.", "membership", ""},
+		{"Studio diary: lighting notes", "Every light, modifier and setting I used this month, with diagrams.", "ppv", "4990000"},
 	}},
 	{"chefmarco", "chefmarco", "Chef Marco", "5990000", []seedPost{
-		{"knife-skills", "Five knife skills everyone needs", "Julienne, brunoise, chiffonade, tourné and the rock chop, step by step.", "public", ""},
-		{"sunday-ragu", "My Sunday ragù", "The six-hour ragù my grandmother taught me, with every trick included.", "membership", ""},
-		{"pasta-masterclass", "Fresh pasta masterclass", "A complete written masterclass: doughs, shapes, fillings and sauces.", "members_ppv", "7990000"},
+		{"Five knife skills everyone needs", "Julienne, brunoise, chiffonade, tourné and the rock chop, step by step.", "public", ""},
+		{"My Sunday ragù", "The six-hour ragù my grandmother taught me, with every trick included.", "membership", ""},
+		{"Fresh pasta masterclass", "A complete written masterclass: doughs, shapes, fillings and sauces.", "members_ppv", "7990000"},
 	}},
 	{"fitwithkai", "fitwithkai", "Fit with Kai", "7990000", []seedPost{
-		{"morning-mobility", "Ten-minute morning mobility", "A short routine to loosen hips, shoulders and spine before work.", "public", ""},
-		{"12-week-plan", "12-week strength plan", "Progressive overload plan with three full-body sessions each week.", "membership", ""},
-		{"nutrition-guide", "Nutrition guide", "Macros, meal timing and a two-week sample menu.", "ppv", "9990000"},
+		{"Ten-minute morning mobility", "A short routine to loosen hips, shoulders and spine before work.", "public", ""},
+		{"12-week strength plan", "Progressive overload plan with three full-body sessions each week.", "membership", ""},
+		{"Nutrition guide", "Macros, meal timing and a two-week sample menu.", "ppv", "9990000"},
 	}},
 	{"inksketch", "inksketch", "Ink & Sketch", "free", []seedPost{
-		{"ink-hello", "Sketchbook tour", "A flip through this year's sketchbook, page by page.", "public", ""},
-		{"ink-line-weight", "Line weight exercises", "Six drills for confident, varied line weight. Free for members.", "membership", ""},
-		{"ink-brush-pack", "Brush pack and process", "My custom brush pack with a full process write-up.", "members_ppv", "2990000"},
+		{"Sketchbook tour", "A flip through this year's sketchbook, page by page.", "public", ""},
+		{"Line weight exercises", "Six drills for confident, varied line weight. Free for members.", "membership", ""},
+		{"Brush pack and process", "My custom brush pack with a full process write-up.", "members_ppv", "2990000"},
 	}},
 	{"cityhiker", "cityhiker", "City Hiker", "", []seedPost{
-		{"hiker-routes", "Five urban walking routes", "Five routes through the old town, each under two hours.", "public", ""},
-		{"hiker-guidebook", "The complete city guidebook", "Every route, café and viewpoint I've mapped, in one guide.", "ppv", "5990000"},
+		{"Five urban walking routes", "Five routes through the old town, each under two hours.", "public", ""},
+		{"The complete city guidebook", "Every route, café and viewpoint I've mapped, in one guide.", "ppv", "5990000"},
 	}},
 }
 
@@ -77,24 +77,24 @@ func seed(ctx context.Context, base string, out io.Writer) error {
 				return fmt.Errorf("%s membership: %w", creator.channel, err)
 			}
 		}
-		var existing []struct{ Slug string }
+		var existing []struct{ Title string }
 		if err = client.call(ctx, "GET", "/api/v1/posts?limit=50&channel_id="+channelID, token, nil, &existing); err != nil {
 			return fmt.Errorf("%s posts: %w", creator.channel, err)
 		}
 		seeded := map[string]bool{}
 		for _, item := range existing {
-			seeded[item.Slug] = true
+			seeded[item.Title] = true
 		}
 		for _, p := range creator.posts {
-			if seeded[p.slug] {
+			if seeded[p.title] {
 				continue
 			}
-			body := map[string]any{"channel_id": channelID, "slug": p.slug, "title": p.title, "body": p.body, "access_policy": p.policy}
+			body := map[string]any{"channel_id": channelID, "title": p.title, "body": p.body, "access_policy": p.policy}
 			if p.price != "" {
 				body["price"] = map[string]any{"unit_amount": p.price, "currency": "USD"}
 			}
 			if err := client.call(ctx, "POST", "/api/v1/posts", token, body, nil); err != nil {
-				return fmt.Errorf("%s post: %w", p.slug, err)
+				return fmt.Errorf("%s post: %w", p.title, err)
 			}
 		}
 		fmt.Fprintf(out, "seeded @%s (%d posts)\n", creator.channel, len(creator.posts))

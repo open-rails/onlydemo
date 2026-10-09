@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
 	authkitfiber "github.com/open-rails/authkit/adapters/fiber"
+	"github.com/open-rails/contentkit/access"
 	"github.com/riverqueue/river"
 )
 
@@ -143,7 +144,9 @@ func startServer(ctx context.Context, config Config, pool *pgxpool.Pool, opts bi
 	}
 	s.closers = append(s.closers, func() { _ = s.billing.Close(context.Background()) })
 	s.channels = newChannels(pool, s.auth, s.billing, config)
-	s.posts = newPosts(s.channels, config)
+	if s.posts, err = newPosts(s.channels, config); err != nil {
+		return nil, err
+	}
 	if s.media, err = newMedia(ctx, config, pool, s.auth, s.billing, s.channels, s.posts); err != nil {
 		return nil, fmt.Errorf("initialize media: %w", err)
 	}
@@ -178,6 +181,11 @@ func startServer(ctx context.Context, config Config, pool *pgxpool.Pool, opts bi
 func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, cfg Config, channels *channelAPI, posts *postAPI, media *mediaService) (*fiber.App, error) {
 	app := fiber.New()
 	app.Use(countQueries)
+	// One entitlement read per request: the paywall gate memoizes it.
+	app.Use(func(c fiber.Ctx) error {
+		c.SetContext(access.WithMemo(c.Context()))
+		return c.Next()
+	})
 
 	app.Get("/dev/routes", homepage(app))
 
@@ -210,18 +218,17 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, c
 	app.Post("/api/v1/channels/:id/leave", required, channels.leave)
 	app.Post("/api/v1/channels/:id/subscribe", required, func(c fiber.Ctx) error { return channels.subscribe(c, returnOrigin(c, cfg.PublicURL)) })
 	app.Get("/api/v1/channels/:id/members", required, channels.members)
-	app.Get("/api/v1/channels/:channel/posts/:slug", optional, posts.getBySlug)
 	app.Post("/api/v1/channels/:id/members", required, channels.members)
 	app.Delete("/api/v1/channels/:id/members/:user_id", required, channels.members)
 	app.Get("/api/v1/me", required, posts.me)
 	app.Get("/api/v1/me/channels", required, channels.mine)
-	app.Get("/api/v1/config", publicConfiguration(billing, cfg.TrustedCountryHeader))
+	app.Get("/api/v1/config", publicConfiguration(billing, media, cfg.TrustedCountryHeader))
 	app.Get("/api/v1/posts", optional, posts.list)
 	app.Post("/api/v1/posts", required, posts.create)
-	app.Get("/api/v1/posts/:id", optional, posts.get)
-	app.Patch("/api/v1/posts/:id", required, posts.update)
-	app.Delete("/api/v1/posts/:id", required, posts.delete)
-	app.Post("/api/v1/posts/:id/checkout", required, func(c fiber.Ctx) error {
+	app.Get("/api/v1/posts/:code", optional, posts.get)
+	app.Patch("/api/v1/posts/:code", required, posts.update)
+	app.Delete("/api/v1/posts/:code", required, posts.delete)
+	app.Post("/api/v1/posts/:code/checkout", required, func(c fiber.Ctx) error {
 		return posts.checkout(c, returnOrigin(c, cfg.PublicURL))
 	})
 	media.mount(app, optional)
@@ -234,6 +241,10 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, c
 	if err := authkitfiber.Mount(app, authService.client); err != nil {
 		return nil, err
 	}
-	mountFrontend(app)
+	urls, err := newURLRouter(posts, cfg)
+	if err != nil {
+		return nil, err
+	}
+	mountFrontend(app, urls, cfg.PublicURL, posts)
 	return app, nil
 }

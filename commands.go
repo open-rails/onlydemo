@@ -56,11 +56,11 @@ func newRootCommand() *cobra.Command {
 	seedCommand.Flags().StringVar(&seedURL, "url", "http://127.0.0.1:3000", "running server base URL")
 	mediaCommand := &cobra.Command{Use: "media", Short: "Media maintenance", Args: cobra.NoArgs}
 	root.AddCommand(&cobra.Command{
-		Use: "media-worker", Short: "Run the media worker: image renditions, slots, video encodes, upload placement (needs libvips and ffmpeg)", Args: cobra.NoArgs,
+		Use: "media-worker", Short: "Run the media worker: upload placement, image renditions, video encodes (needs libvips and ffmpeg)", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return runMediaWorker(cmd.Context()) },
 	})
 	mediaCommand.AddCommand(&cobra.Command{
-		Use: "reprocess", Short: "Re-derive every item's media after a rendition policy change", Args: cobra.NoArgs,
+		Use: "reprocess", Short: "Redo every item's stale media outputs after a preset change", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return reprocessMedia(cmd.Context(), cmd.OutOrStdout()) },
 	})
 	var orphanGrace time.Duration
@@ -74,7 +74,12 @@ func newRootCommand() *cobra.Command {
 	orphans.Flags().DurationVar(&orphanGrace, "grace", 24*time.Hour, "skip folders changed within this period")
 	orphans.Flags().BoolVar(&deleteOrphans, "delete", false, "delete the orphans instead of only reporting them")
 	mediaCommand.AddCommand(orphans)
-	root.AddCommand(admin, seedCommand, mediaCommand)
+	urlsCommand := &cobra.Command{Use: "urls", Short: "Content URL maintenance", Args: cobra.NoArgs}
+	urlsCommand.AddCommand(&cobra.Command{
+		Use: "backfill", Short: "Register every post's content code and slug (idempotent)", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error { return backfillURLs(cmd.Context(), cmd.OutOrStdout()) },
+	})
+	root.AddCommand(admin, seedCommand, mediaCommand, urlsCommand)
 	return root
 }
 

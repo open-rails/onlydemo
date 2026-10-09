@@ -23,6 +23,7 @@ const titles: Record<UploadUiOperation, string> = {
   "slot.load": "Couldn't load the image",
   "slot.decode": "Couldn't open the image",
   "slot.save": "Couldn't save the image",
+  "slot.remove": "Couldn't remove the image",
   upload: "Upload failed",
 };
 

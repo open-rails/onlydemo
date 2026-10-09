@@ -12,6 +12,8 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/contentkit/access"
+	ckopenrails "github.com/open-rails/contentkit/adapters/openrails"
 	riverkit "github.com/open-rails/helpers/river"
 	"github.com/open-rails/openrails"
 	openrailsfiber "github.com/open-rails/openrails/adapters/fiber"
@@ -23,6 +25,8 @@ type billingService struct {
 	client *openrails.Client
 	// reads are the viewer lookups behind every page (the client; tests count them).
 	reads entitlementReads
+	// gate decides paywalls from one entitlement read per request.
+	gate *access.Gate
 	// psps are the declared PSPs every offer price is sold through.
 	psps         []string
 	postDeletion postDeletionPolicy
@@ -64,6 +68,10 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 		return nil, fmt.Errorf("start OpenRails: %w", err)
 	}
 	b := &billingService{client: client, reads: client, psps: slices.Sorted(maps.Keys(cfg.Merchant.PSPs)), postDeletion: cfg.PostDeletion, membershipHours: cfg.MembershipHours}
+	if b.gate, err = access.NewGate(access.GateConfig{Entitlements: ckopenrails.Entitlements(liveReads{b}), Tenant: tenant,
+		MemberKinds: []string{kindChannel}, OwnedKinds: []string{kindPost}}); err != nil {
+		return nil, err
+	}
 	// This assignment precedes shared-fleet startup and HTTP publication.
 	auth.billing = b
 	return b, nil
@@ -81,6 +89,13 @@ type entitlementReads interface {
 	ListCustomerEntitlements(context.Context, billing.CustomerID, billing.CustomerEntitlementListParams, ...openrails.RequestOption) (*billing.ListPage[billing.CustomerEntitlement], error)
 	ListOffers(context.Context, billing.OfferListParams, ...openrails.RequestOption) (billing.OfferPages, error)
 	CheckProductAccess(context.Context, billing.CustomerID, billing.CheckProductAccessParams, ...openrails.RequestOption) (map[string]bool, error)
+}
+
+// liveReads reads entitlements through b.reads at call time.
+type liveReads struct{ b *billingService }
+
+func (r liveReads) CheckEntitlements(ctx context.Context, c billing.CustomerID, p billing.CheckEntitlementsParams, o ...openrails.RequestOption) (*billing.EntitlementCheck, error) {
+	return r.b.reads.CheckEntitlements(ctx, c, p, o...)
 }
 
 func (b *billingService) RiverJobs() riverkit.Contribution { return b.client.RiverJobs() }

@@ -1,4 +1,4 @@
-import type { SlotManifest } from "@openrails/contentkit-upload";
+import type { PublicImage } from "@openrails/contentkit-upload";
 import type { PspConfig } from "@openrails/billing-ui";
 export type AccessPolicy = "public" | "membership" | "members_ppv" | "ppv";
 // An OpenRails offer: a product's current price for its entitlement.
@@ -23,8 +23,8 @@ export interface Channel {
   role?: "owner" | "editor";
   can_manage: boolean;
   can_edit: boolean;
-  avatar: SlotManifest | null;
-  cover: SlotManifest | null;
+  avatar: PublicImage | null;
+  cover: PublicImage | null;
   membership: ChannelMembership;
   deleted_at?: string | null;
 }
@@ -44,6 +44,8 @@ export interface Post {
   channel_slug: string;
   channel_name?: string;
   author_id: string;
+  // The post's URL is /p/{code}/{slug}; the slug follows the title.
+  code: string;
   slug: string;
   title: string;
   body?: string;
@@ -51,9 +53,7 @@ export interface Post {
   can_edit?: boolean;
   purchased?: boolean;
   has_membership?: boolean;
-  channel_avatar?: SlotManifest;
-  // Posts with a video: the cover (native-aspect srcset).
-  poster?: SlotManifest;
+  channel_avatar?: PublicImage;
   access_policy: AccessPolicy;
   // "publishing": media still processing; only the channel's editors see it.
   state: "draft" | "publishing" | "published";
@@ -77,7 +77,7 @@ export interface Page<T> {
   total?: number;
 }
 export interface AccountData {
-  user: { id: string; username: string; email?: string; avatar: SlotManifest | null };
+  user: { id: string; username: string; email?: string; avatar: PublicImage | null };
   manageable_channels: Channel[];
   purchased_posts: Post[];
 }
@@ -86,6 +86,8 @@ export interface AppConfig {
   billing_available: boolean;
   /** The buyer's country from a trusted edge header, else "". */
   country: string;
+  /** The user avatar preset; a user's is this at their id. */
+  user_avatar: PublicImage;
 }
 export const visibilityLabels: Record<AccessPolicy, string> = {
   public: "Public",

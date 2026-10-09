@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { request } from "../api";
 import type { AccessPolicy, Channel, Post } from "../models";
 import { micros } from "../format";
@@ -32,7 +32,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { FormError } from "./states";
 import { MemberStar } from "./policy-badge";
 import { DraftMediaEditor, MediaDrop, type DraftMediaHandle } from "./post-media";
-import { postFiles, screenFiles } from "../media";
+import { screenFiles, uploadsOf, usePostUploads } from "../media";
 
 const policies: Array<{ value: AccessPolicy; title: string; detail: string }> =
   [
@@ -130,25 +130,25 @@ export function PostForm({
   const client = useQueryClient();
   // New posts upload into a draft created with the first file; Publish turns
   // it into the post, Cancel deletes it with its media.
-  const [draft, setDraft] = useState<{ id: string; files: File[] }>();
+  const [draft, setDraft] = useState<{ id: string; code: string; files: File[] }>();
   const [mediaBusy, setMediaBusy] = useState(false);
   const [refused, setRefused] = useState<string[]>([]);
   const media = useRef<DraftMediaHandle>(null);
   const onBusy = useCallback((busy: boolean) => setMediaBusy(busy), []);
   const createDraft = useMutation({
     mutationFn: () =>
-      request<{ id: string }>("/api/v1/posts", {
+      request<{ id: string; code: string }>("/api/v1/posts", {
         method: "POST",
         body: JSON.stringify({ channel_id: channelID, draft: true }),
       }),
   });
   const addFirst = (list: File[]) => {
-    const { accepted, refused } = screenFiles(list, { files: 0, videos: 0 });
+    const { accepted, refused } = screenFiles(list, { images: 0, videos: 0 });
     setRefused(refused);
     if (accepted.length === 0) return;
     createDraft.mutate(undefined, {
-      onSuccess: ({ id }) => {
-        setDraft({ id, files: accepted });
+      onSuccess: ({ id, code }) => {
+        setDraft({ id, code, files: accepted });
         onDraft?.(true);
       },
     });
@@ -156,7 +156,7 @@ export function PostForm({
   const discard = useMutation({
     mutationFn: async () => {
       media.current?.discard();
-      if (draft) await request(`/api/v1/posts/${draft.id}`, { method: "DELETE" });
+      if (draft) await request(`/api/v1/posts/${draft.code}`, { method: "DELETE" });
     },
     onSuccess: () => onDiscarded?.(),
   });
@@ -173,18 +173,18 @@ export function PostForm({
   // Text is optional once the post has an image or video.
   const [hasText, setHasText] = useState(!!(post?.title.trim() || post?.body?.trim()));
   const [draftMedia, setDraftMedia] = useState(0);
-  const saved = useQuery({ queryKey: ["post-files", post?.id], queryFn: () => postFiles(post!.id), enabled: !!post });
-  const hasMedia = draftMedia > 0 || !!saved.data?.files.some((f) => f.name !== "teaser");
+  const saved = usePostUploads(post?.id ?? "", !!post);
+  const hasMedia = draftMedia > 0 || uploadsOf(saved.data).length > 0;
   const needsText = !hasMedia && !hasText;
   const offer = post?.offers?.find((value) => value.kind !== "recurring");
   const save = useMutation({
     mutationFn: (body: object) =>
-      request<Post>(post ? `/api/v1/posts/${post.id}` : "/api/v1/posts", {
+      request<Post>(post ? `/api/v1/posts/${post.code}` : "/api/v1/posts", {
         method: post ? "PATCH" : "POST",
         body: JSON.stringify(body),
       }),
     onSuccess: async (saved) => {
-      // Follow a renamed slug (or open the new post) before refetching.
+      // Follow a new title's slug (or open the new post) before refetching.
       onSaved(saved);
       await client.invalidateQueries();
     },
@@ -202,7 +202,6 @@ export function PostForm({
         ...(post ? {} : { channel_id: channelID }),
         ...(draft ? { draft_id: draft.id } : {}),
         title: String(data.get("title")).trim(),
-        slug: String(data.get("slug")).trim(),
         body: String(data.get("body")),
         access_policy: policy,
         ...(["ppv", "members_ppv"].includes(policy)
@@ -256,33 +255,17 @@ export function PostForm({
             )}
           </Field>
         )}
-        <div className="input-row">
-          <Field>
-            <FieldLabel htmlFor="post-title">Title</FieldLabel>
-            <Input
-              id="post-title"
-              name="title"
-              maxLength={200}
-              autoFocus
-              defaultValue={post?.title}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="post-slug">Slug</FieldLabel>
-            <Input
-              id="post-slug"
-              name="slug"
-              pattern="[a-z0-9]+(-[a-z0-9]+)*"
-              maxLength={120}
-              defaultValue={post?.slug}
-              placeholder="a-short-slug"
-            />
-            <FieldDescription>
-              Unique within this channel. Lowercase letters, numbers, and
-              dashes. Leave empty to make one from the title.
-            </FieldDescription>
-          </Field>
-        </div>
+        <Field>
+          <FieldLabel htmlFor="post-title">Title</FieldLabel>
+          <Input
+            id="post-title"
+            name="title"
+            maxLength={200}
+            autoFocus
+            defaultValue={post?.title}
+          />
+          <FieldDescription>The post's address follows its title; old links keep working.</FieldDescription>
+        </Field>
         <Field>
           <FieldLabel htmlFor="post-body">Story</FieldLabel>
           <Textarea

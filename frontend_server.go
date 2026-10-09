@@ -3,10 +3,13 @@ package main
 import (
 	"embed"
 	"mime"
+	"net/http"
 	"path"
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/adaptor"
+	"github.com/open-rails/contentkit/contenturl"
 	"github.com/open-rails/openrails/billing"
 )
 
@@ -33,7 +36,9 @@ func frontendFile(c fiber.Ctx, name string) error {
 
 // Vite assets are built explicitly with pnpm. Unknown API paths stay 404 and
 // never receive an HTML shell masquerading as a successful API response.
-func mountFrontend(app *fiber.App) {
+// Content pages pass the URL router first.
+func mountFrontend(app *fiber.App, urls *contenturl.Router, base string, posts *postAPI) {
+	shell := adaptor.HTTPHandler(urls.Middleware(spaPage(http.StatusOK, base, posts)))
 	app.Use(func(c fiber.Ctx) error {
 		for _, prefix := range []string{"/api/", "/auth/", "/billing/", "/.well-known/", "/oidc/"} {
 			if strings.HasPrefix(c.Path(), prefix) {
@@ -52,13 +57,13 @@ func mountFrontend(app *fiber.App) {
 				return c.SendStatus(404)
 			}
 		}
-		c.Set("Cache-Control", "no-store")
-		return frontendFile(c, "index.html")
+		return shell(c)
 	})
 }
 
-// publicConfiguration exposes OpenRails's browser-safe PSP projection.
-func publicConfiguration(b *billingService, countryHeader string) fiber.Handler {
+// publicConfiguration exposes OpenRails's browser-safe PSP projection and the
+// user avatar preset (a user's avatar is it at their id).
+func publicConfiguration(b *billingService, m *mediaService, countryHeader string) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		// Only an operator-named edge header is trusted for the buyer's country.
 		country := ""
@@ -73,6 +78,6 @@ func publicConfiguration(b *billingService, countryHeader string) fiber.Handler 
 			psps = config.PSPs
 		}
 		c.Set("Cache-Control", "no-store")
-		return c.JSON(fiber.Map{"billing_available": err == nil, "psps": psps, "country": country})
+		return c.JSON(fiber.Map{"billing_available": err == nil, "psps": psps, "country": country, "user_avatar": m.image(kindUser, "", avatarImage)})
 	}
 }

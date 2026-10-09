@@ -51,10 +51,10 @@ func TestNMIBillingEndToEnd(t *testing.T) {
 	channelID := owner.call("POST", "/api/v1/channels", map[string]any{"slug": "nmi-studio", "name": "NMI studio"}, "", 201)["id"].(string)
 	membership := owner.call("PUT", "/api/v1/channels/"+channelID+"/membership", map[string]any{"enabled": true, "price": map[string]any{"unit_amount": "9990000", "currency": "USD"}}, "", 200)
 	membershipPrice := membership["membership"].(map[string]any)["offer"].(map[string]any)["price_id"].(string)
-	post := owner.call("POST", "/api/v1/posts", map[string]any{"channel_id": channelID, "slug": "nmi-ppv", "title": "Paid", "body": "Paid content",
+	post := owner.call("POST", "/api/v1/posts", map[string]any{"channel_id": channelID, "title": "Paid", "body": "Paid content",
 		"access_policy": "ppv", "price": map[string]any{"unit_amount": "4990000", "currency": "USD"}}, "", 201)
-	included := owner.call("POST", "/api/v1/posts", map[string]any{"channel_id": channelID, "slug": "nmi-members", "title": "Members", "body": "Members read this", "access_policy": "membership"}, "", 201)
-	postPath, includedPath := "/api/v1/posts/"+post["id"].(string), "/api/v1/posts/"+included["id"].(string)
+	included := owner.call("POST", "/api/v1/posts", map[string]any{"channel_id": channelID, "title": "Members", "body": "Members read this", "access_policy": "membership"}, "", 201)
+	postPath, includedPath := "/api/v1/posts/"+post["code"].(string), "/api/v1/posts/"+included["code"].(string)
 
 	psps, err := h.srv.billing.client.ListPSPs(ctx, billing.PSPListParams{})
 	if err != nil || len(psps.Items) != 1 {
@@ -155,7 +155,7 @@ func newNMIHarness(t *testing.T) *nmiHarness {
 	h.cfg = Config{MembershipHours: 720, DatabaseURL: pool.Config().ConnString(), PublicURL: h.base, ReturnOrigins: []string{h.base}, AuthIssuer: h.base, AuthAudience: "demo-nmi-test",
 		Merchant: testMerchant(openrails.NMIPSP{AccountID: nmiTestAccount, SecurityKey: "nmimock-security-key",
 			WebhookSigningSecret: "nmimock-webhook-secret", TokenizationKey: "nmimock-tokenization"}.PSPConfig()),
-		Media: mediaConfig{Tenant: "o", S3Endpoint: endpoint, S3PublicEndpoint: endpoint, S3Bucket: h.bucket, S3Region: "us-east-1",
+		Media: mediaConfig{S3Endpoint: endpoint, S3PublicEndpoint: endpoint, S3Bucket: h.bucket, S3Region: "us-east-1",
 			S3AccessKeyID: access, S3SecretKey: secret, URL: "http://127.0.0.1:9", Delivery: media.DeliverCookie, CookieDomain: "localhost",
 			TokenKey: "k1:" + base64.StdEncoding.EncodeToString(key), FilesPerHour: testFilesPerHour, BytesPerDay: 1 << 30, ChannelQuota: testQuota}}
 	if err = initializeDatabase(ctx, h.cfg, pool); err != nil {

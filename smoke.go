@@ -121,18 +121,18 @@ func smoke() error {
 	if _, err := owner.call("POST", "/api/v1/channels", ownerToken, map[string]any{"slug": "smoke-channel", "name": "Duplicate"}, "", 409); err != nil {
 		return fmt.Errorf("duplicate channel slug: %w", err)
 	}
-	post, err := owner.call("POST", "/api/v1/posts", ownerToken, map[string]any{"channel_id": ch["id"], "slug": "smoke-post", "title": "Manual purchase", "body": "Paid content", "access_policy": "ppv", "price": map[string]any{"unit_amount": "4990000", "currency": "USD"}}, "", 201)
+	post, err := owner.call("POST", "/api/v1/posts", ownerToken, map[string]any{"channel_id": ch["id"], "title": "Manual purchase", "body": "Paid content", "access_policy": "ppv", "price": map[string]any{"unit_amount": "4990000", "currency": "USD"}}, "", 201)
 	if err != nil {
 		return err
 	}
-	path := "/api/v1/posts/" + post["id"].(string)
+	path := "/api/v1/posts/" + post["code"].(string)
 	if post, err = owner.activeOffer(path, ownerToken); err != nil {
 		return err
 	}
-	if err = smokeChannelScopedSlugs(owner, ownerToken, ch["id"].(string), post["id"]); err != nil {
-		return fmt.Errorf("channel-scoped post slugs: %w", err)
+	if err = smokePostURLs(owner, ownerToken, post); err != nil {
+		return fmt.Errorf("content URLs: %w", err)
 	}
-	preview, err := buyer.call("GET", "/api/v1/channels/smoke-channel/posts/smoke-post", buyerToken, nil, "", 200)
+	preview, err := buyer.call("GET", path, buyerToken, nil, "", 200)
 	if err != nil {
 		return err
 	}
@@ -217,7 +217,7 @@ func smoke() error {
 	if accepted["status"] != "succeeded" {
 		return fmt.Errorf("reprice changed the paid session: %v", accepted["status"])
 	}
-	gatedPost := map[string]any{"channel_id": ch["id"], "slug": "members-extra", "title": "Members buy separately", "body": "Extra permanent purchase", "access_policy": "members_ppv", "price": map[string]any{"unit_amount": "4990000", "currency": "USD"}}
+	gatedPost := map[string]any{"channel_id": ch["id"], "title": "Members buy separately", "body": "Extra permanent purchase", "access_policy": "members_ppv", "price": map[string]any{"unit_amount": "4990000", "currency": "USD"}}
 	if _, err = owner.call("POST", "/api/v1/posts", ownerToken, gatedPost, "", 400); err != nil {
 		return fmt.Errorf("members-only post without a membership: %w", err)
 	}
@@ -234,10 +234,10 @@ func smoke() error {
 	if err != nil {
 		return err
 	}
-	if gated, err = owner.activeOffer("/api/v1/posts/"+gated["id"].(string), ownerToken); err != nil {
+	if gated, err = owner.activeOffer("/api/v1/posts/"+gated["code"].(string), ownerToken); err != nil {
 		return err
 	}
-	gatedPath := "/api/v1/posts/" + gated["id"].(string) + "/checkout"
+	gatedPath := "/api/v1/posts/" + gated["code"].(string) + "/checkout"
 	gatedPrice := gated["offers"].([]any)[0].(map[string]any)["price_id"]
 	if _, err = buyer.call("POST", gatedPath, buyerToken, map[string]any{"price_id": gatedPrice}, "", 403); err != nil {
 		return err
@@ -251,11 +251,11 @@ func smoke() error {
 		return fmt.Errorf("membership offer missing")
 	}
 	membershipPrice := membershipOffer["price_id"].(string)
-	included, err := owner.call("POST", "/api/v1/posts", ownerToken, map[string]any{"channel_id": channelID, "slug": "included-post", "title": "Membership post", "body": "Members read this", "access_policy": "membership"}, "", 201)
+	included, err := owner.call("POST", "/api/v1/posts", ownerToken, map[string]any{"channel_id": channelID, "title": "Membership post", "body": "Members read this", "access_policy": "membership"}, "", 201)
 	if err != nil {
 		return err
 	}
-	includedPath := "/api/v1/posts/" + included["id"].(string)
+	includedPath := "/api/v1/posts/" + included["code"].(string)
 	beforeMembership, err := buyer.call("GET", includedPath, buyerToken, nil, "", 200)
 	if err != nil {
 		return err
@@ -277,18 +277,18 @@ func smoke() error {
 	if afterMembership["can_read"] != true {
 		return fmt.Errorf("verified membership did not grant access")
 	}
-	future, err := owner.call("POST", "/api/v1/posts", ownerToken, map[string]any{"channel_id": channelID, "slug": "future-included", "title": "New member story", "body": "Future member content", "access_policy": "membership"}, "", 201)
+	future, err := owner.call("POST", "/api/v1/posts", ownerToken, map[string]any{"channel_id": channelID, "title": "New member story", "body": "Future member content", "access_policy": "membership"}, "", 201)
 	if err != nil {
 		return err
 	}
-	futureRead, err := buyer.call("GET", "/api/v1/posts/"+future["id"].(string), buyerToken, nil, "", 200)
+	futureRead, err := buyer.call("GET", "/api/v1/posts/"+future["code"].(string), buyerToken, nil, "", 200)
 	if err != nil {
 		return err
 	}
 	if futureRead["can_read"] != true {
 		return fmt.Errorf("membership did not include future post")
 	}
-	gatedRead, err := buyer.call("GET", "/api/v1/posts/"+gated["id"].(string), buyerToken, nil, "", 200)
+	gatedRead, err := buyer.call("GET", "/api/v1/posts/"+gated["code"].(string), buyerToken, nil, "", 200)
 	if err != nil {
 		return err
 	}
@@ -373,11 +373,11 @@ func smoke() error {
 	if retainedPurchase["purchased"] != true || retainedPurchase["can_read"] != true {
 		return fmt.Errorf("policy edit removed permanent purchase")
 	}
-	doomed, err := owner.call("POST", "/api/v1/posts", ownerToken, map[string]any{"channel_id": channelID, "slug": "doomed-post", "title": "Deleted later", "body": "Soon gone", "access_policy": "ppv", "price": map[string]any{"unit_amount": "4990000", "currency": "USD"}}, "", 201)
+	doomed, err := owner.call("POST", "/api/v1/posts", ownerToken, map[string]any{"channel_id": channelID, "title": "Deleted later", "body": "Soon gone", "access_policy": "ppv", "price": map[string]any{"unit_amount": "4990000", "currency": "USD"}}, "", 201)
 	if err != nil {
 		return err
 	}
-	doomedPath := "/api/v1/posts/" + doomed["id"].(string)
+	doomedPath := "/api/v1/posts/" + doomed["code"].(string)
 	if doomed, err = owner.activeOffer(doomedPath, ownerToken); err != nil {
 		return err
 	}
@@ -427,7 +427,7 @@ func smoke() error {
 	if _, err = owner.call("DELETE", "/auth/v1/me", ownerToken, map[string]any{"password": "Manual-smoke-password-42!"}, "", 204); err != nil {
 		return fmt.Errorf("retired channel still blocked owner account deletion: %w", err)
 	}
-	fmt.Println("Manual smoke passed: native auth, channel-scoped post slugs, resource offers and reprice, saved-card checkout sessions, permanent paid access, members-only purchase refusal, membership checkout and cancellation, membership close/free/join/leave/paid transitions, future included posts, separate publishing roles, post soft deletion with archived product, retained channel soft deletion and owner account deletion. Zero real provider requests.")
+	fmt.Println("Manual smoke passed: native auth, content URLs, resource offers and reprice, saved-card checkout sessions, permanent paid access, members-only purchase refusal, membership checkout and cancellation, membership close/free/join/leave/paid transitions, future included posts, separate publishing roles, post soft deletion with archived product, retained channel soft deletion and owner account deletion. Zero real provider requests.")
 	return nil
 }
 
@@ -458,50 +458,34 @@ func smokePay(buyer smokeClient, token, session, method string) error {
 	return nil
 }
 
-// Post slugs are unique per channel and addressed as /c/<channel>/<post>.
-func smokeChannelScopedSlugs(owner smokeClient, token, channelID string, postID any) error {
-	other, err := owner.call("POST", "/api/v1/channels", token, map[string]any{"slug": "smoke-other", "name": "Other smoke"}, "", 201)
+// Posts are /p/{CODE}/{slug}: every post has its own code, the slug
+// follows the title and is decoration, and the API takes codes.
+func smokePostURLs(owner smokeClient, token string, post map[string]any) error {
+	twin, err := owner.call("POST", "/api/v1/posts", token, map[string]any{"channel_id": post["channel_id"], "title": post["title"], "body": "Same title"}, "", 201)
 	if err != nil {
 		return err
 	}
-	twin, err := owner.call("POST", "/api/v1/posts", token, map[string]any{"channel_id": other["id"], "slug": "smoke-post", "title": "Same slug", "body": "Other channel"}, "", 201)
-	if err != nil {
-		return fmt.Errorf("same slug in another channel: %w", err)
+	if twin["code"] == post["code"] || twin["slug"] != post["slug"] || post["slug"] != "manual-purchase" {
+		return fmt.Errorf("same title: %v/%v and %v/%v", post["code"], post["slug"], twin["code"], twin["slug"])
 	}
-	dup, err := owner.call("POST", "/api/v1/posts", token, map[string]any{"channel_id": channelID, "slug": "smoke-post", "title": "Duplicate", "body": "Same channel"}, "", 409)
-	if err != nil {
-		return err
-	}
-	if dup["error"] != "That post slug is already used in this channel. Choose another." {
-		return fmt.Errorf("duplicate slug message %v", dup["error"])
-	}
-	for _, slug := range []string{"new", "Bad Slug", "a--b"} {
-		if _, err = owner.call("POST", "/api/v1/posts", token, map[string]any{"channel_id": channelID, "slug": slug, "title": "t", "body": "b"}, "", 400); err != nil {
-			return fmt.Errorf("invalid slug %q: %w", slug, err)
+	code := twin["code"].(string)
+	page := "/p/" + code + "/manual-purchase"
+	for from, to := range map[string]string{"/p/" + code: page, "/p/" + strings.ToLower(code) + "/old": page} {
+		req, _ := http.NewRequest("GET", owner.base+from, nil)
+		res, err := owner.client.Transport.RoundTrip(req)
+		if err != nil {
+			return err
+		}
+		res.Body.Close()
+		if res.StatusCode != 301 || res.Header.Get("Location") != to {
+			return fmt.Errorf("GET %s = %d %q, want 301 %s", from, res.StatusCode, res.Header.Get("Location"), to)
 		}
 	}
-	first, err := owner.call("GET", "/api/v1/channels/smoke-channel/posts/smoke-post", "", nil, "", 200)
-	if err != nil {
-		return err
+	renamed, err := owner.call("PATCH", "/api/v1/posts/"+code, token, map[string]any{"title": "Renamed twin"}, "", 200)
+	if err != nil || renamed["slug"] != "renamed-twin" {
+		return fmt.Errorf("rename: %v %w", renamed, err)
 	}
-	second, err := owner.call("GET", "/api/v1/channels/smoke-other/posts/smoke-post", "", nil, "", 200)
-	if err != nil {
-		return err
-	}
-	if first["id"] != postID || second["id"] != twin["id"] || second["channel_slug"] != "smoke-other" {
-		return fmt.Errorf("slug lookup resolved the wrong posts")
-	}
-	twinPath := "/api/v1/posts/" + twin["id"].(string)
-	if _, err = owner.call("PATCH", twinPath, token, map[string]any{"slug": "smoke-renamed"}, "", 200); err != nil {
-		return err
-	}
-	if _, err = owner.call("GET", "/api/v1/channels/smoke-other/posts/smoke-renamed", "", nil, "", 200); err != nil {
-		return err
-	}
-	if _, err = owner.call("GET", "/api/v1/channels/smoke-other/posts/smoke-post", "", nil, "", 404); err != nil {
-		return err
-	}
-	_, err = owner.call("DELETE", "/api/v1/channels/"+other["id"].(string), token, nil, "", 202)
+	_, err = owner.call("DELETE", "/api/v1/posts/"+code, token, nil, "", 204)
 	return err
 }
 
@@ -532,11 +516,11 @@ func smokeMembershipSettings(owner smokeClient, ownerToken string, buyer smokeCl
 	if _, err = owner.call("PUT", settings, ownerToken, map[string]any{"enabled": false, "price": nil}, "", 200); err != nil {
 		return err
 	}
-	closedPost, err := owner.call("POST", "/api/v1/posts", ownerToken, map[string]any{"channel_id": channelID, "slug": "after-close", "title": "For existing members", "body": "Still published", "access_policy": "membership"}, "", 201)
+	closedPost, err := owner.call("POST", "/api/v1/posts", ownerToken, map[string]any{"channel_id": channelID, "title": "For existing members", "body": "Still published", "access_policy": "membership"}, "", 201)
 	if err != nil {
 		return err
 	}
-	closedPath := "/api/v1/posts/" + closedPost["id"].(string)
+	closedPath := "/api/v1/posts/" + closedPost["code"].(string)
 	for _, path := range []string{includedPath, closedPath} {
 		if ok, err := readable(buyer, buyerToken, path); err != nil || !ok {
 			return fmt.Errorf("closing removed a member's access to %s: %v", path, err)

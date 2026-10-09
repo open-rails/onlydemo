@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { APIError, request } from "../api";
 import { NotFoundPage } from "../App";
@@ -38,9 +38,11 @@ import {
   useJoinFree,
   usePay,
 } from "../components/pay";
-import { channelPath, postPath } from "../paths";
+import { channelPath, contentURLs, parseCode, postLink, postPath } from "../paths";
+import { useCanonical } from "../canonical";
 export function PostPage() {
-  const { channel: channelSlug = "", post: postSlug = "" } = useParams();
+  const code = parseCode(useParams().code ?? "");
+  const location = useLocation();
   const auth = useAuth();
   const navigate = useNavigate();
   const client = useQueryClient();
@@ -48,11 +50,9 @@ export function PostPage() {
   const [editor, setEditor] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const post = useQuery({
-    queryKey: ["post", channelSlug, postSlug, auth.user?.id],
-    queryFn: () =>
-      request<Post>(
-        `/api/v1/channels/${encodeURIComponent(channelSlug)}/posts/${encodeURIComponent(postSlug)}`,
-      ),
+    queryKey: ["post", code, auth.user?.id],
+    queryFn: () => request<Post>(`/api/v1/posts/${code}`),
+    enabled: !!code,
     refetchInterval: (query) =>
       query.state.data?.offer_status === "pending" || query.state.data?.state === "publishing" ? 2000 : false,
   });
@@ -64,12 +64,12 @@ export function PostPage() {
   });
   const offer = post.data?.offers?.find((value) => value.kind !== "recurring");
   const joinFree = useJoinFree(post.data?.channel_id || "");
-  const canonical = post.data && postPath(post.data);
+  // The slug is decoration: keep the address bar on the canonical URL.
+  const canonical = post.data && contentURLs.canonical(location.pathname + location.search, postLink(post.data));
   useEffect(() => {
-    // A former channel slug still resolves; show the current URL.
-    if (canonical && canonical !== location.pathname)
-      navigate(canonical, { replace: true });
-  }, [canonical, navigate]);
+    if (canonical?.redirect) navigate(canonical.location, { replace: true });
+  }, [canonical?.redirect, canonical?.location, navigate]);
+  useCanonical(post.data && postPath(post.data), post.data?.title);
   const pageTitle = post.data && (post.data.title || `Post by @${post.data.channel_slug}`);
   useEffect(() => {
     if (!pageTitle) return;
@@ -80,12 +80,13 @@ export function PostPage() {
   }, [pageTitle]);
   const remove = useMutation({
     mutationFn: () =>
-      request(`/api/v1/posts/${post.data!.id}`, { method: "DELETE" }),
+      request(`/api/v1/posts/${post.data!.code}`, { method: "DELETE" }),
     onSuccess: () => {
       void client.invalidateQueries();
       navigate(channelPath(post.data?.channel_slug || ""));
     },
   });
+  if (!code) return <NotFoundPage />;
   if (post.isPending) return <Loading />;
   if (post.error instanceof APIError && post.error.status === 404)
     return <NotFoundPage />;
@@ -122,7 +123,7 @@ export function PostPage() {
     else if (mustJoin && membership)
       pay({ kind: "membership", id: item.channel_id, merchant: creator, offer: membership });
     else if (!mustJoin && offer)
-      pay({ kind: "post", id: item.id, merchant: creator, offer });
+      pay({ kind: "post", id: item.code, merchant: creator, offer });
   };
   return (
     <>
@@ -162,7 +163,7 @@ export function PostPage() {
               </div>
             )
           }
-          editor={canEdit && <PostMediaEditor postID={item.id} channel={channel.data?.can_manage ? item.channel_id : undefined} />}
+          editor={canEdit && <PostMediaEditor postID={item.id} />}
         />
         <aside className="panel purchase-panel">
           <dl className="post-facts">

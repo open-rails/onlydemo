@@ -22,23 +22,23 @@ tasks:
     cmds:
       - docker compose down -v
 
-  media:access:
-    desc: Run the media access worker (ContentKit cmd/media-access at the go.mod version)
+  media:gateway:
+    desc: Run the media gateway (ContentKit cmd/media-gateway at the go.mod version)
     cmds:
       - |
-        MEDIA_ACCESS_LISTEN="${MEDIA_ACCESS_LISTEN:-127.0.0.1:8090}" \
-        MEDIA_ACCESS_S3_ENDPOINT="$MEDIA_S3_ENDPOINT" \
-        MEDIA_ACCESS_S3_BUCKET="${MEDIA_S3_BUCKET:-onlydemo-media}" \
-        MEDIA_ACCESS_S3_ACCESS_KEY_ID="$MEDIA_S3_ACCESS_KEY_ID" \
-        MEDIA_ACCESS_S3_SECRET_ACCESS_KEY="$MEDIA_S3_SECRET_ACCESS_KEY" \
-        MEDIA_ACCESS_TOKEN_KEY="$MEDIA_TOKEN_KEY" \
-        MEDIA_ACCESS_TOKEN_KEY_PREVIOUS="${MEDIA_TOKEN_KEY_PREVIOUS:-}" \
-        MEDIA_ACCESS_CORS_ORIGINS="${MEDIA_ACCESS_CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}" \
-        MEDIA_ACCESS_HOSTS="${MEDIA_ACCESS_HOSTS:-localhost,127.0.0.1}" \
-        go run github.com/open-rails/contentkit/cmd/media-access
+        MEDIA_GATEWAY_LISTEN="${MEDIA_GATEWAY_LISTEN:-127.0.0.1:8090}" \
+        MEDIA_GATEWAY_S3_ENDPOINT="$MEDIA_S3_ENDPOINT" \
+        MEDIA_GATEWAY_S3_BUCKET="${MEDIA_S3_BUCKET:-onlydemo-media}" \
+        MEDIA_GATEWAY_S3_ACCESS_KEY_ID="$MEDIA_S3_ACCESS_KEY_ID" \
+        MEDIA_GATEWAY_S3_SECRET_ACCESS_KEY="$MEDIA_S3_SECRET_ACCESS_KEY" \
+        MEDIA_GATEWAY_TOKEN_KEY="$MEDIA_TOKEN_KEY" \
+        MEDIA_GATEWAY_TOKEN_KEY_PREVIOUS="${MEDIA_TOKEN_KEY_PREVIOUS:-}" \
+        MEDIA_GATEWAY_CORS_ORIGINS="${MEDIA_GATEWAY_CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}" \
+        MEDIA_GATEWAY_HOSTS="${MEDIA_GATEWAY_HOSTS:-localhost=onlydemo; 127.0.0.1=onlydemo}" \
+        go run github.com/open-rails/contentkit/cmd/media-gateway
 
   media:worker:
-    desc: Run the media worker (`onlydemo media-worker`; needs libvips and ffmpeg). It does every image rendition, slot, video encode and upload placement; publishes go back to the app's River queue
+    desc: Run the media worker (`onlydemo media-worker`; needs libvips and ffmpeg). It places uploads and renders images and video; readiness goes back to the app's River queue
     cmds:
       - |
         MEDIA_WORKER_THREADS="${MEDIA_WORKER_THREADS:-2}" \
@@ -46,14 +46,14 @@ tasks:
         go run . media-worker
 
   run:
-    desc: Migrate, then run Go with Air, Vite, the media access worker and the video worker (task dev:up first)
+    desc: Migrate, then run Go with Air, Vite, the media gateway and the media worker (task dev:up first)
     cmds:
       - task: migrate
       - |
         set -e
         pnpm --dir frontend dev --host 127.0.0.1 &
         FRONTEND_PID=$!
-        task media:access &
+        task media:gateway &
         MEDIA_PID=$!
         task media:worker &
         WORKER_PID=$!
@@ -67,7 +67,7 @@ tasks:
       - task: migrate
       - |
         set -e
-        task media:access &
+        task media:gateway &
         MEDIA_PID=$!
         task media:worker &
         WORKER_PID=$!
@@ -122,6 +122,7 @@ tasks:
     deps: [frontend:build]
     cmds:
       - pnpm --dir frontend lint
+      - pnpm --dir frontend test
       - go build ./...
       - go vet ./...
 
@@ -139,6 +140,10 @@ tasks:
       DEMO_TEST_S3_ENDPOINT: http://127.0.0.1:59000
       DEMO_TEST_S3_ACCESS_KEY: onlydemo
       DEMO_TEST_S3_SECRET_KEY: onlydemo-dev-secret
+  urls:backfill:
+    desc: Register every post's content code and slug (idempotent)
+    cmds:
+      - go run . urls backfill
   test:nmi:
     desc: NMI billing end-to-end test against nmimock on the local PostgreSQL (task dev:up first)
     cmds:

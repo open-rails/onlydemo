@@ -27,7 +27,7 @@ import { AvatarUpload } from "@openrails/contentkit-upload/ui";
 import { Card, CardContent } from "@/components/ui/card";
 import { UserAvatar, ChannelCard } from "../components/cards";
 import { PostView } from "../components/post-view";
-import { userRef, useSlot, useSlotSaved } from "../media";
+import { userRef } from "../media";
 import { useAuth } from "../session";
 import { channelsPath, newChannelPath } from "../paths";
 import { VerifyEmailBanner } from "../verify";
@@ -245,18 +245,14 @@ function SetupReturn({ id }: { id: string }) {
 }
 function AccountSettings({ user }: { user: AccountData["user"] }) {
   const navigate = useNavigate();
-  const ref = userRef(user.id);
-  const avatar = useSlot(ref, "avatar", user.avatar);
-  const saved = useSlotSaved();
   return (
     <>
       <VerifyEmailBanner />
       <Card className="mb-6">
         <CardContent>
           <AvatarUpload
-            item={ref}
-            manifest={avatar}
-            onChange={(m) => saved(ref, "avatar", m)}
+            item={userRef(user.id)}
+            image={user.avatar}
             label="Profile photo"
           />
         </CardContent>

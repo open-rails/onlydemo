@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom";
-import { type CSSProperties, type ReactNode } from "react";
-import type { SlotManifest } from "@openrails/contentkit-upload";
-import { SlotImage } from "@openrails/contentkit-upload/ui";
+import { useState, type CSSProperties, type ReactNode } from "react";
+import { publicRenditions, type PublicImage } from "@openrails/contentkit-upload";
+import { RenditionImg } from "@openrails/contentkit-upload/ui";
+import { usePublicGeneration } from "@openrails/contentkit-upload/react";
 import { cn } from "cn";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,16 +10,25 @@ import { type Channel } from "../models";
 import { hue, membershipOffer, useChannels } from "../channels";
 import { subscribeLabel, useJoinFree, usePay } from "./pay";
 import { channelsPath, channelPath } from "../paths";
-import { userRef, useSlot } from "../media";
+import { useAppConfig } from "../config";
 
 const tint = (seed: string | number) =>
   ({ "--h": hue(seed) }) as CSSProperties;
 
-// Slot images (srcset at every rendered width; sizes is the CSS box) over a
-// generated placeholder shown while unset.
-const hasImage = (m?: SlotManifest | null): m is SlotManifest => !!m?.outputs.length;
-// The box, not the slot aspect, sizes the image (object-fit: cover).
-const fill: CSSProperties = { position: "absolute", inset: 0, width: "100%", height: "100%", aspectRatio: "auto", borderRadius: "inherit" };
+// The box, not the preset's aspect, sizes the image (object-fit: cover).
+const fill: CSSProperties = { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", borderRadius: "inherit" };
+
+// A public image preset over a generated placeholder: the width its box
+// needs, hidden while there is no upload (the media gateway answers 404).
+// A save in the upload kit remounts it with the new bytes.
+function PublicImg({ image }: { image?: PublicImage | null }) {
+  const generation = usePublicGeneration();
+  const outputs = publicRenditions(image);
+  const key = `${outputs[0]?.url}#${generation}`;
+  const [failed, setFailed] = useState<string>();
+  if (!outputs.length || failed === key) return null;
+  return <RenditionImg key={key} outputs={outputs} alt="" style={fill} onError={() => setFailed(key)} />;
+}
 export function Avatar({
   name,
   seed,
@@ -27,21 +37,21 @@ export function Avatar({
 }: {
   name: string;
   seed: string | number;
-  image?: SlotManifest | null;
+  image?: PublicImage | null;
   sizes?: string;
   className?: string;
 }) {
   return (
     <span className={cn("avatar", className)} style={tint(seed)}>
       {(name || "?").slice(0, 1).toUpperCase()}
-      {hasImage(image) && <SlotImage manifest={image} round style={fill} />}
+      <PublicImg image={image} />
     </span>
   );
 }
-// The signed-in user's avatar, shared with the account page's editor.
+// The signed-in user's avatar: the user avatar preset at their id.
 export function UserAvatar({ user, className }: { user: { id: string; username: string }; className?: string }) {
-  const image = useSlot(userRef(user.id), "avatar");
-  return <Avatar name={user.username} seed={user.id} image={image} className={className} />;
+  const preset = useAppConfig().data?.user_avatar;
+  return <Avatar name={user.username} seed={user.id} image={preset && { ...preset, id: user.id }} className={className} />;
 }
 export function Cover({
   seed,
@@ -50,14 +60,14 @@ export function Cover({
   children,
 }: {
   seed: string | number;
-  image?: SlotManifest | null;
+  image?: PublicImage | null;
   sizes?: string;
   className?: string;
   children?: ReactNode;
 }) {
   return (
     <div className={cn("cover", className)} style={tint(seed)}>
-      {hasImage(image) && <SlotImage manifest={image} style={fill} />}
+      <PublicImg image={image} />
       {children}
     </div>
   );

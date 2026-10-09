@@ -73,7 +73,7 @@ func (api *channelAPI) mintCheckout(c fiber.Ctx, price billing.PriceID, publicUR
 	return c.Status(http.StatusCreated).JSON(session)
 }
 
-// checkout is POST /api/v1/posts/:id/checkout {price_id}: the app's content
+// checkout is POST /api/v1/posts/:code/checkout {price_id}: the app's content
 // rules decide who may buy; OpenRails decides the offer and payment.
 func (api *postAPI) checkout(c fiber.Ctx, publicURL string) error {
 	if viewer(c) == "" {
@@ -83,9 +83,9 @@ func (api *postAPI) checkout(c fiber.Ctx, publicURL string) error {
 	if err != nil {
 		return clientError(c, 400, err.Error())
 	}
-	id, err := postID(c)
+	id, err := api.postID(c)
 	if err != nil {
-		return clientError(c, 404, err.Error())
+		return readError(c, err)
 	}
 	var channel string
 	err = api.pool.QueryRow(c.Context(), `SELECT channel_id::text FROM `+api.table+` WHERE id=$1`, id).Scan(&channel)

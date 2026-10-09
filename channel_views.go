@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit/iam"
-	"github.com/open-rails/contentkit/media"
+	"github.com/open-rails/contentkit/access"
 	"github.com/open-rails/openrails/billing"
 )
 
@@ -23,9 +23,9 @@ type channelView struct {
 	Role       string              `json:"role,omitempty"`
 	CanManage  bool                `json:"can_manage"`
 	CanEdit    bool                `json:"can_edit"`
-	Avatar     *media.SlotManifest `json:"avatar"`
-	Cover      *media.SlotManifest `json:"cover"`
-	Membership channelMembership   `json:"membership"`
+	Avatar     *publicImage      `json:"avatar"`
+	Cover      *publicImage      `json:"cover"`
+	Membership channelMembership `json:"membership"`
 }
 
 var errNoChannel = errors.New("channel not found")
@@ -51,7 +51,7 @@ func (api *channelAPI) views(ctx context.Context, user string, ids []string, gra
 			keys = append(keys, membershipResource(id))
 		}
 	}
-	pg, err := api.loadPage(ctx, user, ids, keys, slotAvatar, slotCover)
+	pg, err := api.loadPage(ctx, user, ids, keys)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +62,7 @@ func (api *channelAPI) views(ctx context.Context, user string, ids []string, gra
 		}
 		g, s, key := pg.channels[id], pg.states[id], membershipResource(id)
 		v := channelView{ID: id, Slug: g.Slug, Name: g.Name, CanManage: pg.can(id, channelSettingsManage), CanEdit: pg.can(id, channelEditPermission),
-			Avatar: pg.slots[slotKey{id, slotAvatar}], Cover: pg.slots[slotKey{id, slotCover}],
+			Avatar: api.media.image(kindChannel, id, avatarImage), Cover: api.media.image(kindChannel, id, coverImage),
 			Membership: channelMembership{Status: s.Status, Free: s.Free, Sync: s.Sync, Member: pg.access[key]}}
 		if v.CanManage {
 			v.Role = "owner"
@@ -271,14 +271,15 @@ func (api *postAPI) me(c fiber.Ctx) error {
 	before, _ := parsePostID(c.Query("before"))
 	// The library is every post the viewer holds a purchase of.
 	keys := []string{}
-	params := billing.CustomerEntitlementListParams{Prefix: postResource(""), PageRequest: billing.PageRequest{Limit: 100}}
+	owned := access.OwnPrefix(tenant, kindPost)
+	params := billing.CustomerEntitlementListParams{Prefix: owned, PageRequest: billing.PageRequest{Limit: 100}}
 	for {
 		held, err := api.billing.reads.ListCustomerEntitlements(c.Context(), customer, params)
 		if err != nil {
 			return billingUnavailable(c)
 		}
 		for _, e := range held.Items {
-			if key, ok := strings.CutPrefix(e.Entitlement, postResource("")); ok && uuid.Validate(key) == nil {
+			if key, ok := strings.CutPrefix(e.Entitlement, owned); ok && uuid.Validate(key) == nil {
 				keys = append(keys, key)
 			}
 		}
@@ -312,12 +313,8 @@ func (api *postAPI) me(c fiber.Ctx) error {
 	if err != nil {
 		return billingUnavailable(c)
 	}
-	avatar, err := api.media.slots(c.Context(), media.UserKind, []string{profile.ID}, slotAvatar)
-	if err != nil {
-		return databaseError(c, err)
-	}
 	c.Set("Cache-Control", "no-store")
-	return c.JSON(fiber.Map{"user": fiber.Map{"id": profile.ID, "username": profile.Username, "email": profile.Email, "avatar": avatar[slotKey{profile.ID, slotAvatar}]}, "manageable_channels": managed, "purchased_posts": purchased, "has_more": more, "next_cursor": next, "subscriptions": subscriptions.Items, "payments": payments.Items})
+	return c.JSON(fiber.Map{"user": fiber.Map{"id": profile.ID, "username": profile.Username, "email": profile.Email, "avatar": api.media.image(kindUser, profile.ID, avatarImage)}, "manageable_channels": managed, "purchased_posts": purchased, "has_more": more, "next_cursor": next, "subscriptions": subscriptions.Items, "payments": payments.Items})
 }
 
 // editable lists the channels the user can publish to.

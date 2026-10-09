@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   build:
-    name: lint + build
+    name: lint + test + build
     if: '!github.event.pull_request.draft'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -37,4 +37,5 @@ jobs:
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm --dir frontend install --frozen-lockfile
       - run: pnpm --dir frontend lint
+      - run: pnpm --dir frontend test
       - run: pnpm --dir frontend build

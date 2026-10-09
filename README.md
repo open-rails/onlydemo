@@ -24,7 +24,7 @@ task seed     # optional display channels and posts, created through the API
 ```
 
 `task run` migrates (idempotent), then serves Go with Air, the frontend with
-Vite, the media access worker (`task media:access`) and the media worker
+Vite, the media gateway (`task media:gateway`) and the media worker
 (`task media:worker`, `onlydemo media-worker`), reloading on change; open http://localhost:5173.
 The MinIO console is http://localhost:59001 (`onlydemo` / `onlydemo-dev-secret`). `task run:embedded` builds the frontend into
 the single Go binary and serves everything from http://localhost:3000.
@@ -85,10 +85,10 @@ results are synchronous and OpenRails reconciles from the gateway.
 | `TRUSTED_COUNTRY_HEADER` | Edge header with the buyer's country (e.g. `CF-IPCountry`) to preselect the billing country; unset = never trusted, the browser locale is used |
 | `MEMBERSHIP_PERIOD` | Renewal period of membership prices set afterwards, in whole hours (default `720h`; e.g. `1h` to test rebilling) |
 | `POST_DELETION_REFUND`, `POST_DELETION_REFUND_WINDOW` | Deleting a paid post: `refund` (default), `review` or `none` for one-time purchases made within the window before deletion (default `720h`). A post that becomes free refunds nothing |
-| `CONTENT_SCHEMA` | ContentKit baseline schema (default `content`); holds the upload limiter's counters |
+| `CONTENT_SCHEMA` | ContentKit schema (default `content`): the upload limiter's counters and content codes |
 | `MEDIA_S3_*` | Media bucket: `ENDPOINT`, `PUBLIC_ENDPOINT` (browser presign host), `BUCKET`, `REGION`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY` |
-| `MEDIA_URL`, `MEDIA_DELIVERY`, `MEDIA_COOKIE_DOMAIN` | media-access origin; `cookie` (default) or `url` delivery |
-| `MEDIA_TOKEN_KEY`, `MEDIA_TOKEN_KEY_PREVIOUS` | `{kid}:{base64 32+ bytes}` signing keys shared with media-access |
+| `MEDIA_URL`, `MEDIA_DELIVERY`, `MEDIA_COOKIE_DOMAIN` | media-gateway origin; `cookie` (default) or `url` delivery |
+| `MEDIA_TOKEN_KEY`, `MEDIA_TOKEN_KEY_PREVIOUS` | `{kid}:{base64 32+ bytes}` signing keys shared with media-gateway |
 | `MEDIA_UPLOAD_FILES_PER_HOUR`, `MEDIA_UPLOAD_BYTES_PER_DAY`, `MEDIA_CHANNEL_QUOTA_BYTES` | Upload limits (defaults 60, 100 GiB, 500 GiB) |
 
 There is no separate billing database URL or billing encryption key. Credentials
@@ -106,11 +106,19 @@ channel owners can manage the channel and share owner/editor roles; editors can
 publish and edit but cannot manage owners or delete the channel. Ordinary readers,
 subscribers and purchasers are **not** added to the publishing group.
 
-URLs derive from current slugs: `/c` lists channels, `/c/new` creates one,
-`/c/<channel>` and `/c/<channel>/<post>` (API:
-`GET /api/v1/channels/<channel>/posts/<post>`). Post slugs are unique within
-their channel. Checkout returns carry the stable post/channel id and resolve
-the current URL, so renames never break a link.
+`/c` lists channels, `/c/new` creates one and `/c/<handle>` is a channel. A
+post is ContentKit's uniform content URL, `/p/<CODE>/<slug>`: a permanent
+9-character code (ContentKit's `contenturl`, registered with `Put` when the
+post is created and again on a new title) and a slug from its title. The
+server reads only the code, so the slug is decoration. Before the app shell,
+the router answers a missing or stale slug, another spelling of the code or a
+trailing slash with a 301 to the canonical path, a deleted post with 410, and
+drafts and unknown codes like any unknown page; a canonical page carries
+`<link rel="canonical">`, `og:url` and `og:title` (and a `Link` header). The
+API takes the code (`/api/v1/posts/<CODE>`) and returns `code` and `slug`; the
+browser builds links with `@openrails/contentkit-urls` and keeps the address
+bar canonical. `onlydemo urls backfill` (`task urls:backfill`) registers posts
+that have no code; it is idempotent.
 
 Posts have one of four content policies:
 
@@ -125,10 +133,10 @@ post's access policy changes. Deleted content is hidden. Payment history remains
 The application stores content, its access policy and each channel's slug and
 name (AuthKit holds only the channel's permission group, with the channel's id),
 not a duplicate product, price or sales ledger. One merchant catalog holds a
-product per sold resource, keyed by the entitlement it grants:
-`post:<stable-id>` and `channel:<channel-id>:membership`, plus
-`channel:<channel-id>:membership:free`, the never-sold product a free member is
-granted. Catalog offers own native
+product per sold resource, keyed by the ContentKit entitlement it grants:
+`content:onlydemo:post:<id>` and `members:onlydemo:channel:<id>`, plus
+`members:onlydemo:channel:<id>:free`, the never-sold product granting a free
+member the membership. Catalog offers own native
 currency amounts, availability and immutable price versions. USD offers appear
 first; another displayed currency is charged only when explicitly selected.
 A channel has no membership until its owner creates one (`PUT
@@ -149,138 +157,74 @@ not a calendar month); a change applies to prices set afterwards. Repricing move
 
 ## Media
 
-Images and videos use ContentKit media: one private bucket, a folder per item,
-originals never served. Browsers upload straight to the bucket with
-`@openrails/contentkit-upload` (a ContentKit release asset); the app presigns
-and commits (`/api/v1/media/upload/*`).
+Images and videos use ContentKit media: one private bucket, an item per post,
+channel and user (`onlydemo/{kind}/{id}/`), declared once in the registry
+(`mediaKinds` in media.go). Browsers upload straight to the bucket with
+`@openrails/contentkit-upload` (a ContentKit release asset); the app presigns,
+commits (`/api/v1/media/upload/*`) and reads (`/api/v1/media/*`).
 
-Post ids are UUIDv7s (`uuidv7()`), ContentKit's content id and the media
-folder `{tenant}/post/{id}/`, so an id is never reused after a database reset.
-Creating a post starts its folder (`Manifests.Create`) and fails over leftovers.
-`onlydemo media sweep-orphans [--grace 24h] [--delete]` reports or removes post
-and channel folders with no row.
-
-- **Kinds.** `post`: images (`large`, `thumb`) and videos (MP4, WebM, MOV,
-  MKV) mixed in one order, plus an optional image `teaser` derived as a
-  blurred WebP (the app refuses a video teaser). ContentKit holds the caps
-  (`Kind.MaxFiles`, `TypeLimits`): 50 files per post (teaser included), 10 of
-  them videos; images up to 25 MiB, videos up to 20 GiB (multipart, 4K sources); 409 `too_many_files`. `channel`: public `avatar` (1:1, 128/512 px) and
-  `cover` (3:1, 900/3000 px, crops from 600 px) slots; `user`: `avatar`.
-- **Formats.** Images: JPEG, PNG, WebP, GIF, AVIF (`imageTypes` in media.go
-  and frontend/src/media.ts). Animated GIF/WebP stay animated everywhere
-  (ContentKit's default `Animation` allow; no slot rejects). Animated AVIF is
-  refused until libheif 1.19. Refusals are typed and toasted; errors surface
-  as sonner toasts through `UploadUiProvider onError`.
-- **Slots.** The SDK UI crops before saving (`AvatarUpload` on the account
-  page; `SlotEditor` + `SlotEditMenu` over the channel header): the original
-  is kept, EXIF orientation applied, and ContentKit renders the small and
-  large rendition (the large one at the crop's width when narrower; never
-  upscaled). "Edit crop" re-renders the kept original
-  (`edit-slot`); "Use as channel avatar/cover" on a post image copies it
-  (`commit-slot-from-file` with `from`; the manager must be allowed to upload to
-  both). The `SlotEncoded` hook stores each slot's `SlotListing` in
-  `media_slots.listing`; listings build its URLs with
-  `Reader.ListedSlot(ref, slot, listing)` (hash-named, immutable files; no
-  bucket reads). SDK components pick the rendition for their rendered width × 2–3×
-  density. After changing widths or variant specs, run `onlydemo media
-  reprocess` (one `ProcessJob` per post, channel and user with media).
-- **Edits.** Crop and rotate are ContentKit's non-destructive file edits
-  (commit op `edit`): variants re-derive from the untouched original. The
-  post image cropper (react-easy-crop with the SDK's `useCrop`) draws the `Unedited`,
-  `EditorOnly` `editor` variant. Only editors (whoever may upload to the item:
-  its channel's posters or managers, site admins; `Resolution.Editor`) are
-  signed it and get `edit`/`dims`. Item order lives in the
-  manifest; the post row keeps only its access policy.
-- **Reads.** `GET /api/v1/media/post/{id}?variant=large,blurred` resolves once
-  with the post rule (`media/tiered` over OpenRails: membership key,
-  `post:<billing_key>` purchase key, members_ppv = purchase only; channel
-  editors and site admins read everything). Full access gets every file;
-  anyone else who can see the post gets the teaser only. Files are served by
-  `media-access`, never the bucket.
-- **Media worker.** `onlydemo media-worker` (`task media:worker`) is
-  ContentKit's media worker built with this app's kinds, teaser spec choice
-  and hooks (`media_worker.go`): it does every image rendition, slot, video
-  encode and the placement of multipart uploads (`staging/u-…` hashed while
-  processed, then moved to `originals/sha256-…`). The app only presigns,
-  commits, publishes and reads, enqueueing into River schema `media_worker`.
-  Env: the app's config plus `MEDIA_WORKER_THREADS` (ffmpeg threads),
-  `MEDIA_WORKER_CONCURRENCY`, `MEDIA_WORKER_IMAGE_CONCURRENCY`,
-  `MEDIA_WORKER_ENCODER` (auto/x264/nvenc), `MEDIA_WORKER_TMP` and
-  `MEDIA_HOST_RIVER_SCHEMA` (default: `RIVER_SCHEMA`).
-- **Process on upload.** Each file is committed unattached the moment it
-  uploads, so it is processed while the post is still being composed; the
-  queue row shows the processing progress, "Add to post" attaches the files
-  in order without reprocessing, and removing one cancels its jobs and
-  deletes it.
-- **Video.** A commit enqueues the encode in River schema `media_worker`;
-  the media worker writes a
-  byte-range HLS ladder (ContentKit's default rungs 2160–480 by short side, so
-  vertical and 21:9 sources keep their aspect; capped at 4096 px per side and
-  3840×2160 area), a seek sprite and one MP4 download per rung. Sources outside
-  1:2.4–2.4:1 fail; editors see why (`failed`). The player (hls.js) loads
-  `/api/v1/media/post/{id}/hls/{file}/master.m3u8` from the read API, sized at
-  the source's `w`/`h`; segments come from `media-access`. Downloads are saved
-  as `{post-slug}-{file}-{rung}p.mp4`.
-- **Composer.** The first file added to "New post" creates the post as a
-  draft (`POST /api/v1/posts {channel_id, draft: true}`: no slug, never
-  listed, visible and uploadable only by its author), so uploads have a folder
-  and can be cropped and picked as the teaser before publishing. Files commit
-  in the order added; Publish sends `draft_id` and turns the draft into the
-  post. Cancel deletes the draft with its folder (`DELETE /api/v1/posts/{id}`);
-  drafts abandoned for 24 h are swept hourly.
-- **Covers.** Each post with a video has a cover at the video's native aspect
-  (`Video.PosterWidths` 640/1280/1920: the ~620 px feed column at 2–3×). The
-  worker picks an automatic frame; in the composer and the post's media editor,
-  "Set cover" (`VideoPosterPicker`: an exact frame via
-  `GET /api/v1/media/upload/frame`, optionally cropped at the video's aspect, or
-  an uploaded image) changes it. Frame posters reach the app's image job in the
-  same worker; the app needs ffmpeg for `/frame`. `SlotEncoded` stores the
-  poster listing like other slots, so listings carry `poster` URLs without
-  reads. Covers render to ContentKit's token-gated `private/` and are copied to
-  `public/` unless the post is hidden: drafts start hidden, publishing one
-  exposes it (`ExposeTx` in the same transaction; members-only and paid posts
-  keep a public cover), and deleting a post removes its public copies first.
-  `Hooks.PublicRemoved` (a CDN purge) is a no-op here.
-- **Inline preview.** Videos the viewer can play preview in the feed with
-  their own HLS, muted (mouse: after 500 ms of hover; touch: the most visible
-  one), from the cover's frame or 10 % in (ContentKit `MediaGallery`). Locked
-  posts show only the cover (`VideoPoster`): they have no stream.
-- **Uploads.** Post images need `channel:posts:create`, channel slots
-  `channel:settings:manage`, a user their own avatar. The UploadLimiter
-  rate-limits each uploader (429) and holds each channel's quota: presign
-  refuses early and a commit that would exceed it fails (413
-  `quota_exceeded`, shown in the editor); site admins are exempt. Deleting a post erases its folder and releases quota;
-  channel purge erases post and channel folders; account purge erases the
-  avatar.
+- **Posts.** Uploads `images/{name}` (JPEG, PNG, WebP, GIF, AVIF; 25 MiB, 40
+  per post) and `videos/{name}` (MP4, WebM, MOV, MKV; 20 GiB multipart, 10 per
+  post). ContentKit orders each path, so a post shows its images, then its
+  videos. Private: `large` WebP renditions and an HLS ladder per video
+  (ContentKit's default rungs and 1:2.4–2.4:1 bounds; editors see failures).
+  Public: `preview`, the first image blurred, for everyone who can see the
+  post; everything else is private, all or nothing per viewer.
+- **Channels and users.** Public `avatar` (1:1, 128/512 px) and channel
+  `cover` (3:1, 900/3000 px, from 600 px wide) at fixed names; the API returns
+  each as the SDK's `PublicImage`. A missing one is a 404 and the UI shows its
+  placeholder. The SDK crops before saving (`AvatarUpload`, `SlotEditor`).
+- **Edits.** Crop and rotate are non-destructive `edit` ops on the kept
+  original; the post cropper draws the upload's editor view.
+- **Access.** One resolver for reads, playlists and uploads: ContentKit's
+  `access.Gate` over OpenRails (`contentkit/adapters/openrails`), with the
+  post's rule (public, members, ppv, members_ppv over the channel) and
+  ContentKit's keys: `content:onlydemo:post:<id>` (owning the post) and
+  `members:onlydemo:channel:<id>`, the catalog's product keys. Channel editors
+  and site admins read everything; drafts are their author's, publishing posts
+  their channel editors'. A page of posts costs one entitlement read.
+- **Worker.** `onlydemo media-worker` (`task media:worker`) is ContentKit's
+  media worker with this registry: it places uploads, renders images and
+  encodes video from its own River schema `onlydemo_media_worker`; readiness
+  and purges come back through the app's River queue. A publishing post goes
+  live when its media is ready (`ItemReady`), its preview exposed in the same
+  transaction. Env: `MEDIA_WORKER_*` (ContentKit's tuning: threads, codecs,
+  concurrency, encoder) and `MEDIA_HOST_RIVER_SCHEMA` (default
+  `RIVER_SCHEMA`).
+- **Composer.** The first file creates the post as a draft (hidden, its
+  author's only), files commit as they finish and Publish turns the draft into
+  the post. Cancel deletes the draft with its folder; drafts abandoned for
+  24 h are swept hourly.
+- **Uploads.** Post media needs `channel:posts:create`, channel images
+  `channel:settings:manage`, a user their own avatar. The upload limiter
+  rate-limits each uploader (429) and holds each channel's quota (413
+  `quota_exceeded`); site admins are exempt. Deleting a post erases its folder
+  and releases quota; channel and account purges erase theirs.
+- **Maintenance.** `onlydemo media reprocess` redoes stale outputs after a
+  preset change; `onlydemo media sweep-orphans [--grace 24h] [--delete]`
+  reports or removes folders with no row.
 - **Delivery.** Production uses cookie mode: the site and `media.` host share a
   registrable domain (`MEDIA_COOKIE_DOMAIN`) over HTTPS. Locally the app
-  (`localhost:5173`) and worker (`localhost:8090`) share no parent domain, so
+  (`localhost:5173`) and gateway (`localhost:8090`) share no parent domain, so
   `.env.example` uses URL tokens (`MEDIA_DELIVERY=url`).
 
 ### Production media configuration
 
-- Serve `media-access` at `media.<domain>` and use cookie delivery:
+- Serve `media-gateway` at `media.<domain>` and use cookie delivery:
   `MEDIA_URL=https://media.<domain>`, `MEDIA_DELIVERY=cookie`,
   `MEDIA_COOKIE_DOMAIN=<domain>`.
-- `MEDIA_ACCESS_CORS_ORIGINS` lists exactly the site origins
-  (`https://<domain>`, plus `https://www.<domain>` if it is served);
-  `MEDIA_ACCESS_HOSTS=media.<domain>`. Keep the default
-  `Cross-Origin-Resource-Policy: same-site`, which blocks other sites from
-  hotlinking media.
-- Keep the bucket private. media-access gets a read-only key limited to
+- `MEDIA_GATEWAY_HOSTS=media.<domain>=onlydemo`; `MEDIA_GATEWAY_CORS_ORIGINS`
+  lists exactly the site origins.
+- Keep the bucket private. The gateway gets a read-only key limited to
   `*/private/*` and `*/public/*`.
-- A CDN may cache `public/` (immutable names); wire `Hooks.PublicRemoved` to
-  purge it. Never let a shared cache store `private/`: it is token-gated.
-- To rotate `MEDIA_TOKEN_KEY`, give media-access the new key as
-  `MEDIA_ACCESS_TOKEN_KEY` and the old one as `_PREVIOUS`, switch the app
-  to the new key, and drop the old key after about 5 hours (token TTL plus
-  the rounding window).
-- The read API rate-limits each viewer (ContentKit default: 2 requests/s,
-  burst 120) and logs every signed response with the viewer id.
+- A CDN may cache `public/`; never let a shared cache store `private/`.
+- To rotate `MEDIA_TOKEN_KEY`, give the gateway the new key as
+  `MEDIA_GATEWAY_TOKEN_KEY` and the old one as `_PREVIOUS`, switch the app
+  to the new key, and drop the old key after about 5 hours.
 
 ## Buying and membership
 
-A purchase or a membership starts at the app: `POST /api/v1/posts/:id/checkout`
+A purchase or a membership starts at the app: `POST /api/v1/posts/:code/checkout`
 or `POST /api/v1/channels/:id/subscribe` with `{price_id}`. The app checks its
 content and channel policy (members-only purchases need a membership, editors
 buy nothing, the price must be one of the offers it put on sale), then mints the
@@ -367,18 +311,18 @@ transport. It covers purchases/replay, resource access, saved-card membership,
 explicit quote confirmation/cancellation and retained deletion. Unexpected provider
 requests fail locally; no real Stripe request or credential is used.
 
-`TestMediaEndToEnd` runs the media proof on real PostgreSQL, MinIO, the
-ContentKit handlers, the app's media worker (libvips, ffmpeg) and the
-`media-access` binary (fake Stripe only): uploads and variants, a mixed
-image/video post (HLS playlists and byte ranges, downloads, locked viewers,
-ceilings; skipped without ffmpeg locally), what anonymous, member, buyer and members_ppv
-buyer (after membership lapse) viewers get, editor/admin bypass, the default
-ladder reaching the encoder, 9:21 and 21:9 sources (rung-keyed renditions,
-playlists and downloads) and a refused 3:1 one, editor-only variants and edit
-data, rate and quota refusals (presign and commit), slots (upload with a crop,
-rotate, re-crop, versioned srcset widths, also from a post image) and
-post erasure. `task dev:up && task test:media`
-runs it locally.
+`TestMediaEndToEnd` runs the media and URL proof on real PostgreSQL, MinIO,
+the ContentKit handlers, the app's media worker (libvips, ffmpeg), the
+`media-gateway` binary and the app's URL router (fake Stripe only): uploads and
+private WebP renditions, a mixed image/video post (HLS playlists and byte
+ranges, locked viewers, per-path ceilings), what anonymous, member, buyer and
+members_ppv buyer (after membership lapse) viewers get (everything, or the
+public blurred preview), editor/admin bypass, editor-only edits, rate and quota
+refusals (presign and commit), public avatars and covers (crop, rotate,
+re-crop), drafts, publishing after processing, content URLs (codes, canonical
+redirects and tags, 410 after deletion, the backfill), listing cost and post
+erasure. `task dev:up && task test:media` runs it locally. `pnpm --dir frontend
+test` checks the browser's post links.
 
 `TestNMIBillingEndToEnd` runs billing against OpenRails's `nmimock` NMI gateway
 on loopback, with one fake clock for OpenRails and the gateway: signup, a saved

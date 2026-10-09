@@ -1,5 +1,5 @@
-# Local services: PostgreSQL and MinIO (the media bucket). media-access runs
-# as a local process (task media:access) at the ContentKit version in go.mod.
+# Local services: PostgreSQL and MinIO (the media bucket). media-gateway runs
+# as a local process (task media:gateway) at the ContentKit version in go.mod.
 name: onlydemo
 services:
   postgres:

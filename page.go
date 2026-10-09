@@ -6,7 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit/iam"
-	"github.com/open-rails/contentkit/media"
+	"github.com/open-rails/contentkit/access"
 )
 
 // channelInfo is a live channel's address and name.
@@ -20,8 +20,10 @@ type page struct {
 	channels map[string]channelInfo
 	states   map[string]membershipState // live channels only
 	// perms are the viewer's grants on each channel, root grants included.
-	perms  map[string][]iam.Perm
-	slots  map[slotKey]*media.SlotManifest
+	perms map[string][]iam.Perm
+	// filter is the viewer's paywall access from the request's one
+	// entitlement read; access holds the requested keys.
+	filter *access.Filter
 	access map[string]bool
 }
 
@@ -35,14 +37,16 @@ func (pg *page) live(channel string) bool {
 	return ok
 }
 
-// loadPage reads channels, the viewer's grants on them, the named channel
-// slots and the viewer's entitlements among keys.
-func (api *channelAPI) loadPage(ctx context.Context, user string, ids []string, keys []string, slots ...string) (*page, error) {
+// loadPage reads channels, the viewer's grants on them and the viewer's
+// entitlements among keys.
+func (api *channelAPI) loadPage(ctx context.Context, user string, ids []string, keys []string) (*page, error) {
 	pg := &page{channels: map[string]channelInfo{}, states: map[string]membershipState{}, perms: map[string][]iam.Perm{}}
 	ids = unique(ids)
 	var err error
-	if pg.access, err = api.billing.access(ctx, user, keys); err != nil || len(ids) == 0 {
-		pg.slots = map[slotKey]*media.SlotManifest{}
+	if pg.filter, err = api.billing.gate.Filter(ctx, actorFor(user)); err != nil {
+		return nil, err
+	}
+	if pg.access, err = api.billing.held(ctx, user, pg.filter, keys); err != nil || len(ids) == 0 {
 		return pg, err
 	}
 	rows, err := api.pool.Query(ctx, `SELECT id::text,slug,name,membership,membership_free,membership_sync,membership_revision FROM `+api.table+` WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL`, ids)
@@ -56,9 +60,6 @@ func (api *channelAPI) loadPage(ctx context.Context, user string, ids []string, 
 		pg.states[id], pg.channels[id] = s, info
 		return nil
 	}); err != nil {
-		return nil, err
-	}
-	if pg.slots, err = api.media.slots(ctx, kindChannel, ids, slots...); err != nil {
 		return nil, err
 	}
 	if pg.perms, err = api.auth.effective(ctx, user, ids); err != nil {

@@ -40,7 +40,7 @@ const router = createBrowserRouter([
       { path: "/c", element: <ChannelsPage /> },
       { path: "/c/new", element: <NewChannelPage /> },
       { path: "/c/:channel", element: <ChannelPage /> },
-      { path: "/c/:channel/:post", element: <PostPage /> },
+      { path: "/p/:code/:slug?", element: <PostPage /> },
       {
         path: "/post/new",
         element: (

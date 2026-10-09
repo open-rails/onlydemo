@@ -66,7 +66,7 @@ func (h *mediaHarness) cost(p peer, path string) (cost, []byte) {
 // testListingCost grows the site by channels and posts and requires every
 // listing to cost exactly what it did before. It also proves the library
 // holds a purchase older than the newest 50 posts.
-func (h *mediaHarness) testListingCost(t *testing.T, purchasedPost string, buyer peer) {
+func (h *mediaHarness) testListingCost(t *testing.T, purchasedPost testPost, buyer peer) {
 	lister := h.register("lister", "127.0.0.11")
 	fan := h.register("follower", "127.0.0.12")
 	anon := peer{h: h, name: "anonymous", client: h.client("127.0.0.13")}
@@ -79,13 +79,13 @@ func (h *mediaHarness) testListingCost(t *testing.T, purchasedPost string, buyer
 		})
 		return id
 	}
-	paidPost := func(ch, slug string) string {
-		id := lister.call("POST", "/api/v1/posts", map[string]any{"channel_id": ch, "slug": slug, "title": slug, "body": "b", "access_policy": "ppv",
-			"price": map[string]any{"unit_amount": "990000", "currency": "USD"}}, "", 201)["id"].(string)
-		eventually(t, slug+" offer", func() bool {
-			return len(lister.call("GET", fmt.Sprintf("/api/v1/posts/%s", id), nil, "", 200)["offers"].([]any)) > 0
+	paidPost := func(ch, title string) string {
+		code := lister.call("POST", "/api/v1/posts", map[string]any{"channel_id": ch, "title": title, "body": "b", "access_policy": "ppv",
+			"price": map[string]any{"unit_amount": "990000", "currency": "USD"}}, "", 201)["code"].(string)
+		eventually(t, title+" offer", func() bool {
+			return len(lister.call("GET", "/api/v1/posts/"+code, nil, "", 200)["offers"].([]any)) > 0
 		})
-		return id
+		return code
 	}
 	first := channel("cost-a")
 	firstPaid := paidPost(first, "cost-a-paid")
@@ -105,7 +105,7 @@ func (h *mediaHarness) testListingCost(t *testing.T, purchasedPost string, buyer
 
 	// 51 newer posts push the purchase out of the newest 50.
 	for i := range 51 {
-		lister.call("POST", "/api/v1/posts", map[string]any{"channel_id": first, "slug": fmt.Sprintf("cost-public-%d", i), "title": "t", "body": "b"}, "", 201)
+		lister.call("POST", "/api/v1/posts", map[string]any{"channel_id": first, "title": fmt.Sprintf("cost public %d", i), "body": "b"}, "", 201)
 	}
 	for _, slug := range []string{"cost-b", "cost-c", "cost-d"} {
 		paidPost(channel(slug), slug+"-paid")
@@ -129,14 +129,14 @@ func (h *mediaHarness) testListingCost(t *testing.T, purchasedPost string, buyer
 	if err := json.Unmarshal(raw, &library); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.ContainsFunc(library.Purchased, func(p post) bool { return p.ID == purchasedPost && p.Purchased && p.CanRead }) {
+	if !slices.ContainsFunc(library.Purchased, func(p post) bool { return p.ID == purchasedPost.id && p.Code == purchasedPost.code && p.Purchased && p.CanRead }) {
 		t.Fatalf("library %+v lacks purchased post %s", library.Purchased, purchasedPost)
 	}
 
 	// A media read resolves the post and the viewer's grants (plus, when
 	// they hold any, the account's liveness) once.
 	for _, p := range []peer{buyer, fan, lister} {
-		c, _ := h.cost(p, fmt.Sprintf("/api/v1/media/post/%s?variant=large,blurred", purchasedPost))
+		c, _ := h.cost(p, "/api/v1/media/post/"+purchasedPost.id)
 		if c.auth > 2 || c.billing > 1 {
 			t.Errorf("%s media read: %+v", p.name, c)
 		}
@@ -147,8 +147,8 @@ func (h *mediaHarness) testListingCost(t *testing.T, purchasedPost string, buyer
 	lister.call("POST", "/api/v1/channels/"+first+"/members", map[string]any{"username": "helper", "role": "editor"}, "", 201)
 	rights := func() (bool, bool, bool) {
 		ch := helper.call("GET", "/api/v1/channels/"+first, nil, "", 200)
-		post := helper.call("GET", fmt.Sprintf("/api/v1/posts/%s", firstPaid), nil, "", 200)
-		return ch["can_edit"] == true, post["can_read"] == true, h.read(helper, firstPaid).res.Access == media.AccessFull
+		post := helper.call("GET", "/api/v1/posts/"+firstPaid, nil, "", 200)
+		return ch["can_edit"] == true, post["can_read"] == true, h.read(helper, kindPost, post["id"].(string), false).res.Access == media.AccessFull
 	}
 	if edit, read, media := rights(); !edit || !read || !media {
 		t.Fatalf("editor rights before deletion: edit %t read %t media %t", edit, read, media)

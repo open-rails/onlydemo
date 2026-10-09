@@ -64,7 +64,7 @@ import { PostView } from "../components/post-view";
 import { membershipOffer, myChannelsKey, rememberPostChannel } from "../channels";
 import { ChannelTeam } from "../components/channel-team";
 import { SlotEditError, SlotEditMenu, SlotEditor } from "@openrails/contentkit-upload/ui";
-import { channelRef, useSlot, useSlotSaved } from "../media";
+import { channelRef } from "../media";
 import { subscribeLabel, usePay } from "../components/pay";
 import { channelsPath, channelPath, newPostPath } from "../paths";
 
@@ -98,11 +98,6 @@ export function ChannelPage() {
     ...postQuery,
     data: postQuery.data?.pages.flatMap((page) => page.data),
   };
-  // Managers read the full slot manifests (edit, source size) to re-crop.
-  const manage = !!channel.data?.can_manage;
-  const avatar = useSlot(channelRef(id), "avatar", channel.data?.avatar, manage);
-  const cover = useSlot(channelRef(id), "cover", channel.data?.cover, manage);
-  const saved = useSlotSaved();
   const canonical = channel.data?.slug;
   const editable = channel.data?.can_edit ? channel.data.id : "";
   const userID = auth.user?.id;
@@ -129,7 +124,7 @@ export function ChannelPage() {
   return (
     <>
       <section className="profile">
-        <Cover seed={current.id} image={cover} sizes="(min-width: 768px) 720px, 100vw" className="profile-cover">
+        <Cover seed={current.id} image={current.cover} sizes="(min-width: 768px) 720px, 100vw" className="profile-cover">
           <Link to={channelsPath} className="cover-back" aria-label="Back">
             <HugeiconsIcon icon={ArrowLeft02Icon} size={20} />
           </Link>
@@ -140,14 +135,7 @@ export function ChannelPage() {
             </small>
           </div>
           {current.can_manage && (
-            <SlotEditor
-              item={channelRef(current.id)}
-              slot="cover"
-              manifest={cover}
-              aspect="3:1"
-              targetWidth={3000}
-              onChange={(m) => saved(channelRef(current.id), "cover", m)}
-            >
+            <SlotEditor item={channelRef(current.id)} path="cover" image={current.cover} minWidth={600}>
               <SlotEditMenu
                 label="Edit cover"
                 render={
@@ -170,19 +158,12 @@ export function ChannelPage() {
               <Avatar
                 name={current.name}
                 seed={current.id}
-                image={avatar}
+                image={current.avatar}
                 sizes="112px"
                 className="avatar-xl"
               />
               {current.can_manage && (
-                <SlotEditor
-                  item={channelRef(current.id)}
-                  slot="avatar"
-                  manifest={avatar}
-                  aspect="1:1"
-                  targetWidth={512}
-                  onChange={(m) => saved(channelRef(current.id), "avatar", m)}
-                >
+                <SlotEditor item={channelRef(current.id)} path="avatar" image={current.avatar} minWidth={128} round>
                   <SlotEditMenu
                     label="Change avatar"
                     iconOnly

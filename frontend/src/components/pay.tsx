@@ -22,6 +22,7 @@ import { ErrorState, Loading } from "./states";
 
 // What the buyer is paying for: a post unlock or a channel membership.
 export type PayTarget =
+  // A post by its code; a membership by its channel id.
   | { kind: "post"; id: string; merchant: string; offer: Offer }
   | { kind: "membership"; id: string; merchant: string; offer: Offer };
 

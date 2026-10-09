@@ -13,7 +13,8 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
-    "preview": "vite preview --host 127.0.0.1"
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "vitest run --maxWorkers=2"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
@@ -24,7 +25,8 @@
     "@hugeicons/react": "^1.1.10",
     "@openrails/auth-ui": "https://github.com/open-rails/authkit/releases/download/v1.10.1/openrails-auth-ui-1.10.1.tgz",
     "@openrails/billing-ui": "https://github.com/open-rails/openrails/releases/download/v0.233.0/openrails-billing-ui-0.233.0.tgz",
-    "@openrails/contentkit-upload": "https://github.com/open-rails/contentkit/releases/download/v0.52.0/openrails-contentkit-upload-0.52.0.tgz",
+    "@openrails/contentkit-upload": "https://github.com/open-rails/contentkit/releases/download/v0.67.0/openrails-contentkit-upload-0.67.0.tgz",
+    "@openrails/contentkit-urls": "https://github.com/open-rails/contentkit/releases/download/v0.67.0/openrails-contentkit-urls-0.67.0.tgz",
     "@tanstack/react-query": "^5.100.11",
     "class-variance-authority": "^0.7.1",
     "cn": "0.4.0",
@@ -52,6 +54,7 @@
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.59.4",
-    "vite": "^8.0.13"
+    "vite": "^8.0.13",
+    "vitest": "^5.0.3"
   }
 }

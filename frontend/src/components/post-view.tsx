@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { VideoPoster } from "@openrails/contentkit-upload/ui";
 import { cn } from "cn";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Bookmark02Icon, FavouriteIcon, Message01Icon, SquareLock02Icon, Tick02Icon } from "@hugeicons/core-free-icons";
@@ -78,7 +77,7 @@ export function PostView({
   const unlock = () => {
     if (needsMembership && membership?.free) void joinFree.join();
     else if (needsMembership && memberOffer) pay({ kind: "membership", id: post.channel_id, merchant: name, offer: memberOffer });
-    else if (!needsMembership && price && post.offer_status !== "pending") pay({ kind: "post", id: post.id, merchant: name, offer: price });
+    else if (!needsMembership && price && post.offer_status !== "pending") pay({ kind: "post", id: post.code, merchant: name, offer: price });
   };
   const body = post.can_read && post.body ? (full ? post.body : excerpt(post.body)) : "";
   const Title = full ? "h2" : "h3";
@@ -133,18 +132,9 @@ export function PostView({
       )}
       {post.state === "publishing" && <PublishingNotice post={post} />}
       <div ref={watchMedia}>
-        {mediaNear &&
-          (!post.can_read && post.poster ? (
-            <VideoPoster className="feed-video" poster={post.poster} alt="">
-              <span className="feed-video-link" aria-hidden>
-                <span className="lock-badge">
-                  <HugeiconsIcon icon={SquareLock02Icon} size={30} />
-                </span>
-              </span>
-            </VideoPoster>
-          ) : (
-            <PostGallery post={post} viewer={auth.user?.id} unlock={() => unlockRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })} />
-          ))}
+        {mediaNear && (
+          <PostGallery post={post} viewer={auth.user?.id} unlock={() => unlockRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })} />
+        )}
       </div>
       {editor}
       {!post.can_read && !(needsMembership && membership?.status === "closed") && (

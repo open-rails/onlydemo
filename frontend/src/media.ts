@@ -1,57 +1,24 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { createUploadClient, UploadError } from "@openrails/contentkit-upload";
-import type { CommitFile, Edit, EncodeProgress, ErrorDetails, Op, ReadResult, RefBody, SlotManifest, VideoImages } from "@openrails/contentkit-upload";
+import type { FileInfo, ReadResult, RefBody } from "@openrails/contentkit-upload";
 import { mediaMessage } from "./media-errors";
-import { auth, request } from "./api";
+import { auth } from "./api";
 
-// Browser uploads go straight to the bucket; the app only presigns and commits.
+// Browser uploads go straight to the bucket; the app only presigns, commits
+// and reads (ContentKit's upload and read APIs behind AuthKit).
 export const uploads = createUploadClient({
   endpoint: "/api/v1/media/upload",
+  readEndpoint: "/api/v1/media",
   fetch: (input, init) => auth.authFetch(input, init),
 });
 
-export const postRef = (id: string): RefBody => ({
-  kind: "post",
-  id: String(id),
-});
+export const postRef = (id: string): RefBody => ({ kind: "post", id });
+export const channelRef = (id: string): RefBody => ({ kind: "channel", id });
+export const userRef = (id: string): RefBody => ({ kind: "user", id });
 
-export interface MediaFile {
-  index: number;
-  name?: string;
-  type?: string;
-  w?: number;
-  h?: number;
-  duration?: number;
-  teaser?: boolean;
-  locked?: boolean;
-  hls?: boolean;
-  failed?: string; // editors only: why the file cannot be processed
-  failed_code?: string; // editors only: a typed image refusal (animation_not_allowed, image_too_large, …)
-  failed_details?: ErrorDetails;
-  progress?: EncodeProgress; // live encode progress while the video is pending
-  edit?: Edit;
-  dims?: { w: number; h: number };
-  variant?: string;
-  url?: string;
-}
-export interface MediaDownload {
-  key: string;
-  name: string;
-  type?: string;
-  size?: number;
-  url: string;
-}
-export interface MediaRead {
-  access: "full" | "preview" | "none";
-  total: number;
-  expires: number;
-  files: MediaFile[];
-  downloads?: MediaDownload[];
-}
-
-// Mirrors the server's post ceilings (media.go); the server enforces them.
+// Mirrors the post kind's uploads (media.go); the server enforces them.
 export const limits = {
-  files: 50,
+  images: 40,
   videos: 10,
   imageBytes: 25 << 20,
   videoBytes: 20 * 1024 ** 3,
@@ -59,6 +26,13 @@ export const limits = {
 export const imageTypes = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"]; // keep in sync with media.go imageTypes
 export const videoTypes = ["video/mp4", "video/webm", "video/quicktime", "video/x-matroska"];
 export const isVideo = (type?: string) => !!type?.startsWith("video/");
+
+// A post's upload paths: ContentKit orders images and videos each in turn.
+export const IMAGES = "images/";
+export const VIDEOS = "videos/";
+export const uploadPath = (file: File) =>
+  (isVideo(file.type) ? VIDEOS : IMAGES) + `${crypto.randomUUID().slice(0, 8)}-${file.name}`;
+export const displayName = (path: string) => path.replace(/^(images|videos)\//, "").replace(/^[0-9a-f]{8}-/, "");
 
 // Browsers leave .mkv/.mov types empty or nonstandard; name them for presign.
 const byExtension: Record<string, string> = {
@@ -74,31 +48,29 @@ export function withMediaType(file: File) {
   return type ? new File([file], file.name, { type, lastModified: file.lastModified }) : file;
 }
 
-// Client-side checks of the post ceilings; the server enforces them again.
-export function screenFiles(list: Iterable<File>, have: { files: number; videos: number }) {
-  let { files: count, videos } = have;
+// Client-side checks of the post's uploads; the server enforces them again.
+export function screenFiles(list: Iterable<File>, have: { images: number; videos: number }) {
+  let { images, videos } = have;
   const accepted: File[] = [];
   const refused: string[] = [];
   for (const file of [...list].map(withMediaType)) {
     const video = isVideo(file.type);
-    if (!imageTypes.includes(file.type) && !videoTypes.includes(file.type))
-      refused.push(`${file.name}: unsupported type.`);
+    if (!imageTypes.includes(file.type) && !videoTypes.includes(file.type)) refused.push(`${file.name}: unsupported type.`);
     else if (file.size > (video ? limits.videoBytes : limits.imageBytes))
       refused.push(`${file.name}: over the ${video ? "20 GiB video" : "25 MiB image"} limit.`);
-    else if (count >= limits.files) refused.push(`${file.name}: a post holds at most ${limits.files} files.`);
-    else if (video && videos >= limits.videos)
-      refused.push(`${file.name}: a post holds at most ${limits.videos} videos.`);
+    else if (video && videos >= limits.videos) refused.push(`${file.name}: a post holds at most ${limits.videos} videos.`);
+    else if (!video && images >= limits.images) refused.push(`${file.name}: a post holds at most ${limits.images} images.`);
     else {
       accepted.push(file);
-      count++;
       if (video) videos++;
+      else images++;
     }
   }
   return { accepted, refused };
 }
 
 // Playlists come from the app's read API (bearer auth); byte ranges from
-// media-access, signed in the playlist (URL mode) or under the folder cookie
+// media-gateway, signed in the playlist (URL mode) or under the item cookie
 // the playlist response sets (cookie mode, hence withCredentials).
 export function mediaXhr(xhr: XMLHttpRequest, url: string) {
   xhr.open("GET", url, true);
@@ -110,28 +82,25 @@ export function mediaXhr(xhr: XMLHttpRequest, url: string) {
   }
 }
 
-// The public poster with its frame time (none for drafts).
-export const readVideoImages = (id: string) =>
-  request<VideoImages>(`/api/v1/media/post/${id}/video-images`);
+/** A post's media as this viewer may have it: every file, or its preview and locked files. */
+export const readPost = (id: string) => uploads.read(postRef(id));
 
-// HLS routes of the read API; relative playlists resolve under the master.
-export const hlsBase = (postID: string, name: string) =>
-  `/api/v1/media/post/${postID}/hls/${encodeURIComponent(name)}/`;
+/** A post's uploads as its editors see them: edits, processing, failures. */
+export function usePostUploads(id: string, enabled = true) {
+  return useQuery({
+    queryKey: ["post-uploads", id],
+    queryFn: ({ signal }) => uploads.read(postRef(id), { editor: true, signal }),
+    enabled: enabled && !!id,
+    refetchInterval: (q) => (q.state.data && processing(q.state.data) ? 2500 : false),
+  });
+}
 
-// The read API resolves access once and returns URLs only for what this
-// viewer may see (cookie mode sets the folder cookie for full access).
-// The item's current encode step, including the poster pass after publish.
-export const readVideoProgress = (id: string) =>
-  request<{ progress?: EncodeProgress }>(`/api/v1/media/post/${id}/video-images`);
+/** An editor read's uploads, images then videos. */
+export const uploadsOf = (read?: ReadResult) => (read?.files ?? []).filter((f) => f.upload && !f.unattached);
+export const processing = (read: ReadResult) =>
+  uploadsOf(read).some((f) => !f.failed && (f.staged || (f.pending?.length ?? 0) > 0));
 
-export const readPost = (id: string, variants: string) =>
-  request<MediaRead & ReadResult>(`/api/v1/media/post/${id}?variant=${variants}`);
-
-export const postFiles = (id: string) =>
-  request<{ files: CommitFile[] }>(`/api/v1/posts/${id}/media`);
-
-export const commit = (id: string, ops: Op[]) =>
-  uploads.commit(postRef(id), ops);
+export const commit = (id: string, ops: Parameters<typeof uploads.commit>[1]) => uploads.commit(postRef(id), ops);
 
 export function uploadMessage(error: unknown) {
   if (!(error instanceof UploadError)) return mediaMessage(error);
@@ -143,34 +112,18 @@ export function uploadMessage(error: unknown) {
     case "too_large":
       return "That file is too large (images 25 MiB, videos 20 GiB).";
     case "too_many_files":
-      return `A post holds at most ${limits.files} files, ${limits.videos} of them videos.`;
+      return `A post holds at most ${limits.images} images and ${limits.videos} videos.`;
     case "forbidden":
       return "You can't upload here.";
   }
   return mediaMessage(error);
 }
 
-// Slots (avatars, covers): listings carry a manifest from the app API; a
-// slot's full manifest (edit, source dims) is read for its editors.
-export const channelRef = (id: string): RefBody => ({ kind: "channel", id });
-export const userRef = (id: string): RefBody => ({ kind: "user", id });
-const slotKey = (ref: RefBody, slot: string) => ["slot", ref.kind, ref.id, slot];
-
-export function useSlot(ref: RefBody, slot: string, initial?: SlotManifest | null, enabled = true) {
-  const q = useQuery({
-    queryKey: slotKey(ref, slot),
-    queryFn: ({ signal }) => uploads.getSlot(ref, slot, signal),
-    enabled: enabled && !!ref.id,
-    staleTime: Infinity,
-  });
-  return q.data ?? initial ?? null;
-}
-
-// Stores a saved slot and refetches the listings that embed it.
-export function useSlotSaved() {
-  const client = useQueryClient();
-  return (ref: RefBody, slot: string, m: SlotManifest) => {
-    client.setQueryData(slotKey(ref, slot), m);
-    void client.invalidateQueries({ predicate: (q) => q.queryKey[0] !== "slot" });
-  };
+/** Why an upload cannot be processed, in words. */
+export function failureMessage(f: FileInfo) {
+  if (isVideo(f.type))
+    return /aspect/i.test(f.failed?.message ?? "")
+      ? "Its shape is not supported: videos must be between 1:2.4 (tall) and 2.4:1 (wide)."
+      : "It could not be processed. Try another file or format.";
+  return mediaMessage({ code: f.failed?.code ?? "internal_error", message: f.failed?.message, details: f.failed?.details, refusal: !!f.failed?.code });
 }
