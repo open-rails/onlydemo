@@ -35,7 +35,7 @@ func newMediaWorker(ctx context.Context, cfg Config, pool *pgxpool.Pool, tune fu
 	if err != nil {
 		return nil, err
 	}
-	wc := worker.Config{Pool: pool, Store: store, Kinds: kinds, HostSchema: riverSchema(cfg), Logger: slog.Default()}
+	wc := worker.Config{Pool: pool, Store: store, Kinds: kinds, ContentSchema: contentSchema(cfg), HostSchema: riverSchema(cfg), Logger: slog.Default()}
 	if err := tune(&wc); err != nil {
 		return nil, err
 	}

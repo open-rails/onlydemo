@@ -71,7 +71,7 @@ type post struct {
 	CanEdit            bool                `json:"can_edit"`
 	Purchased          bool                `json:"purchased"`
 	SubscriptionActive bool             `json:"has_membership"`
-	ChannelAvatar      *publicImage     `json:"channel_avatar,omitempty"`
+	ChannelAvatar      *publicPreset    `json:"channel_avatar,omitempty"`
 	CreatedAt          time.Time        `json:"created_at"`
 	UpdatedAt          time.Time        `json:"updated_at"`
 	Offers             []billing.Offer  `json:"offers"`
@@ -196,6 +196,10 @@ func (api *postAPI) decorate(c fiber.Ctx, posts []post, withOffers bool) error {
 			}
 		}
 	}
+	avatars, err := api.media.publicImages(ctx, kindChannel, channels, avatarImage)
+	if err != nil {
+		return err
+	}
 	selling := []string{}
 	for i := range posts {
 		p := &posts[i]
@@ -206,7 +210,7 @@ func (api *postAPI) decorate(c fiber.Ctx, posts []post, withOffers bool) error {
 		// Channel grants include the viewer's site-wide (root) grants.
 		p.CanEdit = pg.can(p.ChannelID, channelEditPermission) || pg.can(p.ChannelID, postEditPermission)
 		p.CanRead = readable[i] || pg.can(p.ChannelID, channelReadPermission) || pg.can(p.ChannelID, postReadPermission)
-		p.ChannelAvatar = api.media.image(kindChannel, p.ChannelID, avatarImage)
+		p.ChannelAvatar = &avatars[p.ChannelID][0]
 		if !p.CanRead {
 			p.Body = ""
 		}
@@ -746,7 +750,11 @@ func (api *postAPI) settled(c fiber.Ctx, status int, id string, job *postOfferAr
 			return clientError(c, 500, "media store error")
 		}
 	}
-	p.ChannelAvatar = api.media.image(kindChannel, p.ChannelID, avatarImage)
+	avatars, err := api.media.publicImages(c.Context(), kindChannel, []string{p.ChannelID}, avatarImage)
+	if err != nil {
+		return clientError(c, 500, "media store error")
+	}
+	p.ChannelAvatar = &avatars[p.ChannelID][0]
 	posts := []post{p}
 	if err = api.links(c.Context(), posts); err != nil {
 		return databaseError(c, err)

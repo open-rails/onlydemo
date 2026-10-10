@@ -38,8 +38,8 @@ import {
   useJoinFree,
   usePay,
 } from "../components/pay";
-import { channelPath, contentURLs, parseCode, postLink, postPath } from "../paths";
-import { useCanonical } from "../canonical";
+import { useCanonicalContent } from "@openrails/contentkit-ui/react";
+import { channelPath, parseCode, postLink, postPath } from "../paths";
 export function PostPage() {
   const code = parseCode(useParams().code ?? "");
   const location = useLocation();
@@ -64,12 +64,11 @@ export function PostPage() {
   });
   const offer = post.data?.offers?.find((value) => value.kind !== "recurring");
   const joinFree = useJoinFree(post.data?.channel_id || "");
-  // The slug is decoration: keep the address bar on the canonical URL.
-  const canonical = post.data && contentURLs.canonical(location.pathname + location.search, postLink(post.data));
-  useEffect(() => {
-    if (canonical?.redirect) navigate(canonical.location, { replace: true });
-  }, [canonical?.redirect, canonical?.location, navigate]);
-  useCanonical(post.data && postPath(post.data), post.data?.title);
+  // The slug is decoration: keep the address bar and head on the canonical URL.
+  useCanonicalContent(post.data && postLink(post.data), {
+    title: post.data?.title || undefined,
+    location: location.pathname + location.search + location.hash,
+  });
   const pageTitle = post.data && (post.data.title || `Post by @${post.data.channel_slug}`);
   useEffect(() => {
     if (!pageTitle) return;

@@ -1,4 +1,4 @@
-import type { PublicImage } from "@openrails/contentkit-upload";
+import type { PublicPreset } from "@openrails/contentkit-ui/client";
 export type AccessPolicy = "public" | "membership" | "members_ppv" | "ppv";
 // An OpenRails offer: a product's current price for its entitlement.
 export interface Offer {
@@ -22,8 +22,8 @@ export interface Channel {
   role?: "owner" | "editor";
   can_manage: boolean;
   can_edit: boolean;
-  avatar: PublicImage | null;
-  cover: PublicImage | null;
+  avatar: PublicPreset;
+  cover: PublicPreset;
   membership: ChannelMembership;
   deleted_at?: string | null;
 }
@@ -52,22 +52,14 @@ export interface Post {
   can_edit?: boolean;
   purchased?: boolean;
   has_membership?: boolean;
-  channel_avatar?: PublicImage;
+  channel_avatar?: PublicPreset;
   access_policy: AccessPolicy;
   // "publishing": media still processing; only the channel's editors see it.
   state: "draft" | "publishing" | "published";
-  media_readiness?: MediaReadiness;
   offer_status: "none" | "pending" | "active" | "failed";
   offers: Offer[];
   created_at: string;
   updated_at: string;
-}
-// ContentKit's media readiness: failed once nothing is processing and some
-// files could not be processed.
-export interface MediaReadiness {
-  state: "ready" | "processing" | "failed";
-  processing?: string[];
-  failed?: string[];
 }
 export interface Page<T> {
   data: T[];
@@ -76,15 +68,13 @@ export interface Page<T> {
   total?: number;
 }
 export interface AccountData {
-  user: { id: string; username: string; email?: string; avatar: PublicImage | null };
+  user: { id: string; username: string; email?: string; avatar: PublicPreset };
   manageable_channels: Channel[];
   purchased_posts: Post[];
 }
 export interface AppConfig {
   /** The buyer's country from a trusted edge header, else "". */
   country: string;
-  /** The user avatar preset; a user's is this at their id. */
-  user_avatar: PublicImage;
 }
 export const visibilityLabels: Record<AccessPolicy, string> = {
   public: "Public",

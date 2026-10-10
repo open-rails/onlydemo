@@ -23,7 +23,7 @@ import {
   FormError,
   Loading,
 } from "../components/states";
-import { AvatarUpload } from "@openrails/contentkit-upload/ui";
+import { AvatarUpload } from "@openrails/contentkit-ui";
 import { Card, CardContent } from "@/components/ui/card";
 import { UserAvatar, ChannelCard } from "../components/cards";
 import { PostView } from "../components/post-view";

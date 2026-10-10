@@ -1,4 +1,4 @@
-import { createContentURLs, parseCode } from "@openrails/contentkit-urls";
+import { createContentURLs, parseCode } from "@openrails/contentkit-ui/urls";
 
 // Posts are ContentKit content URLs, /p/{CODE}/{slug}: the server reads only
 // the code and owns the slug. Channels keep their handle, /c/{handle}.

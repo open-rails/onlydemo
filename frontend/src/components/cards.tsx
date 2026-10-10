@@ -1,8 +1,8 @@
 import { Link } from "react-router-dom";
-import { useState, type CSSProperties, type ReactNode } from "react";
-import { publicRenditions, type PublicImage } from "@openrails/contentkit-upload";
-import { RenditionImg } from "@openrails/contentkit-upload/ui";
-import { usePublicGeneration } from "@openrails/contentkit-upload/react";
+import type { CSSProperties, ReactNode } from "react";
+import type { PublicPreset } from "@openrails/contentkit-ui/client";
+import { RenditionImg } from "@openrails/contentkit-ui";
+import { usePublicImage } from "@openrails/contentkit-ui/react";
 import { cn } from "cn";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,6 @@ import { type Channel } from "../models";
 import { hue, membershipOffer, useChannels } from "../channels";
 import { subscribeLabel, useJoinFree, usePay } from "./pay";
 import { channelsPath, channelPath } from "../paths";
-import { useAppConfig } from "../config";
 
 const tint = (seed: string | number) =>
   ({ "--h": hue(seed) }) as CSSProperties;
@@ -18,17 +17,9 @@ const tint = (seed: string | number) =>
 // The box, not the preset's aspect, sizes the image (object-fit: cover).
 const fill: CSSProperties = { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", borderRadius: "inherit" };
 
-// A public image preset over a generated placeholder: the width its box
-// needs, hidden while there is no upload (the media gateway answers 404).
-// A save in the upload kit remounts it with the new bytes.
-function PublicImg({ image }: { image?: PublicImage | null }) {
-  const generation = usePublicGeneration();
-  const outputs = publicRenditions(image);
-  const key = `${outputs[0]?.url}#${generation}`;
-  const [failed, setFailed] = useState<string>();
-  if (!outputs.length || failed === key) return null;
-  return <RenditionImg key={key} outputs={outputs} alt="" style={fill} onError={() => setFailed(key)} />;
-}
+// A public image over its generated placeholder, at the width its box needs.
+const PublicImg = ({ image }: { image?: PublicPreset | null }) => <RenditionImg outputs={image?.renditions} style={fill} />;
+
 export function Avatar({
   name,
   seed,
@@ -37,7 +28,7 @@ export function Avatar({
 }: {
   name: string;
   seed: string | number;
-  image?: PublicImage | null;
+  image?: PublicPreset | null;
   sizes?: string;
   className?: string;
 }) {
@@ -48,10 +39,10 @@ export function Avatar({
     </span>
   );
 }
-// The signed-in user's avatar: the user avatar preset at their id.
+// The signed-in user's avatar: their item's published avatar, if any.
 export function UserAvatar({ user, className }: { user: { id: string; username: string }; className?: string }) {
-  const preset = useAppConfig().data?.user_avatar;
-  return <Avatar name={user.username} seed={user.id} image={preset && { ...preset, id: user.id }} className={className} />;
+  const avatar = usePublicImage("user", user.id, "avatar");
+  return <Avatar name={user.username} seed={user.id} image={avatar.isDefault ? null : avatar.image} className={className} />;
 }
 export function Cover({
   seed,
@@ -60,7 +51,7 @@ export function Cover({
   children,
 }: {
   seed: string | number;
-  image?: PublicImage | null;
+  image?: PublicPreset | null;
   sizes?: string;
   className?: string;
   children?: ReactNode;

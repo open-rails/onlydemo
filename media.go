@@ -12,21 +12,24 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/adaptor"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/authkit/verify"
+	"github.com/open-rails/contentkit"
 	"github.com/open-rails/contentkit/access"
+	"github.com/open-rails/contentkit/content"
 	"github.com/open-rails/contentkit/contentref"
+	"github.com/open-rails/contentkit/contenturl"
 	"github.com/open-rails/contentkit/media"
 	mediaS3 "github.com/open-rails/contentkit/media/s3"
 	"github.com/open-rails/contentkit/media/token"
 	"github.com/open-rails/contentkit/media/workqueue"
 	"github.com/open-rails/contentkit/migrations"
 	helpersauth "github.com/open-rails/helpers/auth"
+	"golang.org/x/sync/errgroup"
 )
 
 // tenant is the app's ContentKit tenant: the media namespace, content refs,
@@ -189,6 +192,7 @@ type mediaService struct {
 	uploads   *media.Uploads
 	reader    *media.Reader
 	limiter   *media.PGLimiter
+	resolver  access.ContentResolver
 	pool      *pgxpool.Pool
 	auth      *appAuth
 	billing   *billingService
@@ -244,7 +248,8 @@ func newMedia(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth
 	m := &mediaService{cfg: mc, store: store, auth: auth, billing: billing, channels: channels, posts: posts, pool: pool}
 	// Drafts and publishing posts are hidden from anonymous viewers, so their
 	// previews are never public before they are. Paid posts keep a preview.
-	if m.kinds, err = newRegistry(mc, media.Hooks{Resolver: billing.gate.Resolver(m), CanUpload: m, ItemReady: m.postReady}); err != nil {
+	m.resolver = billing.gate.Resolver(m)
+	if m.kinds, err = newRegistry(mc, media.Hooks{Resolver: m.resolver, CanUpload: m, ItemReady: m.postReady}); err != nil {
 		return nil, err
 	}
 	m.limiter, err = media.NewPGLimiter(pool, contentSchema(cfg), media.PGLimits{
@@ -265,13 +270,19 @@ func newMedia(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth
 	if err != nil {
 		return nil, err
 	}
-	if m.jobs, err = media.NewJobs(media.JobsConfig{Store: store, Registry: m.kinds, Locker: media.PGLocker(pool), Processes: queue,
+	// The journal records each manifest write with its quota and queue
+	// effects in the app's database, so an interrupted one is recovered.
+	journal, err := media.NewPGJournal(pool, contentSchema(cfg), queue)
+	if err != nil {
+		return nil, err
+	}
+	if m.jobs, err = media.NewJobs(media.JobsConfig{Store: store, Registry: m.kinds, Locker: media.PGLocker(pool), Journal: journal, Processes: queue,
 		Pool: pool, Limiter: m.limiter, TempTTL: mc.TempTTL, SweepInterval: mc.SweepInterval}); err != nil {
 		return nil, err
 	}
 	m.manifests = m.jobs.Manifests()
 	if m.uploads, err = media.NewUploads(media.UploadOptions{Store: store, Manifests: m.manifests, Tickets: &ring,
-		Limiter: m.limiter, Queue: queue, ProcessOnUpload: true}); err != nil {
+		Limiter: m.limiter, ProcessOnUpload: true}); err != nil {
 		return nil, err
 	}
 	progress, err := workqueue.NewProgressSource(pool, mediaWorkerSchema)
@@ -289,23 +300,45 @@ func newMedia(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth
 func ref(kind, id string) contentref.ContentRef { return contentref.New(tenant, kind, id) }
 func postRef(id string) contentref.ContentRef   { return ref(kindPost, id) }
 
-// publicImage is one item's public preset, as the browser SDK's PublicImage
-// takes it. A file not uploaded is a 404; the SDK shows its placeholder.
-type publicImage struct {
-	Base      string `json:"base"`
-	Namespace string `json:"namespace"`
-	Kind      string `json:"kind"`
-	ID        string `json:"id"`
-	To        string `json:"to"`
-	Widths    []int  `json:"widths"`
-	Aspect    string `json:"aspect,omitempty"`
+// publicPreset is a public preset at an item, as the browser package's
+// PublicPreset takes it: its published renditions, none before an upload.
+type publicPreset struct {
+	Preset     string                  `json:"preset"`
+	Aspect     string                  `json:"aspect,omitempty"`
+	Renditions []media.PublicRendition `json:"renditions"`
 }
 
-func (m *mediaService) image(kind, id string, p media.Public) *publicImage {
-	if m == nil {
-		return nil
+// publicImages answers presets ps of each item, reading the items' manifests
+// concurrently.
+func (m *mediaService) publicImages(ctx context.Context, kind string, ids []string, ps ...media.Public) (map[string][]publicPreset, error) {
+	ids = unique(ids)
+	published := make([][]media.PublicImage, len(ids))
+	if m != nil {
+		g, ctx := errgroup.WithContext(ctx)
+		g.SetLimit(8)
+		for i, id := range ids {
+			g.Go(func() (err error) {
+				published[i], err = m.manifests.PublicImages(ctx, ref(kind, id))
+				return err
+			})
+		}
+		if err := g.Wait(); err != nil {
+			return nil, err
+		}
 	}
-	return &publicImage{Base: m.cfg.URL, Namespace: tenant, Kind: kind, ID: id, To: p.To, Widths: p.Widths, Aspect: p.Image.Aspect.String()}
+	out := make(map[string][]publicPreset, len(ids))
+	for i, id := range ids {
+		for _, p := range ps {
+			img := publicPreset{Preset: p.Name, Aspect: p.Image.Aspect.String(), Renditions: []media.PublicRendition{}}
+			for _, pub := range published[i] {
+				if pub.Preset == p.Name {
+					img.Renditions = pub.Renditions
+				}
+			}
+			out[id] = append(out[id], img)
+		}
+	}
+	return out, nil
 }
 
 // createPost starts a new post's folder, hidden until Expose: a folder
@@ -442,20 +475,28 @@ func (m *mediaService) CanUpload(ctx context.Context, actor access.Actor, t medi
 
 type mediaActorKey struct{}
 
-// mount serves the upload API (the browser SDK) and the read API behind
-// AuthKit's optional verification.
-func (m *mediaService) mount(app fiber.Router, optional fiber.Handler) {
-	upload := media.UploadHandler(m.uploads, media.UploadHandlerOptions{
-		Actor: func(r *http.Request) (access.Actor, bool) {
-			a, _ := r.Context().Value(mediaActorKey{}).(access.Actor)
-			return a, !a.Anonymous
-		}})
-	read := m.reader.Handler(media.HandlerOptions{Identity: m})
-	uploadAPI := adaptor.HTTPHandlerWithContext(withMediaActor(http.StripPrefix("/api/v1/media/upload", upload)))
-	app.Post("/api/v1/media/upload/*", optional, uploadAPI)
-	app.Get("/api/v1/media/upload/frame", optional, uploadAPI)
-	app.Get("/api/v1/media/*", optional, adaptor.HTTPHandlerWithContext(withMediaActor(http.StripPrefix("/api/v1/media", read))))
+// api serves ContentKit's HTTP API under one prefix behind AuthKit's optional
+// verification: uploads at /media/upload, reads at /media, post codes at
+// /codes. Posts are the app's own, so the content module registers no kinds
+// and signed-out visitors only read.
+func (m *mediaService) api(ctx context.Context, cfg Config, urls *contenturl.Router) (http.Handler, error) {
+	rt, err := contentkit.NewRuntime(ctx, contentkit.RuntimeConfig{
+		EmbeddedConfig: contentkit.EmbeddedConfig{PG: m.pool, PGSchema: contentSchema(cfg), Tenant: tenant},
+		Content:        content.Options{Identity: m, Authz: noContentPerms{}, Resolver: m.resolver},
+		Uploads:        m.uploads, Reader: m.reader, Codes: urls,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return withMediaActor(http.StripPrefix(contentkitPrefix, rt.Handler())), nil
 }
+
+const contentkitPrefix = "/api/v1/contentkit"
+
+// noContentPerms grants none of the content module's staff permissions.
+type noContentPerms struct{}
+
+func (noContentPerms) Can(context.Context, access.Actor, string) (bool, error) { return false, nil }
 
 // readiness is a post's media processing; a post without media is ready.
 func (m *mediaService) readiness(ctx context.Context, id string) (*media.Readiness, error) {

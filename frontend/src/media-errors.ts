@@ -1,22 +1,14 @@
 import { toast } from "sonner";
-import { createTranslator, resolveMessages, type UploadUiOperation } from "@openrails/contentkit-upload/ui";
-import { de } from "@openrails/contentkit-upload/locales/de";
-import { en } from "@openrails/contentkit-upload/locales/en";
-import { es } from "@openrails/contentkit-upload/locales/es";
-import { ja } from "@openrails/contentkit-upload/locales/ja";
-import { ko } from "@openrails/contentkit-upload/locales/ko";
-import { zh } from "@openrails/contentkit-upload/locales/zh";
+import { createTranslator, resolveMessages } from "@openrails/contentkit-ui";
+import type { ContentKitOperation as UploadUiOperation } from "@openrails/contentkit-ui/react";
 
-// ContentKit's upload UI follows the page's shadcn tokens, .dark class and <html lang>.
-const uploadLocales = { de, en, es, ja, ko, zh };
-export const uploadMessages =
-  uploadLocales[document.documentElement.lang.slice(0, 2) as keyof typeof uploadLocales] ?? en;
-const text = createTranslator(resolveMessages(uploadMessages));
+// Interim, for the composer's draft media (English, the app's language).
+const text = createTranslator(resolveMessages());
 
 /** A media failure in words: a refusal states its rule, a fault asks to retry. */
 export const mediaMessage = (error: unknown) => text.error(error);
 
-const titles: Record<UploadUiOperation, string> = {
+const titles: Partial<Record<UploadUiOperation, string>> = {
   "poster.load": "Couldn't load the cover",
   "poster.frame": "Couldn't load that frame",
   "poster.save": "Couldn't set the cover",

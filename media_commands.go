@@ -31,7 +31,11 @@ func withMediaJobs(ctx context.Context, fn func(Config, *pgxpool.Pool, *media.Jo
 	if err != nil {
 		return err
 	}
-	jobs, err := media.NewJobs(media.JobsConfig{Store: store, Registry: kinds, Locker: media.PGLocker(pool), Processes: queue})
+	journal, err := media.NewPGJournal(pool, contentSchema(cfg), queue)
+	if err != nil {
+		return err
+	}
+	jobs, err := media.NewJobs(media.JobsConfig{Store: store, Registry: kinds, Locker: media.PGLocker(pool), Journal: journal, Processes: queue})
 	if err != nil {
 		return err
 	}

@@ -165,7 +165,7 @@ func TestMediaEndToEnd(t *testing.T) {
 		ref := postRefBody(posts["public"].id)
 		big := make([]byte, testQuota+1)
 		stranger.presign(ref, "images/x.png", testPNG(t, 8, 8, color.White), "image/png", 403, media.CodeForbidden)
-		stranger.call("GET", "/api/v1/media/post/"+posts["ppv"].id+"?editor", nil, "", 200) // a viewer, not an editor
+		stranger.call("GET", "/api/v1/contentkit/media/post/"+posts["ppv"].id+"?editor", nil, "", 200) // a viewer, not an editor
 		if r := h.read(stranger, kindPost, posts["ppv"].id, true).res; slices.ContainsFunc(r.Files, func(f media.FileInfo) bool { return f.Upload }) {
 			t.Fatalf("a stranger's editor read lists uploads: %+v", r.Files)
 		}
@@ -206,10 +206,14 @@ func TestMediaEndToEnd(t *testing.T) {
 		// Channel editors post but do not manage the channel's look.
 		editor.presign(chRef, "avatar.png", testPNG(t, 300, 300, color.White), "image/png", 403, media.CodeForbidden)
 		owner.put(chRef, "avatar.png", testPNG(t, 300, 300, color.RGBA{0, 160, 0, 255}), "image/png")
-		// The API names the public preset; every width is served (a width
-		// past the image renders at its width).
-		avatar := h.publicURLs(anon.call("GET", "/api/v1/channels/"+channelID, nil, "", 200)["avatar"])
-		if len(avatar) != 2 || !strings.HasSuffix(avatar[0], "/v1/"+tenant+"/channel/"+channelID+"/public/avatar-128.webp") {
+		// The API lists the preset's published renditions once the worker
+		// renders them; every width is served (a width past the image renders
+		// at its width) under a generation-suffixed name.
+		channelImage := func(preset string) func() any {
+			return func() any { return anon.call("GET", "/api/v1/channels/"+channelID, nil, "", 200)[preset] }
+		}
+		avatar := h.published(t, channelImage("avatar"), nil)
+		if len(avatar) != 2 || !strings.Contains(avatar[0], "/v1/"+tenant+"/channel/"+channelID+"/public/avatar-128-") {
 			t.Fatalf("channel avatar %v", avatar)
 		}
 		for _, u := range avatar {
@@ -224,7 +228,7 @@ func TestMediaEndToEnd(t *testing.T) {
 		if e := uploadAt(reply.Files, "avatar.png").Edit; e == nil || e.Crop.H != 400 || e.Rotate != 90 {
 			t.Fatalf("user avatar commit %+v", reply)
 		}
-		for _, u := range h.publicURLs(stranger.call("GET", "/api/v1/me", nil, "", 200)["user"].(map[string]any)["avatar"]) {
+		for _, u := range h.published(t, func() any { return stranger.call("GET", "/api/v1/me", nil, "", 200)["user"].(map[string]any)["avatar"] }, nil) {
 			h.waitPublic(t, u)
 		}
 	})
@@ -269,7 +273,7 @@ func TestMediaEndToEnd(t *testing.T) {
 		if r.res.Access != media.AccessFull || !slices.Equal(r.res.HLS, []string{"hls/clip/"}) || r.res.Files[0].Path != "large/still.webp" {
 			t.Fatalf("member read %+v", r.res)
 		}
-		base := "/api/v1/media/post/" + p.id + "/hls/hls/clip/"
+		base := "/api/v1/contentkit/media/post/" + p.id + "/hls/hls/clip/"
 		master := h.playlist(member, base+"master.m3u8", 200)
 		var variants []string
 		for _, line := range strings.Split(master, "\n") {
@@ -344,15 +348,16 @@ func TestMediaEndToEnd(t *testing.T) {
 
 	t.Run("channel cover: crop, rotate and re-crop without re-upload", func(t *testing.T) {
 		chRef := map[string]string{"kind": kindChannel, "id": channelID}
-		cover := h.publicURLs(anon.call("GET", "/api/v1/channels/"+channelID, nil, "", 200)["cover"])
+		coverImage := func() any { return anon.call("GET", "/api/v1/channels/"+channelID, nil, "", 200)["cover"] }
+		if before := h.publicURLs(coverImage()); len(before) != 0 {
+			t.Fatalf("cover listed before upload: %v", before)
+		}
+		owner.put(chRef, "cover.png", testPNG(t, 1600, 1600, color.RGBA{200, 120, 0, 255}), "image/png")
+		cover := h.published(t, coverImage, nil)
 		if len(cover) != 2 {
 			t.Fatalf("cover preset %v", cover)
 		}
 		widest := cover[len(cover)-1]
-		if publicSum(widest) != "" {
-			t.Fatal("cover served before upload")
-		}
-		owner.put(chRef, "cover.png", testPNG(t, 1600, 1600, color.RGBA{200, 120, 0, 255}), "image/png")
 		h.waitPublic(t, widest)
 		first := publicSum(widest)
 		// Narrower than the cover's MinWidth: refused, the served cover stays.
@@ -368,7 +373,10 @@ func TestMediaEndToEnd(t *testing.T) {
 		if crop := uploadAt(reply.Files, "cover.png").Edit.Crop; crop.H != 1590 {
 			t.Fatalf("cover edit %+v", crop)
 		}
-		eventually(t, "re-cropped cover", func() bool { s := publicSum(widest); return s != "" && s != first })
+		recropped := h.published(t, coverImage, cover)
+		if s := publicSum(recropped[len(recropped)-1]); s == "" || s == first {
+			t.Fatalf("re-cropped cover %v serves %q", recropped, s)
+		}
 	})
 
 	t.Run("composer drafts: publish with media, discard leaves nothing", func(t *testing.T) {
@@ -388,8 +396,8 @@ func TestMediaEndToEnd(t *testing.T) {
 		// Only its author uploads to a draft.
 		editor.presign(ref, "images/b.png", testPNG(t, 10, 10, color.RGBA{9, 9, 9, 255}), "image/png", 403, media.CodeForbidden)
 		h.waitReady(owner, kindPost, d.id)
-		stranger.call("GET", "/api/v1/media/post/"+d.id, nil, "", 404)
-		editor.call("GET", "/api/v1/media/post/"+d.id, nil, "", 404)
+		stranger.call("GET", "/api/v1/contentkit/media/post/"+d.id, nil, "", 404)
+		editor.call("GET", "/api/v1/contentkit/media/post/"+d.id, nil, "", 404)
 		owner.call("GET", d.path(), nil, "", 404)
 		owner.call("PATCH", d.path(), map[string]any{"title": "x"}, "", 404)
 		if listed(d.id) {
@@ -424,8 +432,9 @@ func TestMediaEndToEnd(t *testing.T) {
 				}
 			}()
 			eventually(t, "discarded draft folder erased", func() bool {
-				leftover = h.keys(fmt.Sprintf("%s/post/%s/", tenant, gone.id))
-				return len(leftover) == 0
+				prefix := fmt.Sprintf("%s/post/%s/", tenant, gone.id)
+				leftover = h.keys(prefix)
+				return h.erased(prefix)
 			})
 		}()
 
@@ -466,7 +475,7 @@ func TestMediaEndToEnd(t *testing.T) {
 			t.Helper()
 			for _, p := range []peer{stranger, member, anon} {
 				p.call("GET", d.path(), nil, "", 404)
-				p.call("GET", "/api/v1/media/post/"+d.id, nil, "", 404)
+				p.call("GET", "/api/v1/contentkit/media/post/"+d.id, nil, "", 404)
 			}
 			res, raw := anon.do("GET", "/api/v1/posts?channel_id="+channelID+"&limit=50", nil, "")
 			if res.StatusCode != 200 || strings.Contains(string(raw), d.id) {
@@ -509,9 +518,9 @@ func TestMediaEndToEnd(t *testing.T) {
 			t.Fatalf("usage before delete: %d %v", used, err)
 		}
 		owner.call("DELETE", p.path(), nil, "", 204)
-		buyer.call("GET", "/api/v1/media/post/"+p.id, nil, "", 404)
+		buyer.call("GET", "/api/v1/contentkit/media/post/"+p.id, nil, "", 404)
 		prefix := fmt.Sprintf("%s/post/%s/", tenant, p.id)
-		eventually(t, "folder erased", func() bool { return h.count(prefix) == 0 })
+		eventually(t, "folder erased", func() bool { return h.erased(prefix) })
 		eventually(t, "quota released", func() bool {
 			after, _, err := h.srv.media.limiter.Usage(ctx, tenant, channelOwner(channelID))
 			return err == nil && after < used
@@ -821,7 +830,11 @@ func (h *mediaHarness) keys(prefix string) []string {
 	return keys
 }
 
-func (h *mediaHarness) count(prefix string) int { return len(h.keys(prefix)) }
+// erased reports a deleted item's folder: only ContentKit's deletion
+// tombstone is left.
+func (h *mediaHarness) erased(prefix string) bool {
+	return slices.Equal(h.keys(prefix), []string{prefix + "manifest.json"})
+}
 
 func (h *mediaHarness) client(ip string) *http.Client {
 	dialer := &net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP(ip)}}
@@ -944,7 +957,7 @@ func postRefBody(id string) map[string]string {
 func (p peer) presign(ref map[string]string, path string, data []byte, typ string, status int, code string) map[string]any {
 	p.h.t.Helper()
 	sum := sha256.Sum256(data)
-	out := p.call("POST", "/api/v1/media/upload/presign", map[string]any{"ref": ref, "path": path, "type": typ, "size": len(data), "sha256": hex.EncodeToString(sum[:])}, "", status)
+	out := p.call("POST", "/api/v1/contentkit/media/upload/presign", map[string]any{"ref": ref, "path": path, "type": typ, "size": len(data), "sha256": hex.EncodeToString(sum[:])}, "", status)
 	if code != "" && out["code"] != code {
 		p.h.t.Fatalf("%s presign code %v, want %s", p.name, out["code"], code)
 	}
@@ -986,7 +999,7 @@ func (p peer) upload(ref map[string]string, path string, data []byte, typ string
 
 func (p peer) commit(ref map[string]string, ops []media.Op, status int) map[string]any {
 	p.h.t.Helper()
-	return p.call("POST", "/api/v1/media/upload/commit", map[string]any{"ref": ref, "ops": ops}, "", status)
+	return p.call("POST", "/api/v1/contentkit/media/upload/commit", map[string]any{"ref": ref, "ops": ops, "operation_id": uuid.NewString()}, "", status)
 }
 
 // put uploads and commits one file, as the SDK's client.put does.
@@ -1034,7 +1047,7 @@ type readResult struct {
 
 func (h *mediaHarness) read(p peer, kind, id string, editor bool) readResult {
 	h.t.Helper()
-	path := "/api/v1/media/" + kind + "/" + id
+	path := "/api/v1/contentkit/media/" + kind + "/" + id
 	if editor {
 		path += "?editor"
 	}
@@ -1177,16 +1190,29 @@ func (h *mediaHarness) expectFetch(t *testing.T, u, cookie string, status int) {
 	}
 }
 
-// publicURLs are an API publicImage's URLs, narrowest first.
+// publicURLs are an API publicPreset's rendition URLs, narrowest first.
 func (h *mediaHarness) publicURLs(v any) []string {
 	h.t.Helper()
-	var img publicImage
+	var img publicPreset
 	decode(h.t, v, &img)
-	var out []string
-	for _, w := range img.Widths {
-		out = append(out, media.PublicURL(img.Base, img.Namespace, img.Kind, img.ID, strings.ReplaceAll(img.To, "{w}", strconv.Itoa(w))))
+	slices.SortStableFunc(img.Renditions, func(a, b media.PublicRendition) int { return a.W - b.W })
+	out := []string{}
+	for _, r := range img.Renditions {
+		out = append(out, r.URL)
 	}
 	return out
+}
+
+// published waits until get answers a preset with renditions other than
+// before, and returns their URLs.
+func (h *mediaHarness) published(t *testing.T, get func() any, before []string) []string {
+	t.Helper()
+	var urls []string
+	eventually(t, "published renditions", func() bool {
+		urls = h.publicURLs(get())
+		return len(urls) > 0 && !slices.Equal(urls, before)
+	})
+	return urls
 }
 
 // publicSum is the digest of a served public file ("" when not served).

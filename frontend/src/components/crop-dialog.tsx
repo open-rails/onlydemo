@@ -1,8 +1,7 @@
-import { ratio, type AspectRatio } from "@openrails/contentkit-upload";
+import { ratio, type AspectRatio, type Edit } from "@openrails/contentkit-ui/client";
 import { useEffect, useMemo, useState } from "react";
 import Cropper from "react-easy-crop";
-import { useCrop } from "@openrails/contentkit-upload/react";
-import type { Edit } from "@openrails/contentkit-upload";
+import { useCrop } from "@openrails/contentkit-ui/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { RotateClockwiseIcon, RotateLeft01Icon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";

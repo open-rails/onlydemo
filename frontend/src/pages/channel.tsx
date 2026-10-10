@@ -63,7 +63,7 @@ import { Avatar, Cover } from "../components/cards";
 import { PostView } from "../components/post-view";
 import { membershipOffer, myChannelsKey, rememberPostChannel } from "../channels";
 import { ChannelTeam } from "../components/channel-team";
-import { SlotEditError, SlotEditMenu, SlotEditor } from "@openrails/contentkit-upload/ui";
+import { SlotEditError, SlotEditMenu, SlotEditor } from "@openrails/contentkit-ui";
 import { channelRef } from "../media";
 import { subscribeLabel, usePay } from "../components/pay";
 import { channelsPath, channelPath, newPostPath } from "../paths";

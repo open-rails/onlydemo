@@ -31,8 +31,9 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { FormError } from "./states";
 import { MemberStar } from "./policy-badge";
-import { DraftMediaEditor, MediaDrop, type DraftMediaHandle } from "./post-media";
-import { screenFiles, uploadsOf, usePostUploads } from "../media";
+import { useMediaRead } from "@openrails/contentkit-ui/react";
+import { DraftMediaEditor, MediaDrop, screenFiles, uploadsOf, type DraftMediaHandle } from "./draft-media";
+import { postRef } from "../media";
 
 const policies: Array<{ value: AccessPolicy; title: string; detail: string }> =
   [
@@ -173,8 +174,9 @@ export function PostForm({
   // Text is optional once the post has an image or video.
   const [hasText, setHasText] = useState(!!(post?.title.trim() || post?.body?.trim()));
   const [draftMedia, setDraftMedia] = useState(0);
-  const saved = usePostUploads(post?.id ?? "", !!post);
-  const hasMedia = draftMedia > 0 || uploadsOf(saved.data).length > 0;
+  // A saved post's uploads; a new post has only its draft's.
+  const saved = useMediaRead(postRef(post?.id ?? ""), { editor: true, read: post ? undefined : null });
+  const hasMedia = draftMedia > 0 || uploadsOf(saved.read).length > 0;
   const needsText = !hasMedia && !hasText;
   const offer = post?.offers?.find((value) => value.kind !== "recurring");
   const save = useMutation({
