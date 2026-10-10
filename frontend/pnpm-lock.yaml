@@ -27,11 +27,11 @@ importers:
         specifier: ^1.1.10
         version: 1.1.10(react@19.3.0)
       '@openrails/auth-ui':
-        specifier: https://github.com/open-rails/authkit/releases/download/v1.10.1/openrails-auth-ui-1.10.1.tgz
-        version: https://github.com/open-rails/authkit/releases/download/v1.10.1/openrails-auth-ui-1.10.1.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+        specifier: 1.10.1
+        version: 1.10.1(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@openrails/billing-ui':
-        specifier: https://github.com/open-rails/openrails/releases/download/v0.233.2/openrails-billing-ui-0.233.2.tgz
-        version: https://github.com/open-rails/openrails/releases/download/v0.233.2/openrails-billing-ui-0.233.2.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+        specifier: 0.233.2
+        version: 0.233.2(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@openrails/contentkit-upload':
         specifier: https://github.com/open-rails/contentkit/releases/download/v0.67.0/openrails-contentkit-upload-0.67.0.tgz
         version: https://github.com/open-rails/contentkit/releases/download/v0.67.0/openrails-contentkit-upload-0.67.0.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -461,9 +461,8 @@ packages:
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
 
-  '@openrails/auth-ui@https://github.com/open-rails/authkit/releases/download/v1.10.1/openrails-auth-ui-1.10.1.tgz':
-    resolution: {integrity: sha512-dqn6CTPl/pxLQ4U/z6eT3gy/p6lHqb76Cj8tpJAMZlVa3laLAw0fGvae+uZpisW8WbVJ62Be3b9ILgG9U87PmA==, tarball: https://github.com/open-rails/authkit/releases/download/v1.10.1/openrails-auth-ui-1.10.1.tgz}
-    version: 1.10.1
+  '@openrails/auth-ui@1.10.1':
+    resolution: {integrity: sha512-dqn6CTPl/pxLQ4U/z6eT3gy/p6lHqb76Cj8tpJAMZlVa3laLAw0fGvae+uZpisW8WbVJ62Be3b9ILgG9U87PmA==}
     engines: {node: '>=22.12.0'}
     peerDependencies:
       '@solana/wallet-adapter-react': '>=0.15 <1'
@@ -473,9 +472,8 @@ packages:
       '@solana/wallet-adapter-react':
         optional: true
 
-  '@openrails/billing-ui@https://github.com/open-rails/openrails/releases/download/v0.233.2/openrails-billing-ui-0.233.2.tgz':
-    resolution: {integrity: sha512-a9pdhbGE9iCFOXnTam2xyxOQyNeqUv3BKtR8q/ZTyGMZr8pDYAP0yZy8OJIuv2smwDi6k8/kwleZk58sqcL2fQ==, tarball: https://github.com/open-rails/openrails/releases/download/v0.233.2/openrails-billing-ui-0.233.2.tgz}
-    version: 0.233.2
+  '@openrails/billing-ui@0.233.2':
+    resolution: {integrity: sha512-a9pdhbGE9iCFOXnTam2xyxOQyNeqUv3BKtR8q/ZTyGMZr8pDYAP0yZy8OJIuv2smwDi6k8/kwleZk58sqcL2fQ==}
     engines: {node: '>=22.12.0'}
     peerDependencies:
       react: '>=19 <20'
@@ -2947,7 +2945,7 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.3
 
-  '@openrails/auth-ui@https://github.com/open-rails/authkit/releases/download/v1.10.1/openrails-auth-ui-1.10.1.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
+  '@openrails/auth-ui@1.10.1(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:
       '@base-ui/react': 1.8.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@hugeicons/core-free-icons': 4.3.5
@@ -2963,7 +2961,7 @@ snapshots:
       - '@types/react'
       - date-fns
 
-  '@openrails/billing-ui@https://github.com/open-rails/openrails/releases/download/v0.233.2/openrails-billing-ui-0.233.2.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
+  '@openrails/billing-ui@0.233.2(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:
       '@base-ui/react': 1.8.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@hugeicons/core-free-icons': 4.3.5

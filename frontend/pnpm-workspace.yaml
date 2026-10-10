@@ -1,0 +1,3 @@
+# Our own packages, published only by our release CI, skip pnpm's waiting period.
+minimumReleaseAgeExclude:
+  - '@openrails/*'
