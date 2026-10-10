@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { request } from "../api";
 import type { AccessPolicy, Channel, Post } from "../models";
@@ -31,9 +31,9 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { FormError } from "./states";
 import { MemberStar } from "./policy-badge";
-import { useMediaRead } from "@openrails/contentkit-ui/react";
-import { DraftMediaEditor, MediaDrop, screenFiles, uploadsOf, type DraftMediaHandle } from "./draft-media";
-import { postRef } from "../media";
+import { MediaFolderEditor } from "@openrails/contentkit-ui";
+import { useMediaFolder, useMediaRead } from "@openrails/contentkit-ui/react";
+import { postPaths, postRef } from "../media";
 
 const policies: Array<{ value: AccessPolicy; title: string; detail: string }> =
   [
@@ -129,13 +129,11 @@ export function PostForm({
   Actions?: (props: { children: ReactNode }) => ReactNode;
 }) {
   const client = useQueryClient();
-  // New posts upload into a draft created with the first file; Publish turns
-  // it into the post, Cancel deletes it with its media.
-  const [draft, setDraft] = useState<{ id: string; code: string; files: File[] }>();
-  const [mediaBusy, setMediaBusy] = useState(false);
-  const [refused, setRefused] = useState<string[]>([]);
-  const media = useRef<DraftMediaHandle>(null);
-  const onBusy = useCallback((busy: boolean) => setMediaBusy(busy), []);
+  // New posts upload into a draft created with the first file (files wait
+  // for it in the folder); Publish turns it into the post, Cancel deletes it
+  // with its media.
+  const [draft, setDraft] = useState<{ id: string; code: string }>();
+  const folder = useMediaFolder(draft ? postRef(draft.id) : null, { paths: postPaths, commit: "auto" });
   const createDraft = useMutation({
     mutationFn: () =>
       request<{ id: string; code: string }>("/api/v1/posts", {
@@ -143,20 +141,23 @@ export function PostForm({
         body: JSON.stringify({ channel_id: channelID, draft: true }),
       }),
   });
-  const addFirst = (list: File[]) => {
-    const { accepted, refused } = screenFiles(list, { images: 0, videos: 0 });
-    setRefused(refused);
-    if (accepted.length === 0) return;
-    createDraft.mutate(undefined, {
-      onSuccess: ({ id, code }) => {
-        setDraft({ id, code, files: accepted });
+  const { mutate: create, isPending: creating } = createDraft;
+  const waiting = folder.waiting.length;
+  // A failed creation is tried again when more files are added.
+  const failedAt = useRef(-1);
+  useEffect(() => {
+    if (post || draft || waiting === 0 || creating || failedAt.current === waiting) return;
+    create(undefined, {
+      onSuccess: (created) => {
+        setDraft(created);
         onDraft?.(true);
       },
+      onError: () => (failedAt.current = waiting),
     });
-  };
+  }, [post, draft, waiting, creating, create, onDraft]);
   const discard = useMutation({
     mutationFn: async () => {
-      media.current?.discard();
+      folder.discard();
       if (draft) await request(`/api/v1/posts/${draft.code}`, { method: "DELETE" });
     },
     onSuccess: () => onDiscarded?.(),
@@ -173,10 +174,10 @@ export function PostForm({
   const [validation, setValidation] = useState("");
   // Text is optional once the post has an image or video.
   const [hasText, setHasText] = useState(!!(post?.title.trim() || post?.body?.trim()));
-  const [draftMedia, setDraftMedia] = useState(0);
-  // A saved post's uploads; a new post has only its draft's.
+  // A saved post's uploads; a new post has its draft's.
   const saved = useMediaRead(postRef(post?.id ?? ""), { editor: true, read: post ? undefined : null });
-  const hasMedia = draftMedia > 0 || uploadsOf(saved.read).length > 0;
+  const hasMedia = folder.fileCount > 0 || !!saved.read?.files.some((f) => f.upload && !f.unattached);
+  const mediaBusy = folder.busy || creating;
   const needsText = !hasMedia && !hasText;
   const offer = post?.offers?.find((value) => value.kind !== "recurring");
   const save = useMutation({
@@ -237,7 +238,7 @@ export function PostForm({
               id="post-channel"
               className="w-full"
               value={channelID}
-              disabled={!!draft || createDraft.isPending}
+              disabled={!!draft || creating || folder.fileCount > 0}
               onChange={(event) => {
                 const next = channels.find((c) => c.id === event.target.value);
                 if (next) onChannel?.(next);
@@ -279,28 +280,12 @@ export function PostForm({
           />
           {needsText && <FieldDescription data-testid="text-required">{textRequired}</FieldDescription>}
         </Field>
-        {!post &&
-          (draft ? (
-            <DraftMediaEditor key={draft.id} postID={draft.id} initial={draft.files} handle={media} onBusy={onBusy} onCount={setDraftMedia} />
-          ) : (
-            <Field>
-              <FieldLabel>Images and videos</FieldLabel>
-              <MediaDrop empty onFiles={addFirst} disabled={createDraft.isPending} />
-              {createDraft.isPending && (
-                <FieldDescription>
-                  <Spinner className="inline" /> Preparing uploads…
-                </FieldDescription>
-              )}
-              {refused.length > 0 && (
-                <ul className="media-refused" role="alert">
-                  {refused.map((r) => (
-                    <li key={r}>{r}</li>
-                  ))}
-                </ul>
-              )}
-              <FormError>{createDraft.error?.message}</FormError>
-            </Field>
-          ))}
+        {!post && (
+          <>
+            <MediaFolderEditor folder={folder} label="Images and videos" className="media-editor in-composer" />
+            <FormError>{createDraft.error?.message}</FormError>
+          </>
+        )}
         <FieldSet>
           <FieldLegend variant="label">Who can read this?</FieldLegend>
           <RadioGroup
@@ -383,7 +368,7 @@ export function PostForm({
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={save.isPending || mediaBusy || createDraft.isPending || needsText}>
+            <Button type="submit" disabled={save.isPending || mediaBusy || needsText}>
               {(save.isPending || mediaBusy) && <Spinner data-icon="inline-start" />}
               {post ? "Save changes" : mediaBusy ? "Uploading…" : "Publish post"}
               <HugeiconsIcon icon={ArrowRight02Icon} data-icon="inline-end" />

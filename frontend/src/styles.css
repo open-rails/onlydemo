@@ -475,9 +475,6 @@
     outline: 2px solid var(--ring);
     outline-offset: -2px;
   }
-  .media-thumb[data-video] img {
-    object-fit: cover;
-  }
   .lock-badge {
     position: relative;
     width: 76px;
@@ -1173,110 +1170,9 @@
     padding: 16px;
     border-top: 1px solid var(--border);
   }
-  .media-editor header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-  .upload-button {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
-    font-size: 0.875rem;
-    font-weight: 600;
-    color: var(--primary);
-  }
-  .media-list {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .media-list li {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 4px 8px;
-    min-width: 0;
-  }
-  .media-list li .inline-actions {
-    margin-left: auto;
-  }
-  .media-list .media-name {
-    flex: 1 1 7rem;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 0.875rem;
-  }
-  .media-list .queued {
-    opacity: 0.85;
-  }
-  .media-list [data-failed] {
-    opacity: 1;
-  }
   .media-editor.in-composer {
     padding: 0;
     border-top: 0;
-  }
-  .media-editor h3 {
-    font-size: 0.875rem;
-    font-weight: 600;
-  }
-  .media-thumb {
-    display: grid;
-    flex: none;
-    place-items: center;
-    width: 44px;
-    height: 44px;
-    overflow: hidden;
-    border-radius: 8px;
-    color: var(--muted-foreground);
-    background: var(--muted);
-  }
-  .media-thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-  .media-drop {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-    padding: 24px 16px;
-    text-align: center;
-    cursor: pointer;
-    border: 1.5px dashed var(--border);
-    border-radius: 12px;
-    color: var(--muted-foreground);
-    transition: border-color 120ms, background-color 120ms;
-  }
-  .media-drop strong {
-    color: var(--foreground);
-    font-size: 0.9rem;
-  }
-  .media-drop:hover,
-  .media-drop[data-over],
-  .upload-button[data-over] {
-    border-color: var(--primary);
-    background: color-mix(in oklab, var(--primary) 6%, transparent);
-  }
-  .media-drop[data-disabled] {
-    cursor: progress;
-    opacity: 0.7;
-  }
-  .media-drop:has(input:focus-visible) {
-    outline: 2px solid var(--ring);
-    outline-offset: 2px;
-  }
-  .media-refused {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    font-size: 0.8125rem;
-    color: var(--destructive);
   }
   .discard-confirm {
     display: flex;
@@ -1289,25 +1185,12 @@
     flex: 1 1 16rem;
     font-size: 0.875rem;
   }
-  .media-list progress {
-    width: 80px;
-    height: 6px;
-    accent-color: var(--primary);
-  }
   .publishing-notice {
     margin-bottom: 12px;
-  }
-  .publishing-notice .media-encode {
-    width: min(320px, 100%);
-    margin-top: 8px;
   }
   .media-images {
     width: min(320px, 100%);
     margin-top: 8px;
-  }
-  .media-list .media-encode {
-    width: min(240px, 100%);
-    flex: none;
   }
   .video-downloads {
     display: flex;
@@ -1318,33 +1201,6 @@
   }
   .video-downloads a {
     text-decoration: underline;
-  }
-  .crop-area {
-    position: relative;
-    height: min(60vh, 420px);
-    overflow: hidden;
-    border-radius: 8px;
-    background: #111;
-  }
-  .crop-tools {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-  }
-  .crop-preview {
-    position: relative;
-    display: inline-block;
-    margin-left: auto;
-    overflow: hidden;
-    border-radius: 4px;
-    background: var(--muted);
-  }
-  .crop-preview > span {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    background-repeat: no-repeat;
   }
   .pay-toast {
     position: fixed;

@@ -13,7 +13,6 @@ import { PostGallery, PublishingNotice } from "./post-media";
 import type { ChannelMembership, Post } from "../models";
 import { subscribeLabel, unlockLabel, useJoinFree, usePay } from "./pay";
 import { channelPath, postPath } from "../paths";
-import { useAuth } from "../session";
 
 // The feed shows this much of a post's text; the post page all of it.
 const EXCERPT = 280;
@@ -49,7 +48,6 @@ export function PostView({
   editor?: ReactNode;
 }) {
   const full = variant === "full";
-  const auth = useAuth();
   const [liked, setLiked] = useState(false);
   const pay = usePay();
   const joinFree = useJoinFree(post.channel_id);
@@ -122,7 +120,7 @@ export function PostView({
       {post.state === "publishing" && <PublishingNotice post={post} />}
       <div ref={watchMedia}>
         {mediaNear && (
-          <PostGallery post={post} viewer={auth.user?.id} unlock={() => unlockRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })} />
+          <PostGallery post={post} unlock={() => unlockRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })} />
         )}
       </div>
       {editor}

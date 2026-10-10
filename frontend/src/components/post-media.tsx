@@ -10,11 +10,12 @@ import { postPaths, postRef } from "../media";
 // What this viewer may see as a carousel or grid: every image, then every
 // video, with access; otherwise the first image's blurred preview and the
 // locked rest, which a purchase or membership unlocks.
-export function PostGallery({ post, viewer, unlock }: { post: Post; viewer?: string; unlock: () => void }) {
+export function PostGallery({ post, unlock }: { post: Post; unlock: () => void }) {
   const item = postRef(post.id);
-  // Access is the app's: read again when it changes (sign-in, purchase, join).
+  // Access is the app's: read again when a purchase or join opens the post.
+  // Reads are kept per viewer, so a sign-in or sign-out reads again by itself.
   const { reload } = useMediaRead(item, { refresh: false });
-  const access = `${viewer}:${post.can_read}`;
+  const access = post.can_read;
   const seen = useRef(access);
   useEffect(() => {
     if (seen.current === access) return;
