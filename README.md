@@ -116,7 +116,7 @@ trailing slash with a 301 to the canonical path, a deleted post with 410, and
 drafts and unknown codes like any unknown page; a canonical page carries
 `<link rel="canonical">`, `og:url` and `og:title` (and a `Link` header). The
 API takes the code (`/api/v1/posts/<CODE>`) and returns `code` and `slug`; the
-browser builds links with `@openrails/contentkit-urls` and keeps the address
+browser builds links with `@openrails/contentkit-ui/urls` and keeps the address
 bar canonical. `onlydemo urls backfill` (`task urls:backfill`) registers posts
 that have no code; it is idempotent.
 
@@ -160,8 +160,10 @@ not a calendar month); a change applies to prices set afterwards. Repricing move
 Images and videos use ContentKit media: one private bucket, an item per post,
 channel and user (`onlydemo/{kind}/{id}/`), declared once in the registry
 (`mediaKinds` in media.go). Browsers upload straight to the bucket with
-`@openrails/contentkit-upload` (a ContentKit release asset); the app presigns,
-commits (`/api/v1/media/upload/*`) and reads (`/api/v1/media/*`).
+`@openrails/contentkit-ui` (npm, the ContentKit version). ContentKit's HTTP API
+is one mount, `/api/v1/contentkit`: the app presigns and commits
+(`/media/upload/*`), reads (`/media/*`) and resolves post codes (`/codes/*`).
+Posts are the app's own, so the content module there registers no kinds.
 
 - **Posts.** Uploads `images/{name}` (JPEG, PNG, WebP, GIF, AVIF; 25 MiB, 40
   per post) and `videos/{name}` (MP4, WebM, MOV, MKV; 20 GiB multipart, 10 per
@@ -171,9 +173,11 @@ commits (`/api/v1/media/upload/*`) and reads (`/api/v1/media/*`).
   Public: `preview`, the first image blurred, for everyone who can see the
   post; everything else is private, all or nothing per viewer.
 - **Channels and users.** Public `avatar` (1:1, 128/512 px) and channel
-  `cover` (3:1, 900/3000 px, from 600 px wide) at fixed names; the API returns
-  each as the SDK's `PublicImage`. A missing one is a 404 and the UI shows its
-  placeholder. The SDK crops before saving (`AvatarUpload`, `SlotEditor`).
+  `cover` (3:1, 900/3000 px, from 600 px wide); the API returns each as the
+  package's `PublicPreset`, read from the item's manifest: its published
+  renditions (generation-suffixed names), none before an upload, when the UI
+  shows its placeholder.
+  The package crops before saving (`AvatarUpload`, `SlotEditor`).
 - **Edits.** Crop and rotate are non-destructive `edit` ops on the kept
   original; the post cropper draws the upload's editor view.
 - **Access.** One resolver for reads, playlists and uploads: ContentKit's
@@ -199,7 +203,8 @@ commits (`/api/v1/media/upload/*`) and reads (`/api/v1/media/*`).
   `channel:settings:manage`, a user their own avatar. The upload limiter
   rate-limits each uploader (429) and holds each channel's quota (413
   `quota_exceeded`); site admins are exempt. Deleting a post erases its folder
-  and releases quota; channel and account purges erase theirs.
+  (ContentKit keeps a deletion tombstone, `manifest.json`) and releases quota;
+  channel and account purges erase theirs.
 - **Maintenance.** `onlydemo media reprocess` redoes stale outputs after a
   preset change; `onlydemo media sweep-orphans [--grace 24h] [--delete]`
   reports or removes folders with no row.

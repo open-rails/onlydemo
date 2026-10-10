@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
+import { useNearViewport } from "@openrails/contentkit-ui/react";
 import { Link } from "react-router-dom";
 import { cn } from "cn";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -12,7 +13,6 @@ import { PostGallery, PublishingNotice } from "./post-media";
 import type { ChannelMembership, Post } from "../models";
 import { subscribeLabel, unlockLabel, useJoinFree, usePay } from "./pay";
 import { channelPath, postPath } from "../paths";
-import { useAuth } from "../session";
 
 // The feed shows this much of a post's text; the post page all of it.
 const EXCERPT = 280;
@@ -21,19 +21,6 @@ function excerpt(text: string) {
   const cut = text.slice(0, EXCERPT);
   const space = cut.lastIndexOf(" ");
   return (space > EXCERPT * 0.6 ? cut.slice(0, space) : cut).trimEnd();
-}
-
-// Mounts children once the element nears the viewport (feeds read media lazily).
-function useNear(eager: boolean) {
-  const [el, ref] = useState<HTMLDivElement | null>(null);
-  const [near, setNear] = useState(eager || typeof IntersectionObserver !== "function");
-  useEffect(() => {
-    if (near || !el) return;
-    const io = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && setNear(true), { rootMargin: "800px 0px" });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [near, el]);
-  return [ref, near] as const;
 }
 
 /**
@@ -61,12 +48,12 @@ export function PostView({
   editor?: ReactNode;
 }) {
   const full = variant === "full";
-  const auth = useAuth();
   const [liked, setLiked] = useState(false);
   const pay = usePay();
   const joinFree = useJoinFree(post.channel_id);
   const unlockRef = useRef<HTMLDivElement>(null);
-  const [watchMedia, mediaNear] = useNear(full);
+  // Feeds read media as posts near the viewport.
+  const [watchMedia, mediaNear] = useNearViewport({ eager: full });
   const policy = post.access_policy;
   const price = post.offers?.find((offer) => offer.kind !== "recurring");
   const needsMembership = policy === "membership" || (policy === "members_ppv" && !post.has_membership);
@@ -133,7 +120,7 @@ export function PostView({
       {post.state === "publishing" && <PublishingNotice post={post} />}
       <div ref={watchMedia}>
         {mediaNear && (
-          <PostGallery post={post} viewer={auth.user?.id} unlock={() => unlockRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })} />
+          <PostGallery post={post} unlock={() => unlockRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })} />
         )}
       </div>
       {editor}

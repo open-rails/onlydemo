@@ -14,13 +14,13 @@ services:
       interval: 2s
       retries: 30
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    # Upstream MinIO images are gone; Chainguard still builds it (the digest CI uses).
+    image: cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
     command: server /data --console-address :9001
     environment:
       MINIO_ROOT_USER: onlydemo
       MINIO_ROOT_PASSWORD: onlydemo-dev-secret
     ports: ["127.0.0.1:59000:9000", "127.0.0.1:59001:9001"]
-  bucket:
-    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
-    depends_on: [minio]
-    entrypoint: ["sh", "-c", "until mc alias set local http://minio:9000 onlydemo onlydemo-dev-secret; do sleep 1; done; mc mb -p local/onlydemo-media"]
+    volumes: ["minio:/data"]
+volumes:
+  minio:

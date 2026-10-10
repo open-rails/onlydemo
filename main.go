@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/adaptor"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
@@ -172,13 +173,13 @@ func startServer(ctx context.Context, config Config, pool *pgxpool.Pool, opts bi
 	if err = s.jobs.Start(ctx); err != nil {
 		return nil, fmt.Errorf("start application jobs: %w", err)
 	}
-	if s.app, err = newApp(pool, s.auth, s.billing, config, s.channels, s.posts, s.media); err != nil {
+	if s.app, err = newApp(ctx, pool, s.auth, s.billing, config, s.channels, s.posts, s.media); err != nil {
 		return nil, fmt.Errorf("create application: %w", err)
 	}
 	return s, nil
 }
 
-func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, cfg Config, channels *channelAPI, posts *postAPI, media *mediaService) (*fiber.App, error) {
+func newApp(ctx context.Context, pool *pgxpool.Pool, authService *appAuth, billing *billingService, cfg Config, channels *channelAPI, posts *postAPI, media *mediaService) (*fiber.App, error) {
 	app := fiber.New()
 	app.Use(countQueries)
 	// One entitlement read per request: the paywall gate memoizes it.
@@ -222,7 +223,7 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, c
 	app.Delete("/api/v1/channels/:id/members/:user_id", required, channels.members)
 	app.Get("/api/v1/me", required, posts.me)
 	app.Get("/api/v1/me/channels", required, channels.mine)
-	app.Get("/api/v1/config", publicConfiguration(media, cfg.TrustedCountryHeader))
+	app.Get("/api/v1/config", publicConfiguration(cfg.TrustedCountryHeader))
 	app.Get("/api/v1/posts", optional, posts.list)
 	app.Post("/api/v1/posts", required, posts.create)
 	app.Get("/api/v1/posts/:code", optional, posts.get)
@@ -231,7 +232,15 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, c
 	app.Post("/api/v1/posts/:code/checkout", required, func(c fiber.Ctx) error {
 		return posts.checkout(c, returnOrigin(c, cfg.PublicURL))
 	})
-	media.mount(app, optional)
+	urls, err := newURLRouter(posts, cfg)
+	if err != nil {
+		return nil, err
+	}
+	contentkit, err := media.api(ctx, cfg, urls)
+	if err != nil {
+		return nil, err
+	}
+	app.All(contentkitPrefix+"/*", optional, adaptor.HTTPHandlerWithContext(contentkit))
 	// Site admins work on customers' billing through the merchant API.
 	if err := billing.Mount(app, authService.client); err != nil {
 		return nil, err
@@ -239,10 +248,6 @@ func newApp(pool *pgxpool.Pool, authService *appAuth, billing *billingService, c
 
 	// Register AuthKit endpoints on Fiber so they appear in its route table.
 	if err := authkitfiber.Mount(app, authService.client); err != nil {
-		return nil, err
-	}
-	urls, err := newURLRouter(posts, cfg)
-	if err != nil {
 		return nil, err
 	}
 	mountFrontend(app, urls, cfg.PublicURL, posts)

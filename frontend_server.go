@@ -60,10 +60,9 @@ func mountFrontend(app *fiber.App, urls *contenturl.Router, base string, posts *
 	})
 }
 
-// publicConfiguration is the buyer's country from the trusted edge header and
-// the user avatar preset (a user's avatar is it at their id). billing-ui
-// reads the merchant's payment setup from /billing/v1/config itself.
-func publicConfiguration(m *mediaService, countryHeader string) fiber.Handler {
+// publicConfiguration is the buyer's country from the trusted edge header.
+// billing-ui reads the merchant's payment setup from /billing/v1/config itself.
+func publicConfiguration(countryHeader string) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		// Only an operator-named edge header is trusted for the buyer's country.
 		country := ""
@@ -73,6 +72,6 @@ func publicConfiguration(m *mediaService, countryHeader string) fiber.Handler {
 			}
 		}
 		c.Set("Cache-Control", "no-store")
-		return c.JSON(fiber.Map{"country": country, "user_avatar": m.image(kindUser, "", avatarImage)})
+		return c.JSON(fiber.Map{"country": country})
 	}
 }

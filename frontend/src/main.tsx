@@ -2,11 +2,9 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
-import { UploadUiProvider } from "@openrails/contentkit-upload/ui";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthHost } from "./auth";
-import { uploads } from "./media";
-import { toastMediaError, uploadMessages } from "./media-errors";
+import { ContentKitHost } from "./contentkit";
 import { AppLayout, NotFoundPage, RequireAccount } from "./App";
 import { HomePage, ChannelsPage } from "./pages/explore";
 import { ChannelPage, NewChannelPage } from "./pages/channel";
@@ -75,15 +73,10 @@ const router = createBrowserRouter([
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <UploadUiProvider
-        client={uploads}
-        appearance={{ theme: "inherit" }}
-        messages={uploadMessages}
-        onError={(error, { operation }) => toastMediaError(error, operation)}
-      >
+      <ContentKitHost navigate={(to, options) => void router.navigate(to, options)}>
         <RouterProvider router={router} />
-        <Toaster position="bottom-right" richColors closeButton />
-      </UploadUiProvider>
+      </ContentKitHost>
+      <Toaster position="bottom-right" richColors closeButton />
     </QueryClientProvider>
   </StrictMode>,
 );

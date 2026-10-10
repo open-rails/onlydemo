@@ -136,7 +136,7 @@ func (h *mediaHarness) testListingCost(t *testing.T, purchasedPost testPost, buy
 	// A media read resolves the post and the viewer's grants (plus, when
 	// they hold any, the account's liveness) once.
 	for _, p := range []peer{buyer, fan, lister} {
-		c, _ := h.cost(p, "/api/v1/media/post/"+purchasedPost.id)
+		c, _ := h.cost(p, "/api/v1/contentkit/media/post/"+purchasedPost.id)
 		if c.auth > 2 || c.billing > 1 {
 			t.Errorf("%s media read: %+v", p.name, c)
 		}

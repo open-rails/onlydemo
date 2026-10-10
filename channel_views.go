@@ -23,8 +23,8 @@ type channelView struct {
 	Role       string              `json:"role,omitempty"`
 	CanManage  bool                `json:"can_manage"`
 	CanEdit    bool                `json:"can_edit"`
-	Avatar     *publicImage      `json:"avatar"`
-	Cover      *publicImage      `json:"cover"`
+	Avatar     publicPreset      `json:"avatar"`
+	Cover      publicPreset      `json:"cover"`
 	Membership channelMembership `json:"membership"`
 }
 
@@ -62,7 +62,6 @@ func (api *channelAPI) views(ctx context.Context, user string, ids []string, gra
 		}
 		g, s, key := pg.channels[id], pg.states[id], membershipResource(id)
 		v := channelView{ID: id, Slug: g.Slug, Name: g.Name, CanManage: pg.can(id, channelSettingsManage), CanEdit: pg.can(id, channelEditPermission),
-			Avatar: api.media.image(kindChannel, id, avatarImage), Cover: api.media.image(kindChannel, id, coverImage),
 			Membership: channelMembership{Status: s.Status, Free: s.Free, Sync: s.Sync, Member: pg.access[key]}}
 		if v.CanManage {
 			v.Role = "owner"
@@ -76,6 +75,14 @@ func (api *channelAPI) views(ctx context.Context, user string, ids []string, gra
 		out = append(out, v)
 	}
 	offers, err := api.billing.offers(ctx, billing.OfferRecurring, selling, 1)
+	if err != nil {
+		return nil, err
+	}
+	live := make([]string, len(out))
+	for i, v := range out {
+		live[i] = v.ID
+	}
+	images, err := api.media.publicImages(ctx, kindChannel, live, avatarImage, coverImage)
 	if err != nil {
 		return nil, err
 	}
@@ -99,6 +106,7 @@ func (api *channelAPI) views(ctx context.Context, user string, ids []string, gra
 	}
 	for i := range out {
 		v := &out[i]
+		v.Avatar, v.Cover = images[v.ID][0], images[v.ID][1]
 		if list := offers[membershipResource(v.ID)]; len(list) > 0 {
 			v.Membership.Offer = &list[0]
 		}
@@ -313,8 +321,12 @@ func (api *postAPI) me(c fiber.Ctx) error {
 	if err != nil {
 		return billingUnavailable(c)
 	}
+	avatar, err := api.media.publicImages(c.Context(), kindUser, []string{user}, avatarImage)
+	if err != nil {
+		return clientError(c, 500, "media store error")
+	}
 	c.Set("Cache-Control", "no-store")
-	return c.JSON(fiber.Map{"user": fiber.Map{"id": profile.ID, "username": profile.Username, "email": profile.Email, "avatar": api.media.image(kindUser, profile.ID, avatarImage)}, "manageable_channels": managed, "purchased_posts": purchased, "has_more": more, "next_cursor": next, "subscriptions": subscriptions.Items, "payments": payments.Items})
+	return c.JSON(fiber.Map{"user": fiber.Map{"id": profile.ID, "username": profile.Username, "email": profile.Email, "avatar": avatar[user][0]}, "manageable_channels": managed, "purchased_posts": purchased, "has_more": more, "next_cursor": next, "subscriptions": subscriptions.Items, "payments": payments.Items})
 }
 
 // editable lists the channels the user can publish to.
