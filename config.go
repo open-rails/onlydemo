@@ -12,7 +12,6 @@ import (
 	"github.com/knadh/koanf/providers/env/v2"
 	"github.com/knadh/koanf/v2"
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/billing"
 )
 
 type Config struct {
@@ -36,15 +35,8 @@ type Config struct {
 	TrustedCountryHeader string
 	ContentSchema        string
 	Media                mediaConfig
-	PostDeletion         postDeletionPolicy
 	// MembershipHours is each new channel membership price's renewal period.
 	MembershipHours int
-}
-
-// postDeletionPolicy is what deleting a paid post does to its recent purchases.
-type postDeletionPolicy struct {
-	Action billing.PurchaseAction
-	Window time.Duration
 }
 
 func loadConfig() (Config, error) {
@@ -65,7 +57,7 @@ func loadConfig() (Config, error) {
 			case "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_KEYS_PATH", "AUTH_SCHEMA", "APP_SCHEMA", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
 			default:
-				if key == "CONTENT_SCHEMA" || key == "POST_DELETION_REFUND" || key == "POST_DELETION_REFUND_WINDOW" || key == "MEMBERSHIP_PERIOD" || key == "MERCHANT_FILE" || key == "TRUSTED_COUNTRY_HEADER" || key == "RETURN_ORIGINS" || strings.HasPrefix(key, "MEDIA_") {
+				if key == "CONTENT_SCHEMA" || key == "MEMBERSHIP_PERIOD" || key == "MERCHANT_FILE" || key == "TRUSTED_COUNTRY_HEADER" || key == "RETURN_ORIGINS" || strings.HasPrefix(key, "MEDIA_") {
 					return strings.ToLower(key), value
 				}
 				return "", nil
@@ -139,9 +131,6 @@ func loadConfig() (Config, error) {
 
 		TrustedCountryHeader: strings.TrimSpace(k.String("trusted_country_header")),
 	}
-	if cfg.PostDeletion, err = parsePostDeletionPolicy(k.String("post_deletion_refund"), k.String("post_deletion_refund_window")); err != nil {
-		return Config{}, err
-	}
 	if cfg.MembershipHours, err = parseMembershipPeriod(k.String("membership_period")); err != nil {
 		return Config{}, err
 	}
@@ -175,26 +164,6 @@ func parseReturnOrigins(publicURL, raw string) ([]string, error) {
 		}
 	}
 	return origins, nil
-}
-
-// parsePostDeletionPolicy defaults to refunding purchases from the last 30 days.
-func parsePostDeletionPolicy(action, window string) (postDeletionPolicy, error) {
-	policy := postDeletionPolicy{Action: billing.PurchaseActionRefund, Window: 720 * time.Hour}
-	switch a := billing.PurchaseAction(strings.ToLower(strings.TrimSpace(action))); a {
-	case "":
-	case billing.PurchaseActionRefund, billing.PurchaseActionReview, billing.PurchaseActionNone:
-		policy.Action = a
-	default:
-		return policy, fmt.Errorf("POST_DELETION_REFUND must be refund, review or none")
-	}
-	if window = strings.TrimSpace(window); window != "" {
-		d, err := time.ParseDuration(window)
-		if err != nil || d <= 0 {
-			return policy, fmt.Errorf("POST_DELETION_REFUND_WINDOW must be a positive duration such as 720h")
-		}
-		policy.Window = d
-	}
-	return policy, nil
 }
 
 // parseMembershipPeriod defaults to 720h; OpenRails periods are whole hours.

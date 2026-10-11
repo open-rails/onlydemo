@@ -139,19 +139,21 @@ func (api *postAPI) syncOffer(ctx context.Context, args postOfferArgs) error {
 	return err
 }
 
+// archivePost stops a deleted post's sales. Nobody is refunded: its buyers
+// keep the post.
 func (api *postAPI) archivePost(ctx context.Context, id string) error {
-	var deletedAt *time.Time
-	err := api.pool.QueryRow(ctx, `SELECT deleted_at FROM `+api.table+` WHERE id=$1`, id).Scan(&deletedAt)
+	var deleted bool
+	err := api.pool.QueryRow(ctx, `SELECT deleted_at IS NOT NULL FROM `+api.table+` WHERE id=$1`, id).Scan(&deleted)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	if deletedAt == nil {
+	if !deleted {
 		return errors.New("post deletion was not accepted")
 	}
-	return api.billing.archivePostProduct(ctx, postResource(id), *deletedAt)
+	return api.billing.archiveResource(ctx, postResource(id))
 }
 
 // inline runs a committed job's work in the request, bounded; failure is left

@@ -83,15 +83,11 @@ func smoke() error {
 	if err != nil {
 		return err
 	}
-	postDeletion, err := parsePostDeletionPolicy("", "")
-	if err != nil {
-		return err
-	}
 	membershipHours, err := parseMembershipPeriod("")
 	if err != nil {
 		return err
 	}
-	cfg := Config{PostDeletion: postDeletion, MembershipHours: membershipHours, Media: media, DatabaseURL: databaseURL, PublicURL: base, ReturnOrigins: []string{base}, AuthIssuer: base, AuthAudience: "demo-smoke", Merchant: fakeStripeMerchant(smokeWebhookSecret)}
+	cfg := Config{MembershipHours: membershipHours, Media: media, DatabaseURL: databaseURL, PublicURL: base, ReturnOrigins: []string{base}, AuthIssuer: base, AuthAudience: "demo-smoke", Merchant: fakeStripeMerchant(smokeWebhookSecret)}
 	if err = initializeDatabase(ctx, cfg, pool); err != nil {
 		return err
 	}

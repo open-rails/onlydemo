@@ -277,7 +277,7 @@ func (api *postAPI) me(c fiber.Ctx) error {
 		return billingUnavailable(c)
 	}
 	before, _ := parsePostID(c.Query("before"))
-	// The library is every post the viewer holds a purchase of.
+	// The library is every post the viewer holds a purchase of, deleted ones included.
 	keys := []string{}
 	owned := access.OwnPrefix(tenant, kindPost)
 	params := billing.CustomerEntitlementListParams{Prefix: owned, PageRequest: billing.PageRequest{Limit: 100}}
@@ -296,7 +296,7 @@ func (api *postAPI) me(c fiber.Ctx) error {
 		}
 		params.Cursor = held.Next
 	}
-	rows, err := api.pool.Query(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=ANY($2::uuid[]) AND deleted_at IS NULL`+published+` AND ($1::text='' OR id<$1::uuid) AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL) ORDER BY id DESC LIMIT 51`, before, keys)
+	rows, err := api.pool.Query(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=ANY($2::uuid[])`+published+` AND ($1::text='' OR id<$1::uuid) AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL) ORDER BY id DESC LIMIT 51`, before, keys)
 	if err != nil {
 		return databaseError(c, err)
 	}

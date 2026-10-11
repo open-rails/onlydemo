@@ -84,7 +84,6 @@ results are synchronous and OpenRails reconciles from the gateway.
 | `MERCHANT_FILE` | The merchant declaration (default `merchant.yaml`) |
 | `TRUSTED_COUNTRY_HEADER` | Edge header with the buyer's country (e.g. `CF-IPCountry`) to preselect the billing country; unset = never trusted, the browser locale is used |
 | `MEMBERSHIP_PERIOD` | Renewal period of membership prices set afterwards, in whole hours (default `720h`; e.g. `1h` to test rebilling) |
-| `POST_DELETION_REFUND`, `POST_DELETION_REFUND_WINDOW` | Deleting a paid post: `refund` (default), `review` or `none` for one-time purchases made within the window before deletion (default `720h`). A post that becomes free refunds nothing |
 | `CONTENT_SCHEMA` | ContentKit schema (default `content`): the upload limiter's counters and content codes |
 | `MEDIA_S3_*` | Media bucket: `ENDPOINT`, `PUBLIC_ENDPOINT` (browser presign host), `BUCKET`, `REGION`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY` |
 | `MEDIA_URL`, `MEDIA_DELIVERY`, `MEDIA_COOKIE_DOMAIN` | media-gateway origin; `cookie` (default) or `url` delivery |
@@ -128,7 +127,10 @@ Posts have one of four content policies:
 - **One-time purchase:** anyone signed in can buy.
 
 A purchased post stays readable permanently, even after membership ends or the
-post's access policy changes. Deleted content is hidden. Payment history remains.
+post's access policy changes. Deleting a post hides it from everyone who did
+not buy it (feeds, the channel, its link) and archives its product: it is no
+longer sold, nobody is refunded, and its buyers keep it in their library and
+on its page. Payment history remains.
 
 The application stores content, its access policy and each channel's slug and
 name (AuthKit holds only the channel's permission group, with the channel's id),
@@ -202,9 +204,10 @@ Posts are the app's own, so the content module there registers no kinds.
 - **Uploads.** Post media needs `channel:posts:create`, channel images
   `channel:settings:manage`, a user their own avatar. The upload limiter
   rate-limits each uploader (429) and holds each channel's quota (413
-  `quota_exceeded`); site admins are exempt. Deleting a post erases its folder
-  (ContentKit keeps a deletion tombstone, `manifest.json`) and releases quota;
-  channel and account purges erase theirs.
+  `quota_exceeded`); site admins are exempt. Deleting a post never offered for
+  sale erases its folder (ContentKit keeps a deletion tombstone,
+  `manifest.json`) and releases quota; a post once offered keeps its folder for
+  its buyers and loses its public preview. Channel and account purges erase theirs.
 - **Maintenance.** `onlydemo media reprocess` redoes stale outputs after a
   preset change; `onlydemo media sweep-orphans [--grace 24h] [--delete]`
   reports or removes folders with no row.
@@ -325,8 +328,9 @@ members_ppv buyer (after membership lapse) viewers get (everything, or the
 public blurred preview), editor/admin bypass, editor-only edits, rate and quota
 refusals (presign and commit), public avatars and covers (crop, rotate,
 re-crop), drafts, publishing after processing, content URLs (codes, canonical
-redirects and tags, 410 after deletion, the backfill), listing cost and post
-erasure. `task dev:up && task test:media` runs it locally. `pnpm --dir frontend
+redirects and tags, 410 after deletion, the backfill), listing cost, and post
+deletion (a buyer keeps a deleted post, nobody is refunded; a never-offered post's
+folder is erased). `task dev:up && task test:media` runs it locally. `pnpm --dir frontend
 test` checks the browser's post links.
 
 `TestNMIBillingEndToEnd` runs billing against OpenRails's `nmimock` NMI gateway

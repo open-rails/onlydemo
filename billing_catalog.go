@@ -198,28 +198,6 @@ func (b *billingService) archiveResource(ctx context.Context, resource string) e
 	return err
 }
 
-// archivePostProduct archives a deleted post's product (never deletes it) and
-// applies the host's refund policy to purchases made within the window before
-// deletedAt. The key is derived from the post and policy, so the inline attempt
-// and the job replay one operation; each call is capped, so replay until done.
-func (b *billingService) archivePostProduct(ctx context.Context, resource string, deletedAt time.Time) error {
-	policy := b.postDeletion
-	params := billing.ArchiveProductParams{ProductKey: resource, PurchaseAction: policy.Action, Reason: "post deleted",
-		IdempotencyKey: fmt.Sprintf("post-archive:%s:%s:%s", resource, policy.Action, policy.Window)}
-	if policy.Action != billing.PurchaseActionNone {
-		params.PurchaseWindowStartsAt = deletedAt.Add(-policy.Window)
-	}
-	for {
-		archive, err := b.client.ArchiveProduct(ctx, params)
-		if errors.Is(err, billing.ErrNotFound) {
-			return nil
-		}
-		if err != nil || archive.Complete {
-			return err
-		}
-	}
-}
-
 // archiveChannel stops every sale of a deleted channel: its memberships and posts.
 func (b *billingService) archiveChannel(ctx context.Context, id string, posts []string) error {
 	for _, resource := range append([]string{membershipResource(id), freeMembershipProduct(id)}, mapped(posts, postResource)...) {

@@ -281,8 +281,8 @@ func (api *channelAPI) finishDeletion(ctx context.Context, id string) error {
 	if seconds > 0 {
 		return river.JobSnooze(max(time.Millisecond, time.Duration(seconds*float64(time.Second))))
 	}
-	// Post and channel folders are erased with the rows; soft-deleted posts
-	// were erased when they were deleted, and a repeated erasure is harmless.
+	// Post and channel folders are erased with the rows, a deleted
+	// post's kept folder too; a repeated erasure is harmless.
 	err = pgx.BeginFunc(ctx, api.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `DELETE FROM `+api.posts+` WHERE channel_id=$1 RETURNING id::text`, id)
 		if err != nil {
