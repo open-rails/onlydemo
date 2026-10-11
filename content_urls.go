@@ -29,8 +29,9 @@ func newURLRouter(posts *postAPI, cfg Config) (*contenturl.Router, error) {
 }
 
 // urlVisibility: a published post on a live channel is served; a deleted
-// post or channel is gone; drafts and publishing posts are like unknown
-// codes (their editors open them in the app).
+// post or channel is gone (the Gone page is still the app, where a deleted
+// post's buyers read it); drafts and publishing posts are like unknown codes
+// (their editors open them in the app).
 func (api *postAPI) urlVisibility(r *http.Request, l contenturl.Link) (contenturl.Visibility, error) {
 	if l.ContentKind != kindPost {
 		return contenturl.Hidden, nil

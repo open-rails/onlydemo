@@ -28,8 +28,7 @@ type billingService struct {
 	// gate decides paywalls from one entitlement read per request.
 	gate *access.Gate
 	// psps are the declared PSPs every offer price is sold through.
-	psps         []string
-	postDeletion postDeletionPolicy
+	psps []string
 	// membershipHours is the renewal period of new membership prices.
 	membershipHours int
 }
@@ -67,7 +66,7 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 	if err != nil {
 		return nil, fmt.Errorf("start OpenRails: %w", err)
 	}
-	b := &billingService{client: client, reads: client, psps: slices.Sorted(maps.Keys(cfg.Merchant.PSPs)), postDeletion: cfg.PostDeletion, membershipHours: cfg.MembershipHours}
+	b := &billingService{client: client, reads: client, psps: slices.Sorted(maps.Keys(cfg.Merchant.PSPs)), membershipHours: cfg.MembershipHours}
 	if b.gate, err = access.NewGate(access.GateConfig{Entitlements: ckopenrails.Entitlements(liveReads{b}), Tenant: tenant,
 		MemberKinds: []string{kindChannel}, OwnedKinds: []string{kindPost}}); err != nil {
 		return nil, err

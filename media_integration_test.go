@@ -53,6 +53,7 @@ import (
 	"github.com/open-rails/contentkit/media/token"
 	"github.com/open-rails/contentkit/media/worker"
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 const (
@@ -511,14 +512,88 @@ func TestMediaEndToEnd(t *testing.T) {
 		h.testListingCost(t, posts["ppv"], buyer)
 	})
 
-	t.Run("post deletion erases its folder and releases quota", func(t *testing.T) {
+	t.Run("deleting a sold post archives it: its buyer keeps it, nobody is refunded", func(t *testing.T) {
 		p := posts["ppv"]
+		folder := fmt.Sprintf("%s/post/%s/", tenant, p.id)
+		preview := h.read(stranger, kindPost, p.id, false).res.Previews[0]
+		price := map[string]any{"price_id": stranger.call("GET", p.path(), nil, "", 200)["offers"].([]any)[0].(map[string]any)["price_id"]}
+		owner.call("DELETE", p.path(), nil, "", 204)
+
+		product, err := h.srv.billing.client.GetProductByKey(ctx, postResource(p.id))
+		if err != nil || !product.Archived {
+			t.Fatalf("product after deletion: %+v %v", product, err)
+		}
+		if offers, err := h.srv.billing.offers(ctx, billing.OfferPermanent, []string{postResource(p.id)}, 10); err != nil || len(offers) != 0 {
+			t.Fatalf("a deleted post is still offered: %v %v", offers, err)
+		}
+		customer, _ := customerID(buyer.id)
+		payments, err := h.srv.billing.client.ListPayments(ctx, billing.PaymentListParams{CustomerID: customer, PageRequest: billing.PageRequest{Limit: 50}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		bought := false
+		for _, pay := range payments.Items {
+			if pay.Kind != billing.PaymentCharge || pay.Status != billing.PaymentSucceeded || pay.AmountRefunded != 0 {
+				t.Fatalf("the buyer was refunded: %+v", pay)
+			}
+			bought = bought || pay.Product != nil && pay.Product.Key == postResource(p.id)
+		}
+		if !bought {
+			t.Fatalf("no purchase of the post among %+v", payments.Items)
+		}
+		if refunds := h.stripe.requested("POST /v1/refunds"); refunds != 0 {
+			t.Fatalf("%d provider refunds", refunds)
+		}
+
+		// The buyer still opens the post, its media and its library entry.
+		got := buyer.call("GET", p.path(), nil, "", 200)
+		if got["can_read"] != true || got["purchased"] != true || got["can_edit"] != false || got["body"] != "text" || len(got["offers"].([]any)) != 0 {
+			t.Fatalf("the buyer's deleted post %v", got)
+		}
+		r := h.read(buyer, kindPost, p.id, false)
+		if r.res.Access != media.AccessFull || r.cookie == "" || len(r.res.Files) != 2 {
+			t.Fatalf("the buyer's media %s (cookie %t): %+v", r.res.Access, r.cookie != "", r.res.Files)
+		}
+		for _, f := range r.res.Files {
+			h.expectFetch(t, f.URL, r.cookie, 200)
+		}
+		var library struct {
+			Purchased []post `json:"purchased_posts"`
+		}
+		decode(t, buyer.call("GET", "/api/v1/me", nil, "", 200), &library)
+		if !slices.ContainsFunc(library.Purchased, func(l post) bool { return l.ID == p.id && l.CanRead }) {
+			t.Fatalf("library lost the deleted post: %+v", library.Purchased)
+		}
+		buyer.call("POST", p.path()+"/checkout", price, "", 404)
+
+		// Everyone else: gone from the post, its media, feeds and its link.
+		for _, v := range []peer{owner, editor, admin, member, stranger, anon} {
+			v.call("GET", p.path(), nil, "", 404)
+			v.call("GET", "/api/v1/contentkit/media/post/"+p.id, nil, "", 404)
+			for _, feed := range []string{"/api/v1/posts?limit=50", "/api/v1/posts?channel_id=" + channelID + "&limit=50"} {
+				if slices.ContainsFunc(v.callList(feed), func(l any) bool { return l.(map[string]any)["id"] == p.id }) {
+					t.Fatalf("%s's %s lists the deleted post", v.name, feed)
+				}
+			}
+		}
+		stranger.call("POST", p.path()+"/checkout", price, "", 404)
+		if res, _ := anon.page("/p/" + p.code + "/ppv"); res.StatusCode != 410 {
+			t.Fatalf("deleted post page %d", res.StatusCode)
+		}
+		eventually(t, "public preview withdrawn", func() bool { return publicSum(preview) == "" })
+		if h.erased(folder) {
+			t.Fatal("a sold post's folder was erased")
+		}
+	})
+
+	t.Run("deleting a never-offered post erases its folder and releases quota", func(t *testing.T) {
+		p := posts["public"]
 		used, _, err := h.srv.media.limiter.Usage(ctx, tenant, channelOwner(channelID))
 		if err != nil || used <= 0 {
 			t.Fatalf("usage before delete: %d %v", used, err)
 		}
 		owner.call("DELETE", p.path(), nil, "", 204)
-		buyer.call("GET", "/api/v1/contentkit/media/post/"+p.id, nil, "", 404)
+		anon.call("GET", p.path(), nil, "", 404)
 		prefix := fmt.Sprintf("%s/post/%s/", tenant, p.id)
 		eventually(t, "folder erased", func() bool { return h.erased(prefix) })
 		eventually(t, "quota released", func() bool {
@@ -1310,6 +1385,20 @@ type fakeStripe struct {
 	mu        sync.Mutex
 	customers int
 	sessions  []url.Values
+	requests  []string // "METHOD /path"
+}
+
+// requested counts the requests made to route ("POST /v1/refunds").
+func (s *fakeStripe) requested(route string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, r := range s.requests {
+		if r == route {
+			n++
+		}
+	}
+	return n
 }
 
 func (s *fakeStripe) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -1324,6 +1413,7 @@ func (s *fakeStripe) RoundTrip(req *http.Request) (*http.Response, error) {
 	if err := req.ParseForm(); err != nil {
 		return nil, err
 	}
+	s.requests = append(s.requests, req.Method+" "+req.URL.Path)
 	var data any
 	switch req.Method + " " + req.URL.Path {
 	case "GET /v1/account":

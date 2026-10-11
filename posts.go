@@ -65,6 +65,8 @@ type post struct {
 	// State is "draft" (the composer's), "publishing" (media still
 	// processing: its editors alone see it) or "published".
 	State string `json:"state"`
+	// Deleted posts stay readable to their buyers alone.
+	Deleted bool `json:"-"`
 	// MediaReadiness is a publishing post's media processing, for its editors.
 	MediaReadiness     *media.Readiness    `json:"media_readiness,omitempty"`
 	CanRead            bool                `json:"can_read"`
@@ -87,7 +89,7 @@ type postInput struct {
 	DraftID *string `json:"draft_id"`
 }
 
-const postColumns = `id::text,author_id::text,channel_id::text,title,body,access_policy,offer_status,offer_revision,state,created_at,updated_at`
+const postColumns = `id::text,author_id::text,channel_id::text,title,body,access_policy,offer_status,offer_revision,state,deleted_at IS NOT NULL,created_at,updated_at`
 
 // Post states.
 const (
@@ -102,7 +104,7 @@ const published = ` AND state='published'`
 
 func scanPost(row interface{ Scan(...any) error }) (post, error) {
 	var p post
-	err := row.Scan(&p.ID, &p.AuthorID, &p.ChannelID, &p.Title, &p.Body, &p.AccessPolicy, &p.OfferStatus, &p.OfferRevision, &p.State, &p.CreatedAt, &p.UpdatedAt)
+	err := row.Scan(&p.ID, &p.AuthorID, &p.ChannelID, &p.Title, &p.Body, &p.AccessPolicy, &p.OfferStatus, &p.OfferRevision, &p.State, &p.Deleted, &p.CreatedAt, &p.UpdatedAt)
 	return p, err
 }
 
@@ -210,11 +212,14 @@ func (api *postAPI) decorate(c fiber.Ctx, posts []post, withOffers bool) error {
 		// Channel grants include the viewer's site-wide (root) grants.
 		p.CanEdit = pg.can(p.ChannelID, channelEditPermission) || pg.can(p.ChannelID, postEditPermission)
 		p.CanRead = readable[i] || pg.can(p.ChannelID, channelReadPermission) || pg.can(p.ChannelID, postReadPermission)
+		if p.Deleted {
+			p.CanEdit, p.CanRead = false, p.Purchased
+		}
 		p.ChannelAvatar = &avatars[p.ChannelID][0]
 		if !p.CanRead {
 			p.Body = ""
 		}
-		if withOffers && paidPolicy(p.AccessPolicy) && p.OfferStatus == "active" {
+		if withOffers && !p.Deleted && paidPolicy(p.AccessPolicy) && p.OfferStatus == "active" {
 			selling = append(selling, postResource(p.ID))
 		}
 	}
@@ -291,13 +296,13 @@ func (api *postAPI) list(c fiber.Ctx) error {
 	return c.JSON(posts)
 }
 
-// get serves a post by its code.
+// get serves a post by its code; a deleted one only to its buyers (show).
 func (api *postAPI) get(c fiber.Ctx) error {
 	id, err := api.postID(c)
 	if err != nil {
 		return readError(c, err)
 	}
-	return api.show(c, api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1 AND deleted_at IS NULL`+shown+` AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL)`, id))
+	return api.show(c, api.pool.QueryRow(c.Context(), `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1`+shown+` AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL)`, id))
 }
 
 // shown is what the post page loads: a publishing post is then 404 for
@@ -324,6 +329,9 @@ func (api *postAPI) show(c fiber.Ctx, row pgx.Row) error {
 	posts := []post{p}
 	if err = api.decorate(c, posts, true); err != nil {
 		return billingUnavailable(c)
+	}
+	if posts[0].Deleted && !posts[0].Purchased {
+		return clientError(c, 404, "post not found")
 	}
 	c.Set("Cache-Control", "no-store")
 	return c.JSON(posts[0])
@@ -621,17 +629,20 @@ func (api *postAPI) delete(c fiber.Ctx) error {
 		return clientError(c, 404, "post not found")
 	}
 	err = api.inTx(c, func(tx pgx.Tx) error {
-		result, err := tx.Exec(c.Context(), `UPDATE `+api.table+` SET deleted_at=NOW() WHERE id=$1 AND deleted_at IS NULL`, id)
+		var offered int64
+		err := tx.QueryRow(c.Context(), `UPDATE `+api.table+` SET deleted_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING offer_revision`, id).Scan(&offered)
 		if err != nil {
 			return err
-		}
-		if result.RowsAffected() == 0 {
-			return pgx.ErrNoRows
 		}
 		if _, err = api.jobs.InsertTx(c.Context(), tx, postArchiveArgs{PostID: id}, &river.InsertOpts{UniqueOpts: river.UniqueOpts{ByArgs: true}}); err != nil {
 			return err
 		}
-		return api.media.deletePostsTx(c.Context(), tx, p.ChannelID, id)
+		// A post never offered for sale has no buyers: its media goes. One
+		// once offered keeps it for its buyers; only its public preview goes.
+		if offered == 0 {
+			return api.media.deletePostsTx(c.Context(), tx, p.ChannelID, id)
+		}
+		return api.media.exposeTx(c.Context(), tx, id)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientError(c, 404, "post not found")
@@ -704,9 +715,9 @@ func (api *postAPI) editsChannel(ctx context.Context, user, channel string) (boo
 	return api.auth.can(ctx, user, iam.RootGroup(), postEditPermission)
 }
 
-// visible is a live post (or draft) on a live channel.
-func (api *postAPI) visible(ctx context.Context, id string) (post, error) {
-	return scanPost(api.pool.QueryRow(ctx, `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1 AND deleted_at IS NULL AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL)`, id))
+// onLiveChannel is a post (or draft), deleted ones included, on a live channel.
+func (api *postAPI) onLiveChannel(ctx context.Context, id string) (post, error) {
+	return scanPost(api.pool.QueryRow(ctx, `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1 AND EXISTS(SELECT 1 FROM `+api.channels.table+` ch WHERE ch.id=channel_id AND ch.deleted_at IS NULL)`, id))
 }
 func (api *postAPI) live(ctx context.Context, id string) (post, error) {
 	return scanPost(api.pool.QueryRow(ctx, `SELECT `+postColumns+` FROM `+api.table+` WHERE id=$1 AND deleted_at IS NULL`, id))

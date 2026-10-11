@@ -374,18 +374,22 @@ type grants []iam.Perm
 
 func (g grants) can(perm iam.Perm) bool { return slices.ContainsFunc(g, perm.Matches) }
 
-// postAccess loads a live post (found false otherwise) and the actor's upload
-// grant and grants on its channel.
+// postAccess loads a post on a live channel (found false otherwise) and the
+// actor's upload grant and grants on its channel. Nobody uploads to a deleted
+// post or edits it.
 func (m *mediaService) postAccess(ctx context.Context, actor access.Actor, contentID string) (p post, up media.UploadGrant, g grants, found bool, err error) {
 	id, err := parsePostID(contentID)
 	if err != nil {
 		return p, up, nil, false, nil
 	}
-	p, err = m.posts.visible(ctx, id)
+	p, err = m.posts.onLiveChannel(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, up, nil, false, nil
 	} else if err != nil {
 		return p, up, nil, false, err
+	}
+	if p.Deleted {
+		return p, up, nil, true, nil
 	}
 	if g, err = m.grants(ctx, actor.ID, p.ChannelID); err != nil {
 		return p, up, nil, false, err
@@ -420,6 +424,14 @@ func (m *mediaService) fact(ctx context.Context, r contentref.ContentRef, actor 
 		p, up, g, found, err := m.postAccess(ctx, actor, r.ContentID)
 		if err != nil || !found {
 			return access.Fact{}, false, err
+		}
+		if p.Deleted {
+			// Only its buyers still see a deleted post; it has no public files.
+			held, err := m.billing.access(ctx, actor.ID, []string{postResource(p.ID)})
+			if err != nil {
+				return access.Fact{}, false, err
+			}
+			return access.Fact{Visible: held[postResource(p.ID)], Rule: access.Rule{Level: access.PPV}}, true, nil
 		}
 		switch p.State {
 		case stateDraft:
