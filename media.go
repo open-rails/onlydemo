@@ -29,7 +29,6 @@ import (
 	"github.com/open-rails/contentkit/media/token"
 	"github.com/open-rails/contentkit/media/workqueue"
 	"github.com/open-rails/contentkit/migrations"
-	"golang.org/x/sync/errgroup"
 )
 
 // tenant is the app's ContentKit tenant: the media namespace, content refs,
@@ -308,21 +307,18 @@ type publicPreset struct {
 	Renditions []media.PublicRendition `json:"renditions"`
 }
 
-// publicImages answers presets ps of each item, reading the items' manifests
-// concurrently.
+// publicImages loads one bounded page of public image projections in one query.
 func (m *mediaService) publicImages(ctx context.Context, kind string, ids []string, ps ...media.Public) (map[string][]publicPreset, error) {
 	ids = unique(ids)
 	published := make([][]media.PublicImage, len(ids))
 	if m != nil {
-		g, ctx := errgroup.WithContext(ctx)
-		g.SetLimit(8)
+		qs := make([]media.ImageQuery, len(ids))
 		for i, id := range ids {
-			g.Go(func() (err error) {
-				published[i], err = m.manifests.PublicImages(ctx, ref(kind, id))
-				return err
-			})
+			qs[i] = media.ImageQuery{Ref: ref(kind, id)}
 		}
-		if err := g.Wait(); err != nil {
+		var err error
+		published, err = m.manifests.Images(ctx, qs...)
+		if err != nil {
 			return nil, err
 		}
 	}

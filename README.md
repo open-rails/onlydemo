@@ -84,6 +84,7 @@ results are synchronous and OpenRails reconciles from the gateway.
 | `MERCHANT_FILE` | The merchant declaration (default `merchant.yaml`) |
 | `TRUSTED_COUNTRY_HEADER` | Edge header with the buyer's country (e.g. `CF-IPCountry`) to preselect the billing country; unset = never trusted, the browser locale is used |
 | `MEMBERSHIP_PERIOD` | Renewal period of membership prices set afterwards, in whole hours (default `720h`; e.g. `1h` to test rebilling) |
+| `NOTIFICATION_RECEIPTS` | Include future optional successful-charge receipts (default `false`) |
 | `CONTENT_SCHEMA` | ContentKit schema (default `content`): the upload limiter's counters and content codes |
 | `MEDIA_S3_*` | Media bucket: `ENDPOINT`, `PUBLIC_ENDPOINT` (browser presign host), `BUCKET`, `REGION`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY` |
 | `MEDIA_URL`, `MEDIA_DELIVERY`, `MEDIA_COOKIE_DOMAIN` | media-gateway origin; `cookie` (default) or `url` delivery |
@@ -230,21 +231,35 @@ Posts are the app's own, so the content module there registers no kinds.
   `MEDIA_GATEWAY_TOKEN_KEY` and the old one as `_PREVIOUS`, switch the app
   to the new key, and drop the old key after about 5 hours.
 
+## Notifications
+
+The signed-in bell and `/me?tab=notifications` use ContentKit's inbox at
+`/api/v1/contentkit/notifications`. The existing River fleet imports up to 100
+pending OpenRails events every ten seconds under the stable `onlydemo-inbox`
+consumer. It verifies the customer against AuthKit's directory, stores the
+notice, then acknowledges that consumer's source event. Retry preserves local
+read/archive state; reading or archiving does not resolve a billing issue.
+
+Successful-charge receipts default off. `NOTIFICATION_RECEIPTS=true` imports
+future optional receipts; previously skipped events are not replayed. Account
+purge permanently erases and fences its inbox against delayed imports. Keep the
+consumer registered across restarts; retire it only when deprovisioning this
+application. Drain pending events before a merchant billing archive handoff.
+
 ## Buying and membership
 
 A purchase or a membership starts at the app: `POST /api/v1/posts/:code/checkout`
 or `POST /api/v1/channels/:id/subscribe` with `{price_id}`. The app checks its
 content and channel policy (members-only purchases need a membership, editors
 buy nothing, the price must be one of the offers it put on sale), then mints the
-buyer's checkout session with the Go client's `CreateCheckoutSession`. The
-browser pays it in `@openrails/billing-ui`'s `CheckoutModal` on the customer
-surface (`/billing/v1/me/checkout-sessions/:id`), where saved cards pay too.
-OpenRails decides offer validity, repeat purchase eligibility, accepted terms
-and payment state; a redirect is never proof of payment, the modal reads the
-verified session. Customers cannot start a checkout of their own
-(`Customers: CustomerBillingManagement`), so nothing bypasses the app's rules.
+buyer's unpaid order with `CreateOrder`. A stable `Idempotency-Key` preserves
+that order across a retry. The browser pays it in billing-ui's `OrderCheckout`
+on `/billing/v1/me/orders/:id`, including saved cards. OpenRails decides offer
+validity, repeat purchase eligibility, accepted terms and payment state; a
+redirect is never proof of payment. Direct `POST /billing/v1/me/orders` is
+blocked so every purchase passes the app's content rules first.
 After a post is physically removed, its purchase endpoint returns 404; an
-already paid session and its financial history remain.
+already paid order and its financial history remain.
 
 `/me` shows managed channels and a paginated purchased-post library. Its Billing
 tab is `@openrails/billing-ui`'s `AccountBilling` on the embedded `/billing/v1/me`

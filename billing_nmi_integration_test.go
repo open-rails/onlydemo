@@ -44,6 +44,14 @@ type nmiHarness struct {
 func TestNMIBillingEndToEnd(t *testing.T) {
 	h := newNMIHarness(t)
 	ctx := h.ctx
+	observer, err := h.srv.billing.client.NotificationEvents("onlydemo-notice-proof")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = observer.Register(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = observer.Retire(ctx) })
 	visa := nmimock.Card{Brand: "visa", Last4: "4242"}
 
 	owner := h.register("nmiowner", "127.0.0.2")
@@ -61,7 +69,7 @@ func TestNMIBillingEndToEnd(t *testing.T) {
 		t.Fatalf("PSPs: %v %v", psps, err)
 	}
 	saved := buyer.call("POST", "/billing/v1/me/payment-methods", map[string]any{"psp_id": psps.Items[0].ID,
-		"payment_token": h.nmi.Tokenize(visa), "billing_details": map[string]any{"name": "NMI Buyer"}}, "save-card", 201)
+		"token": h.nmi.Tokenize(visa), "billing_details": map[string]any{"name": "NMI Buyer"}}, "save-card", 201)
 	method := saved["id"].(string)
 
 	// A permanent post purchase: one sale at NMI, then access.
@@ -113,6 +121,7 @@ func TestNMIBillingEndToEnd(t *testing.T) {
 	if got := h.nmi.Charged(vault, ""); got != 499+999+999 {
 		t.Fatalf("a declined renewal moved money: %d cents", got)
 	}
+	h.assertBillingNotices(t, buyer, owner, observer)
 	if odd := h.nmi.Unexpected(); len(odd) > 0 {
 		t.Fatalf("requests nmimock does not model: %v", odd)
 	}
@@ -179,7 +188,7 @@ func (h *nmiHarness) confirm(p peer, orderID, method string) {
 	path := "/billing/v1/me/orders/" + orderID
 	order := p.call("GET", path, nil, "", 200)
 	done := p.call("POST", path+"/pay", map[string]any{"expected_total": order["total"], "payment": map[string]any{"payment_method_id": method}}, "", 200)
-	if done["status"] != "completed" {
+	if done["status"] != "complete" {
 		h.t.Fatalf("order %s: %v", orderID, done)
 	}
 }

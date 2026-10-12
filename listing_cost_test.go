@@ -159,7 +159,12 @@ func (h *mediaHarness) testListingCost(t *testing.T, purchasedPost testPost, buy
 	if _, err := h.srv.auth.client.DeleteUsers(h.ctx, iam.SystemIdentity(), []string{helper.id}); err != nil {
 		t.Fatal(err)
 	}
-	if edit, read, media := rights(); edit || read || media {
-		t.Fatalf("deleted editor kept rights: edit %t read %t media %t", edit, read, media)
+	ch := helper.call("GET", "/api/v1/channels/"+first, nil, "", 200)
+	post := helper.call("GET", "/api/v1/posts/"+firstPaid, nil, "", 200)
+	if ch["can_edit"] == true || post["can_read"] == true {
+		t.Fatal("deleted editor kept content rights")
 	}
+
+	// Native ContentKit authentication refuses a deleted account's stale token.
+	helper.call("GET", contentkitPrefix+"/media/post/"+firstPaid, nil, "", 401)
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -118,18 +119,26 @@ const (
 )
 
 type offer struct {
-	PriceID              billing.PriceID `json:"price_id"`
-	ProductKey           string          `json:"product_key"`
-	ProductName          string          `json:"product_name"`
-	UnitAmount           int64           `json:"unit_amount,string"`
-	Currency             string          `json:"currency"`
-	AccessDurationHours  *int            `json:"access_duration_hours"`
-	BillingIntervalHours *int            `json:"billing_interval_hours"`
+	PriceID              billing.PriceID   `json:"price_id"`
+	ProductKey           string            `json:"product_key"`
+	ProductID            billing.ProductID `json:"product_id"`
+	ProductDisplayName   string            `json:"product_display_name"`
+	Entitlements         []string          `json:"entitlements"`
+	PriceKey             string            `json:"price_key"`
+	Kind                 string            `json:"kind"`
+	UnitAmount           int64             `json:"unit_amount,string"`
+	Currency             string            `json:"currency"`
+	AccessDurationHours  *int              `json:"access_duration_hours"`
+	BillingIntervalHours *int              `json:"billing_interval_hours"`
 }
 
 // offers reads only the app's product keys and filters their current prices.
 func (b *billingService) offers(ctx context.Context, kind offerKind, keys []string, limit int) (map[string][]offer, error) {
 	out := map[string][]offer{}
+	kindName := "permanent"
+	if kind == offerRecurring {
+		kindName = "recurring"
+	}
 	live := false
 	for chunk := range slices.Chunk(unique(keys), billing.MaxBatchItems) {
 		params := billing.ProductListParams{Keys: chunk, Archived: &live, PageRequest: billing.PageRequest{Limit: 100}}
@@ -139,14 +148,17 @@ func (b *billingService) offers(ctx context.Context, kind offerKind, keys []stri
 				return nil, err
 			}
 			for _, product := range page.Items {
+				if !slices.Contains(product.Entitlements, product.Key) {
+					continue
+				}
 				for _, price := range product.Prices {
-					if price.Archived || (price.BillingIntervalHours != nil) != bool(kind) || len(out[product.Key]) >= limit {
+					if price.Archived || (price.BillingIntervalHours != nil) != bool(kind) {
 						continue
 					}
 					if !bool(kind) && price.AccessDurationHours != nil {
 						continue
 					}
-					out[product.Key] = append(out[product.Key], offer{PriceID: price.ID, ProductKey: product.Key, ProductName: product.DisplayName,
+					out[product.Key] = append(out[product.Key], offer{PriceID: price.ID, ProductKey: product.Key, ProductID: product.ID, ProductDisplayName: product.DisplayName, Entitlements: product.Entitlements, PriceKey: price.Key, Kind: kindName,
 						UnitAmount: price.UnitAmount, Currency: price.Currency, AccessDurationHours: price.AccessDurationHours, BillingIntervalHours: price.BillingIntervalHours})
 				}
 			}
@@ -154,6 +166,23 @@ func (b *billingService) offers(ctx context.Context, kind offerKind, keys []stri
 				break
 			}
 			params.Cursor = page.Next
+		}
+	}
+	for key, offers := range out {
+		slices.SortFunc(offers, func(a, b offer) int {
+			if (a.Currency == "USD") != (b.Currency == "USD") {
+				if a.Currency == "USD" {
+					return -1
+				}
+				return 1
+			}
+			if byCurrency := cmp.Compare(a.Currency, b.Currency); byCurrency != 0 {
+				return byCurrency
+			}
+			return cmp.Compare(a.PriceID.String(), b.PriceID.String())
+		})
+		if len(offers) > limit {
+			out[key] = offers[:limit]
 		}
 	}
 	return out, nil

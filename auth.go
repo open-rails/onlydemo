@@ -16,12 +16,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
+	"github.com/open-rails/contentkit/access"
 	"github.com/open-rails/helpers/notify"
 	"github.com/open-rails/openrails/billing"
 )
 
 var (
-	rbac = authkit.NewRoles()
+	rbac = demoRoles()
 
 	// A channel is a permission group: its owners manage it, its editors publish.
 	channelPersona          = rbac.Persona("channel")
@@ -42,6 +43,14 @@ var (
 	customersUpdate      = rbac.Root.Permission(billing.RootCustomerManage.Resource(), billing.RootCustomerManage.Action())
 	adminRole            = rbac.Root.Role("admin", postReadPermission, postEditPermission, postDeletePermission, customersRead, customersUpdate)
 )
+
+func demoRoles() *authkit.Roles {
+	roles := authkit.NewRoles()
+	// Declare ContentKit names without granting them to the demo admin or
+	// channel editor. AuthKit's built-in root Owner retains its native authority.
+	roles.Root.Declare(access.Names(access.Permissions()...)...)
+	return roles
+}
 
 type appAuth struct {
 	client  *authkit.Client

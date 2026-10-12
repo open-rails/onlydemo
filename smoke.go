@@ -160,15 +160,15 @@ func smoke() error {
 	if err != nil || len(psps.Items) != 1 {
 		return fmt.Errorf("stripe PSP: %v %w", psps, err)
 	}
-	setup, err := buyer.call("POST", "/billing/v1/me/payment-method-setups", buyerToken, map[string]any{"psp_id": psps.Items[0].ID, "consent": true}, "manual-card-setup", 200)
+	setup, err := buyer.call("POST", "/billing/v1/me/payment-methods", buyerToken, map[string]any{"psp_id": psps.Items[0].ID}, "manual-card-setup", 201)
 	if err != nil {
 		return err
 	}
-	confirmed, err := buyer.call("POST", "/billing/v1/me/payment-method-setups/"+setup["id"].(string)+"/confirm", buyerToken, nil, "", 200)
+	confirmed, err := buyer.call("POST", "/billing/v1/me/payment-methods/"+setup["id"].(string)+"/confirm", buyerToken, nil, "", 200)
 	if err != nil {
 		return err
 	}
-	method, _ := confirmed["payment_method_id"].(string)
+	method, _ := confirmed["id"].(string)
 	if method == "" {
 		return fmt.Errorf("card setup saved no payment method: %v", confirmed)
 	}
@@ -210,7 +210,7 @@ func smoke() error {
 	if err != nil {
 		return err
 	}
-	if accepted["status"] != "completed" {
+	if accepted["status"] != "complete" {
 		return fmt.Errorf("reprice changed the paid session: %v", accepted["status"])
 	}
 	gatedPost := map[string]any{"channel_id": ch["id"], "title": "Members buy separately", "body": "Extra permanent purchase", "access_policy": "members_ppv", "price": map[string]any{"unit_amount": "4990000", "currency": "USD"}}
@@ -390,7 +390,7 @@ func smoke() error {
 	if err = pool.QueryRow(ctx, `SELECT true FROM demo.posts WHERE id=$1 AND deleted_at IS NOT NULL`, doomed["id"]).Scan(&retained); err != nil {
 		return fmt.Errorf("deleted post row was not retained: %w", err)
 	}
-	if product, e := bill.client.GetProductByKey(ctx, postResource(doomed["id"].(string))); e != nil || !product.Archived {
+	if product, e := bill.productByKey(ctx, postResource(doomed["id"].(string))); e != nil || !product.Archived {
 		return fmt.Errorf("deleted post product was not archived: %v", e)
 	}
 	if _, err = owner.call("DELETE", "/api/v1/channels/"+channelID, ownerToken, nil, "", 202); err != nil {
@@ -448,7 +448,7 @@ func smokePay(buyer smokeClient, token, session, method string) error {
 	if err != nil {
 		return err
 	}
-	if paid["status"] != "completed" {
+	if paid["status"] != "complete" {
 		return fmt.Errorf("session %s: %v", session, paid)
 	}
 	return nil
@@ -612,7 +612,7 @@ func (s smokeClient) call(method, path, token string, body any, key string, stat
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	if key == "" && method == "POST" && (strings.HasSuffix(path, "/checkout") || strings.HasSuffix(path, "/subscribe")) {
+	if key == "" && method == "POST" && (strings.HasSuffix(path, "/checkout") || strings.HasSuffix(path, "/subscribe") || strings.HasSuffix(path, "/pay")) {
 		key = uuid.NewString()
 	}
 	if key != "" {

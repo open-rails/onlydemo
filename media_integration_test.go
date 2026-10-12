@@ -536,7 +536,15 @@ func TestMediaEndToEnd(t *testing.T) {
 			if pay.Kind != billing.PaymentCharge || pay.Status != billing.PaymentSucceeded || pay.AmountRefunded != 0 {
 				t.Fatalf("the buyer was refunded: %+v", pay)
 			}
-			bought = bought || pay.Product != nil && pay.Product.Key == postResource(p.id)
+			if pay.OrderID != nil {
+				order, err := h.srv.billing.client.GetOrder(ctx, *pay.OrderID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, line := range order.Lines {
+					bought = bought || line.ProductID != nil && *line.ProductID == product.ID
+				}
+			}
 		}
 		if !bought {
 			t.Fatalf("no purchase of the post among %+v", payments.Items)
@@ -959,7 +967,7 @@ func (p peer) do(method, path string, body any, key string) (*http.Response, []b
 	if p.token != "" {
 		req.Header.Set("Authorization", "Bearer "+p.token)
 	}
-	if key == "" && method == "POST" && (strings.HasSuffix(path, "/checkout") || strings.HasSuffix(path, "/subscribe")) {
+	if key == "" && method == "POST" && (strings.HasSuffix(path, "/checkout") || strings.HasSuffix(path, "/subscribe") || strings.HasSuffix(path, "/pay")) {
 		key = uuid.NewString()
 	}
 	if key != "" {
