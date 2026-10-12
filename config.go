@@ -27,7 +27,6 @@ type Config struct {
 	// URLs may name: PUBLIC_URL plus RETURN_ORIGINS.
 	ReturnOrigins []string
 	AuthSchema    string
-	AppSchema     string
 	BillingSchema string
 	RiverSchema   string
 	// Merchant is the seller and its PSPs, from merchant.yaml (MERCHANT_FILE).
@@ -56,7 +55,7 @@ func loadConfig() (Config, error) {
 				return strings.ToLower(key), value
 			case "DATABASE_URL":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
-			case "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_KEYS_PATH", "AUTH_SCHEMA", "APP_SCHEMA", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA":
+			case "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_KEYS_PATH", "AUTH_SCHEMA", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
 			default:
 				if key == "NOTIFICATION_RECEIPTS" || key == "CONTENT_SCHEMA" || key == "MERCHANT_FILE" || key == "TRUSTED_COUNTRY_HEADER" || key == "RETURN_ORIGINS" || strings.HasPrefix(key, "MEDIA_") {
@@ -126,7 +125,6 @@ func loadConfig() (Config, error) {
 		PublicURL:            publicURL,
 		ReturnOrigins:        returnOrigins,
 		AuthSchema:           strings.TrimSpace(k.String("auth.schema")),
-		AppSchema:            strings.TrimSpace(k.String("app.schema")),
 		BillingSchema:        strings.TrimSpace(k.String("billing.schema")),
 		RiverSchema:          strings.TrimSpace(k.String("river.schema")),
 		Merchant:             merchant,
@@ -171,20 +169,13 @@ func parseReturnOrigins(publicURL, raw string) ([]string, error) {
 var databaseSchemaPattern = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 
 func validateDatabaseSchemas(cfg Config) error {
-	for name, value := range map[string]string{"AUTH_SCHEMA": cfg.AuthSchema, "APP_SCHEMA": cfg.AppSchema, "BILLING_SCHEMA": cfg.BillingSchema, "RIVER_SCHEMA": cfg.RiverSchema, "CONTENT_SCHEMA": cfg.ContentSchema} {
+	for name, value := range map[string]string{"AUTH_SCHEMA": cfg.AuthSchema, "BILLING_SCHEMA": cfg.BillingSchema, "RIVER_SCHEMA": cfg.RiverSchema, "CONTENT_SCHEMA": cfg.ContentSchema} {
 		value = strings.TrimSpace(value)
 		if value != "" && (len(value) > 63 || !databaseSchemaPattern.MatchString(value) || strings.HasPrefix(value, "pg_")) {
 			return fmt.Errorf("%s must be a lowercase PostgreSQL schema identifier (at most 63 bytes, no pg_ prefix)", name)
 		}
 	}
 	return nil
-}
-
-func appSchema(cfg Config) string {
-	if schema := strings.TrimSpace(cfg.AppSchema); schema != "" {
-		return schema
-	}
-	return "demo"
 }
 
 func contentSchema(cfg Config) string {

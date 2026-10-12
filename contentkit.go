@@ -16,9 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/contentkit"
-	"github.com/open-rails/contentkit/access"
 	ckopenrails "github.com/open-rails/contentkit/adapters/openrails"
-	"github.com/open-rails/contentkit/content"
 	"github.com/open-rails/contentkit/contentref"
 	"github.com/open-rails/contentkit/media"
 	"github.com/open-rails/contentkit/media/avatar"
@@ -82,8 +80,8 @@ func contentKitConfig(cfg Config) (contentkit.Config, error) {
 }
 
 // mediaKinds are the app's media kinds: a post's mixed images and videos
-// (its version media once posts are ContentKit content), a channel's cover
-// banner and avatar, and people's avatars.
+// (its version's media), a channel's cover banner and avatar, and people's
+// avatars.
 func mediaKinds(ck contentkit.Config) ([]media.Kind, error) {
 	gk, ok := ck.Content.GroupKinds[kindChannel]
 	if !ok {
@@ -116,17 +114,13 @@ func mediaKinds(ck contentkit.Config) ([]media.Kind, error) {
 	}, nil
 }
 
-// workerRegistry is the engine's media registry for the media worker. Posts
-// stay a plain folder kind until ContentKit stores them (#120).
+// workerRegistry is the engine's media registry, for the media worker.
 func workerRegistry(cfg Config) (*media.Registry, error) {
 	ck, err := contentKitConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
-	site := ck.Content
-	site.Kinds = maps.Clone(site.Kinds)
-	delete(site.Kinds, content.KindPost)
-	mc, err := media.ForContent(ck.Media.Config, site)
+	mc, err := media.ForContent(ck.Media.Config, ck.Content)
 	if err != nil {
 		return nil, err
 	}
@@ -146,9 +140,7 @@ func mediaFailed(_ context.Context, ref contentref.ContentRef, file string, err 
 }
 
 // newContentKit runs ContentKit in this process; New migrates its schemas.
-// Posts are still the app's (posts.go answers their media) until ContentKit's
-// catalog stores them.
-func newContentKit(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth, billing *billingService, posts *postAPI) (*contentkit.Engine, error) {
+func newContentKit(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth, billing *billingService) (*contentkit.Engine, error) {
 	ck, err := contentKitConfig(cfg)
 	if err != nil {
 		return nil, err
@@ -157,15 +149,8 @@ func newContentKit(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *ap
 	if err != nil {
 		return nil, err
 	}
-	pm := postMedia{posts}
 	return contentkit.New(ctx, ck, contentkit.Deps{Postgres: pool, Auth: auth.client.Authenticator(), Users: auth.client.UserInfo(),
-		Billing: ckopenrails.Billing(billing.client), Store: store, Resolver: pm, CanUpload: pm})
-}
-
-// newGate decides the app's posts against the viewer's keys, as ContentKit
-// decides its own content.
-func newGate(cfg contentkit.Config, billing *billingService) (*access.Gate, error) {
-	return access.NewGate(access.GateConfig{Tenant: cfg.Tenant, Kinds: cfg.Content, Billing: ckopenrails.Billing(billing.client)})
+		Billing: ckopenrails.Billing(billing.client), Store: store})
 }
 
 // ckAPI calls ContentKit's HTTP API in-process: open routes anonymously, the
@@ -241,34 +226,6 @@ func (a *ckAPI) call(ctx context.Context, method, path, credential string, in, o
 		return nil
 	}
 	return json.NewDecoder(res.Body).Decode(out)
-}
-
-// group is the part of ContentKit's GroupDetail the app reads.
-type group struct {
-	ID          string `json:"id"`
-	Kind        string `json:"kind"`
-	Slug        string `json:"slug"`
-	Name        string `json:"name"`
-	State       string `json:"state"`
-	OwnerUserID string `json:"owner_user_id"`
-	AuthScope   string `json:"auth_scope"`
-}
-
-// channels reads the active channels among ids; missing ones are absent.
-func (a *ckAPI) channels(ctx context.Context, ids []string) (map[string]group, error) {
-	out := map[string]group{}
-	for _, id := range unique(ids) {
-		var g group
-		err := a.call(ctx, http.MethodGet, "/v1/groups/"+id, "", nil, &g)
-		switch {
-		case ckStatus(err) == http.StatusNotFound || ckStatus(err) == http.StatusBadRequest:
-		case err != nil:
-			return nil, err
-		case g.Kind == kindChannel && g.State == "active" && g.ID == id:
-			out[id] = g
-		}
-	}
-	return out, nil
 }
 
 func unique(ids []string) []string {

@@ -125,7 +125,6 @@ type server struct {
 	ck       *ckAPI
 	ckRoutes http.Handler
 	channels *channelAPI
-	posts    *postAPI
 	jobs     *river.Client[pgx.Tx]
 	notices  *notifications
 	app      *fiber.App
@@ -156,16 +155,7 @@ func compose(ctx context.Context, config Config, pool *pgxpool.Pool, opts billin
 		return nil, fmt.Errorf("initialize OpenRails: %w", err)
 	}
 	s.closers = append(s.closers, func() { _ = s.billing.Close(context.Background()) })
-	ckConfig, err := contentKitConfig(config)
-	if err != nil {
-		return nil, err
-	}
-	gate, err := newGate(ckConfig, s.billing)
-	if err != nil {
-		return nil, err
-	}
-	s.posts = newPosts(pool, s.auth, gate, config)
-	if s.content, err = newContentKit(ctx, config, pool, s.auth, s.billing, s.posts); err != nil {
+	if s.content, err = newContentKit(ctx, config, pool, s.auth, s.billing); err != nil {
 		return nil, fmt.Errorf("initialize ContentKit: %w", err)
 	}
 	s.closers = append(s.closers, func() { _ = s.content.Close(context.Background()) })
@@ -176,7 +166,6 @@ func compose(ctx context.Context, config Config, pool *pgxpool.Pool, opts billin
 	}
 	s.ckRoutes = routes[0].Handler
 	s.ck = newCKAPI(s.ckRoutes)
-	s.posts.ck = s.ck
 	s.channels = &channelAPI{auth: s.auth, ck: s.ck}
 	return s, nil
 }
@@ -250,15 +239,9 @@ func newApp(pool *pgxpool.Pool, s *server, cfg Config) (*fiber.App, error) {
 		return c.JSON(fiber.Map{"status": "ok", "database": "ok"})
 	})
 
-	optional := authkitfiber.Optional(s.auth.client)
 	required := authkitfiber.Required(s.auth.client)
 	s.channels.mount(app, required)
 	app.Get("/api/v1/config", publicConfiguration(cfg.TrustedCountryHeader))
-	app.Get("/api/v1/posts", optional, s.posts.list)
-	app.Post("/api/v1/posts", required, s.posts.create)
-	app.Get("/api/v1/posts/:id", optional, s.posts.get)
-	app.Patch("/api/v1/posts/:id", required, s.posts.update)
-	app.Delete("/api/v1/posts/:id", required, s.posts.delete)
 	// ContentKit authenticates its own requests through AuthKit.
 	app.All(contentkitPrefix+"/v1/*", adaptor.HTTPHandler(s.ckRoutes))
 	// Site admins work on customers' billing through the merchant API.

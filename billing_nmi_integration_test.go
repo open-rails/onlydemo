@@ -16,10 +16,12 @@ import (
 	"github.com/riverqueue/river/rivertype"
 )
 
-// TestNMIBillingEndToEnd: a creator sells their channel's membership through
-// ContentKit; a fan's saved card buys it with an OpenRails order for the
-// offer's price, which opens the channel's members-only posts; the
-// membership renews, and a declined renewal enters dunning.
+// TestNMIBillingEndToEnd is the real-stack purchase proof: a creator sells
+// a post and their channel's membership through ContentKit offers; a fan's
+// saved card buys each with an OpenRails order for the offer's price. The
+// purchase opens the post, which stays in the fan's library and readable
+// after its deletion; the membership opens the channel's members-only posts,
+// renews, and a declined renewal enters dunning.
 func TestNMIBillingEndToEnd(t *testing.T) {
 	h := newHarness(t, harnessOptions{clock: true})
 	ctx := h.ctx
@@ -35,27 +37,19 @@ func TestNMIBillingEndToEnd(t *testing.T) {
 
 	owner := h.register("nmiowner", "127.0.0.2")
 	buyer := h.register("nmibuyer", "127.0.0.3")
+	stranger := h.register("nmistranger", "127.0.0.4")
 	if err := h.srv.auth.grantAdmin(ctx, owner.id); err != nil {
 		t.Fatal(err)
 	}
 	channelID := owner.call("POST", "/api/v1/channels", map[string]any{"slug": "nmi-studio", "name": "NMI studio"}, "", 201)["id"].(string)
-	offerPath := contentkitPrefix + "/v1/groups/" + channelID + "/offer"
-	owner.call("PUT", offerPath, map[string]any{"amount": "9.99", "renew_hours": 720}, "", 200)
-	var membershipPrice string
-	eventually(t, "the membership price", func() bool {
-		page := owner.call("GET", contentkitPrefix+"/v1/offers", nil, "", 200)
-		for _, o := range page["offers"].([]any) {
-			o := o.(map[string]any)
-			if o["synced"] == true && o["price_id"] != nil {
-				membershipPrice = o["price_id"].(string)
-			}
-		}
-		return membershipPrice != ""
-	})
-	included := owner.call("POST", "/api/v1/posts", map[string]any{"channel_id": channelID, "title": "Members", "body": "Members read this", "access_policy": "membership"}, "", 201)
-	includedPath := "/api/v1/posts/" + included["id"].(string)
-	if buyer.call("GET", includedPath, nil, "", 200)["can_read"] == true {
-		t.Fatal("members-only post open before the membership")
+	owner.call("PUT", contentkitPrefix+"/v1/groups/"+channelID+"/offer", map[string]any{"amount": "9.99", "renew_hours": 720}, "", 200)
+	membershipPrice := owner.offerPrice(channelID)
+	included, _ := owner.post(channelID, "Members", "Members read this", map[string]any{"level": "group", "group_id": channelID})
+	paid, _ := owner.post(channelID, "Paid", "Paid content", map[string]any{"level": "ppv"})
+	owner.call("PUT", contentkitPrefix+"/v1/contents/"+paid+"/offer", map[string]any{"amount": "4.99"}, "", 200)
+	postPrice := owner.offerPrice(paid)
+	if buyer.opens(included) || buyer.opens(paid) {
+		t.Fatal("posts open before any purchase")
 	}
 
 	psps, err := h.srv.billing.client.ListPSPs(ctx, billing.PSPListParams{})
@@ -65,16 +59,42 @@ func TestNMIBillingEndToEnd(t *testing.T) {
 	saved := buyer.call("POST", "/billing/v1/me/payment-methods", map[string]any{"psp_id": psps.Items[0].ID,
 		"token": h.nmi.Tokenize(visa), "billing_details": map[string]any{"name": "NMI Buyer"}}, "save-card", 201)
 	method := saved["id"].(string)
+	buy := func(price, key string) {
+		order := buyer.call("POST", "/billing/v1/me/orders", map[string]any{"lines": []map[string]any{{"price_id": price}}}, key, 201)
+		h.confirm(buyer, order["id"].(string), method)
+		h.settle()
+	}
 
-	// The membership: an order for the offer's price, paid with the saved card.
-	order := buyer.call("POST", "/billing/v1/me/orders", map[string]any{"lines": []map[string]any{{"price_id": membershipPrice}}}, "membership-order", 201)
-	h.confirm(buyer, order["id"].(string), method)
-	h.settle()
-	eventually(t, "the membership opening the post", func() bool { return buyer.call("GET", includedPath, nil, "", 200)["can_read"] == true })
+	// A purchase opens the post, and only that post.
+	buy(postPrice, "post-order")
+	eventually(t, "the purchase opening the post", func() bool { return buyer.opens(paid) })
+	if buyer.opens(included) {
+		t.Fatal("buying a post opened the members-only post")
+	}
+	library := func() []any {
+		return buyer.call("GET", contentkitPrefix+"/v1/me/library", nil, "", 200)["items"].([]any)
+	}
+	if items := library(); len(items) != 1 || items[0].(map[string]any)["content_id"] != paid {
+		t.Fatalf("library: %v", items)
+	}
+
+	// The membership opens the channel's members-only posts.
+	buy(membershipPrice, "membership-order")
+	eventually(t, "the membership opening the channel", func() bool { return buyer.opens(included) })
 	sub := h.subscription(buyer.id)
 	vault := h.nmi.LastSale().Vault
-	if n := len(h.nmi.Ledger(vault)); n != 1 {
-		t.Fatalf("after the membership NMI holds %d sales, want 1", n)
+	if n := len(h.nmi.Ledger(vault)); n != 2 {
+		t.Fatalf("after the post and the membership NMI holds %d sales, want 2", n)
+	}
+
+	// A deleted post stays its buyer's, in the library too, and nobody else's.
+	owner.call("DELETE", contentkitPrefix+"/v1/contents/"+paid, nil, "", 204)
+	if !buyer.opens(paid) {
+		t.Fatal("deleting the post took it from its buyer")
+	}
+	stranger.call("GET", contentkitPrefix+"/v1/contents/"+paid, nil, "", 404)
+	if items := library(); len(items) != 1 || items[0].(map[string]any)["deleted"] != true {
+		t.Fatalf("library after deletion: %v", items)
 	}
 
 	// Renewal: step the shared clock past the period; the due pass charges.
@@ -84,8 +104,8 @@ func TestNMIBillingEndToEnd(t *testing.T) {
 	if !sub.CurrentPeriodEndsAt.After(end) || sub.Status != "active" {
 		t.Fatalf("renewal did not extend the membership: %s ends %v", sub.Status, sub.CurrentPeriodEndsAt)
 	}
-	if got := h.nmi.Charged(vault, ""); got != 999+999 {
-		t.Fatalf("NMI charged %d cents, want %d", got, 999+999)
+	if got := h.nmi.Charged(vault, ""); got != 499+999+999 {
+		t.Fatalf("NMI charged %d cents, want %d", got, 499+999+999)
 	}
 
 	// Decline: the issuer refuses the next renewal; the membership enters dunning.
@@ -99,7 +119,7 @@ func TestNMIBillingEndToEnd(t *testing.T) {
 	if sub.Status != "past_due" {
 		t.Fatalf("declined renewal left the membership %q, want past_due", sub.Status)
 	}
-	if got := h.nmi.Charged(vault, ""); got != 999+999 {
+	if got := h.nmi.Charged(vault, ""); got != 499+999+999 {
 		t.Fatalf("a declined renewal moved money: %d cents", got)
 	}
 	h.assertBillingNotices(t, buyer, owner, observer)

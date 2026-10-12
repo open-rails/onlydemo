@@ -88,7 +88,7 @@ func newHarness(t *testing.T, o harnessOptions) *harness {
 	t.Cleanup(h.nmi.Close)
 
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
-	h.cfg = Config{AppSchema: "od_app_" + suffix, AuthSchema: "od_auth_" + suffix, BillingSchema: "od_bill_" + suffix,
+	h.cfg = Config{AuthSchema: "od_auth_" + suffix, BillingSchema: "od_bill_" + suffix,
 		RiverSchema: "od_river_" + suffix, ContentSchema: "od_ck_" + suffix, AuthKeysPath: "", AuthAudience: "demo-test",
 		Merchant: testMerchant(openrails.NMIPSP{AccountID: nmiTestAccount, SecurityKey: "nmimock-security-key",
 			WebhookSigningSecret: "nmimock-webhook-secret", TokenizationKey: "nmimock-tokenization"}.PSPConfig())}
@@ -151,7 +151,7 @@ func testPool(t *testing.T, ctx context.Context, url string, cfg Config) *pgxpoo
 	t.Cleanup(func() {
 		cleanup, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
-		for _, s := range []string{cfg.AppSchema, cfg.AuthSchema, cfg.BillingSchema, cfg.RiverSchema, cfg.ContentSchema, mediaWorkerSchema(cfg)} {
+		for _, s := range []string{cfg.AuthSchema, cfg.BillingSchema, cfg.RiverSchema, cfg.ContentSchema, mediaWorkerSchema(cfg)} {
 			if _, err := pool.Exec(cleanup, "DROP SCHEMA IF EXISTS "+pgx.Identifier{s}.Sanitize()+" CASCADE"); err != nil {
 				t.Errorf("drop schema %s: %v", s, err)
 			}
@@ -269,19 +269,46 @@ func (p peer) call(method, path string, body any, key string, status int) map[st
 	return out
 }
 
+func ref(kind, id string) map[string]string { return map[string]string{"kind": kind, "id": id} }
+
+// postRef is a post version's media item.
+func postRef(id, version string) map[string]string {
+	return map[string]string{"kind": kindPost, "id": id, "version": version}
+}
+
 // presign asks ContentKit for an upload plan.
 func (p peer) presign(kind, id, path string, data []byte, typ string, status int) map[string]any {
 	p.h.t.Helper()
+	return p.presignRef(ref(kind, id), path, data, typ, status)
+}
+
+func (p peer) presignVersion(id, version, path string, data []byte, typ string, status int) map[string]any {
+	p.h.t.Helper()
+	return p.presignRef(postRef(id, version), path, data, typ, status)
+}
+
+func (p peer) presignRef(item map[string]string, path string, data []byte, typ string, status int) map[string]any {
+	p.h.t.Helper()
 	sum := sha256.Sum256(data)
-	return p.call("POST", contentkitPrefix+"/v1/media/upload/presign", map[string]any{"ref": map[string]string{"kind": kind, "id": id},
+	return p.call("POST", contentkitPrefix+"/v1/media/upload/presign", map[string]any{"ref": item,
 		"path": path, "type": typ, "size": len(data), "sha256": hex.EncodeToString(sum[:])}, "", status)
 }
 
-// put plays the browser SDK: presign, a checksum-bound PUT straight to the
-// bucket, then the commit. It returns the committed path.
 func (p peer) put(kind, id, path string, data []byte, typ string) string {
 	p.h.t.Helper()
-	plan := p.presign(kind, id, path, data, typ, 200)
+	return p.putRef(ref(kind, id), path, data, typ)
+}
+
+func (p peer) putVersion(id, version, path string, data []byte, typ string) string {
+	p.h.t.Helper()
+	return p.putRef(postRef(id, version), path, data, typ)
+}
+
+// putRef plays the browser SDK: presign, a checksum-bound PUT straight to
+// the bucket, then the commit. It returns the committed path.
+func (p peer) putRef(item map[string]string, path string, data []byte, typ string) string {
+	p.h.t.Helper()
+	plan := p.presignRef(item, path, data, typ, 200)
 	if plan["exists"] != true {
 		put := plan["put"].(map[string]any)
 		req, err := http.NewRequestWithContext(p.h.ctx, put["method"].(string), put["url"].(string), bytes.NewReader(data))
@@ -305,7 +332,7 @@ func (p peer) put(kind, id, path string, data []byte, typ string) string {
 		}
 	}
 	committed := plan["path"].(string)
-	p.call("POST", contentkitPrefix+"/v1/media/upload/commit", map[string]any{"ref": map[string]string{"kind": kind, "id": id},
+	p.call("POST", contentkitPrefix+"/v1/media/upload/commit", map[string]any{"ref": item,
 		"ops": []media.Op{{Op: media.OpPut, Path: committed, Blob: plan["blob"].(string)}}, "operation_id": uuid.NewString()}, "", 200)
 	return committed
 }
@@ -342,4 +369,52 @@ func testPNG(t *testing.T, w, h int, c color.Color) []byte {
 		t.Fatal(err)
 	}
 	return b.Bytes()
+}
+
+// post is a published post of channel, made through ContentKit's catalog:
+// its content id and its one (hidden) version's id.
+func (p peer) post(channel, title, body string, rule map[string]any) (string, string) {
+	p.h.t.Helper()
+	in := map[string]any{"kind": kindPost, "owner_group_id": channel, "text": map[string]any{"en": map[string]string{"title": title, "body": body}}}
+	if rule != nil {
+		in["access"] = rule
+	}
+	created := p.call("POST", contentkitPrefix+"/v1/contents", in, "", 201)
+	id := created["id"].(string)
+	versions, _ := created["versions"].([]any)
+	if len(versions) != 1 {
+		p.h.t.Fatalf("post %s has versions %v", id, versions)
+	}
+	p.call("POST", contentkitPrefix+"/v1/contents/"+id+"/publish", map[string]any{}, "", 200)
+	return id, versions[0].(map[string]any)["id"].(string)
+}
+
+// opens reports whether p opens content id's first version.
+func (p peer) opens(id string) bool {
+	p.h.t.Helper()
+	c := p.call("GET", contentkitPrefix+"/v1/contents/"+id, nil, "", 200)
+	versions, _ := c["versions"].([]any)
+	if len(versions) == 0 {
+		p.h.t.Fatalf("%s sees no version of %s: %v", p.name, id, c)
+	}
+	d, _ := versions[0].(map[string]any)["decision"].(map[string]any)
+	return d["allowed"] == true
+}
+
+// offerPrice waits for target's offer to sell on OpenRails and returns its
+// price (staff read).
+func (p peer) offerPrice(target string) string {
+	p.h.t.Helper()
+	var price string
+	eventually(p.h.t, "the price of "+target, func() bool {
+		page := p.call("GET", contentkitPrefix+"/v1/offers?state=active", nil, "", 200)
+		for _, o := range page["offers"].([]any) {
+			o := o.(map[string]any)
+			if o["target"].(map[string]any)["id"] == target && o["synced"] == true && o["price_id"] != nil {
+				price = o["price_id"].(string)
+			}
+		}
+		return price != ""
+	})
+	return price
 }

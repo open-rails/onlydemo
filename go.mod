@@ -9,7 +9,7 @@ require (
 	github.com/knadh/koanf/providers/env/v2 v2.0.1
 	github.com/knadh/koanf/v2 v2.3.6
 	github.com/open-rails/authkit v1.24.0
-	github.com/open-rails/migratekit v1.11.1
+	github.com/open-rails/migratekit v1.11.1 // indirect
 	github.com/open-rails/openrails v0.248.0
 	github.com/riverqueue/river v0.47.0
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.47.0 // indirect
@@ -20,8 +20,8 @@ require (
 	github.com/johannesboyne/gofakes3 v1.2.0
 	github.com/joho/godotenv v1.5.1
 	github.com/jonboulle/clockwork v0.5.0
-	github.com/open-rails/contentkit v0.78.1-0.20261012222403-a638bbb93f0b
-	github.com/open-rails/contentkit/adapters/openrails v0.2.1-0.20261012222403-a638bbb93f0b
+	github.com/open-rails/contentkit v0.78.1-0.20261012224928-56a118390c52
+	github.com/open-rails/contentkit/adapters/openrails v0.2.1-0.20261012224928-56a118390c52
 	github.com/open-rails/helpers v1.12.0
 	github.com/riverqueue/river/rivertype v0.47.0
 	github.com/spf13/cobra v1.10.2
@@ -97,6 +97,7 @@ require (
 	github.com/logrusorgru/aurora v2.0.3+incompatible // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
+	github.com/maypok86/otter/v2 v2.3.1-0.20261012174237-6b4979235160 // indirect
 	github.com/mitchellh/copystructure v1.2.0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mitchellh/go-testing-interface v1.14.1 // indirect

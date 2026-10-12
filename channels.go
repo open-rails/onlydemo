@@ -1,15 +1,19 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	helpersauth "github.com/open-rails/authkit/auth"
 	"github.com/open-rails/authkit/iam"
+	"github.com/open-rails/authkit/verify"
 )
 
 // channelAPI composes a channel from its two halves: the ContentKit group
@@ -113,4 +117,36 @@ func ckFail(c fiber.Ctx, err error) error {
 		return c.Status(e.Status).JSON(fiber.Map{"error": e.Msg, "code": e.Code})
 	}
 	return unavailable(c)
+}
+
+// viewer is the signed-in user AuthKit's gate verified, or "".
+func viewer(c fiber.Ctx) string {
+	if id, ok := verify.IdentityFromContext(c.Context()); ok && id.SubjectKind == helpersauth.SubjectUser {
+		return id.Subject
+	}
+	return ""
+}
+
+func clientError(c fiber.Ctx, status int, message string) error {
+	return c.Status(status).JSON(fiber.Map{"error": message})
+}
+
+func unavailable(c fiber.Ctx) error {
+	return clientError(c, http.StatusServiceUnavailable, "a dependency is unavailable; retry")
+}
+
+// bindJSON refuses unknown fields and trailing values.
+func bindJSON(c fiber.Ctx, value any) error {
+	if len(c.Body()) > 1<<20 {
+		return errors.New("request is too large")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(c.Body()))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return errors.New("expected one JSON object")
+	}
+	return nil
 }

@@ -29,28 +29,24 @@ var (
 	contentkitPerms = rbac.Root.Declare(access.Names(access.Permissions()...)...)
 
 	// A channel is a ContentKit group whose AuthKit group (its auth_scope)
-	// holds these: owners hold all of them, editors publish posts.
-	// settings:manage and media:write are what ContentKit checks in the scope.
-	channelPersona          = rbac.Persona("channel")
-	channelReadPermission   = channelPersona.Permission("posts", "read")
-	channelCreatePermission = channelPersona.Permission("posts", "create")
-	channelEditPermission   = channelPersona.Permission("posts", "edit")
-	channelRemovePermission = channelPersona.Permission("posts", "delete")
-	channelSettingsRead     = channelPersona.Permission("settings", "read")
-	channelSettingsManage   = channelPersona.Permission("settings", "manage")
-	channelMediaWrite       = channelPersona.Permission("media", "write")
-	channelOwnerRole        = channelPersona.Owner
-	channelEditorRole       = channelPersona.Role("editor", channelReadPermission, channelCreatePermission, channelEditPermission, channelRemovePermission, channelSettingsRead, channelPersona.Members.Read)
+	// holds what ContentKit checks there: content:write edits the channel's
+	// posts, settings:manage the channel, offers:write its prices,
+	// media:write its images. Owners hold all; editors write posts.
+	channelPersona        = rbac.Persona("channel")
+	channelContentWrite   = channelPersona.Permission("content", "write")
+	channelOffersWrite    = channelPersona.Permission("offers", "write")
+	channelMediaWrite     = channelPersona.Permission("media", "write")
+	channelSettingsRead   = channelPersona.Permission("settings", "read")
+	channelSettingsManage = channelPersona.Permission("settings", "manage")
+	channelOwnerRole      = channelPersona.Owner
+	channelEditorRole     = channelPersona.Role("editor", channelContentWrite, channelSettingsRead, channelPersona.Members.Read)
 
-	// Site admins moderate every post, group and offer, and run billing for
-	// customers.
-	postReadPermission   = rbac.Root.Permission("posts", "read")
-	postEditPermission   = rbac.Root.Permission("posts", "edit")
-	postDeletePermission = rbac.Root.Permission("posts", "delete")
-	customersRead        = rbac.Root.Permission(billing.RootCustomerRead.Resource(), billing.RootCustomerRead.Action())
-	customersUpdate      = rbac.Root.Permission(billing.RootCustomerManage.Resource(), billing.RootCustomerManage.Action())
-	adminRole            = rbac.Root.Role("admin", append([]iam.Grant{postReadPermission, postEditPermission, postDeletePermission, customersRead, customersUpdate},
-		staffGrants(access.GroupsWrite, access.OffersWrite, access.CommentsModerate, access.CommentsBan, access.ModerationReview)...)...)
+	// Site admins are ContentKit staff and run billing for customers.
+	customersRead   = rbac.Root.Permission(billing.RootCustomerRead.Resource(), billing.RootCustomerRead.Action())
+	customersUpdate = rbac.Root.Permission(billing.RootCustomerManage.Resource(), billing.RootCustomerManage.Action())
+	adminRole       = rbac.Root.Role("admin", append([]iam.Grant{customersRead, customersUpdate},
+		staffGrants(access.ContentWrite, access.ContentViewRestricted, access.GroupsWrite, access.OffersWrite,
+			access.CommentsModerate, access.CommentsBan, access.ModerationReview)...)...)
 )
 
 // staffGrants are the declared ContentKit permissions among ps.
