@@ -78,11 +78,6 @@ tasks:
         trap 'kill "$MEDIA_PID" "$WORKER_PID" 2>/dev/null || true' EXIT INT TERM
         go run . serve
 
-  seed:
-    desc: Create display channels and posts through the running server's API
-    cmds:
-      - go run . seed {{.CLI_ARGS}}
-
   frontend:build:
     desc: Build the React application
     cmds:
@@ -130,27 +125,18 @@ tasks:
       - go build ./...
       - go vet ./...
 
-  smoke:
-    desc: Run the optional local fake-payment walkthrough
+  test:channels:
+    desc: Channels on ContentKit, on the local PostgreSQL and MinIO (task dev:up first)
     cmds:
-      - scripts/smoke.sh
-
-  test:media:
-    desc: Media end-to-end test on the local PostgreSQL and MinIO (task dev:up first)
-    cmds:
-      - go test -run TestMediaEndToEnd -count=1 -v .
+      - go test -run TestChannelsOnContentKit -count=1 -v .
     env:
-      DEMO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:55433/postgres?sslmode=disable
+      DEMO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:55433/onlydemo?sslmode=disable
       DEMO_TEST_S3_ENDPOINT: http://127.0.0.1:59000
       DEMO_TEST_S3_ACCESS_KEY: onlydemo
       DEMO_TEST_S3_SECRET_KEY: onlydemo-dev-secret
-  urls:backfill:
-    desc: Register every post's content code and slug (idempotent)
-    cmds:
-      - go run . urls backfill
   test:nmi:
     desc: NMI billing end-to-end test against nmimock on the local PostgreSQL (task dev:up first)
     cmds:
       - go test -run TestNMIBillingEndToEnd -count=1 -v .
     env:
-      DEMO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:55433/postgres?sslmode=disable
+      DEMO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:55433/onlydemo?sslmode=disable

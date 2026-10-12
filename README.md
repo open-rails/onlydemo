@@ -1,11 +1,14 @@
 # OnlyDemo
 
 A React/Fiber creator app: creators run channels and publish posts on them.
-AuthKit handles people and publishing roles; OpenRails handles product offers,
-purchases, recurring memberships and payment history.
+ContentKit owns content: channels, their offers and media. AuthKit handles
+people and publishing roles; OpenRails handles purchases, recurring
+memberships and payment history. The app is moving onto ContentKit's routes in
+two phases; [docs/contentkit-cutover.md](docs/contentkit-cutover.md) tracks
+what moved and what is left.
 
-The application API is `/api/v1`, identity JSON API is `/auth/v1`, and customer
-billing is `/billing/v1`. The React app lives at `/`; the searchable native route
+The application API is `/api/v1`, ContentKit's is `/contentkit/v1`, identity
+JSON API is `/auth/v1`, and customer billing is `/billing/v1`. The React app lives at `/`; the searchable native route
 directory is `/dev/routes`. AuthKit protocol anchors stay at
 `/.well-known/jwks.json` and `/oidc` when configured. The issuer stays the origin.
 
@@ -20,7 +23,6 @@ the media worker's image jobs are CGO) and ffmpeg with ffprobe (its video jobs).
 ```sh
 task dev:up   # PostgreSQL (with PGroonga) and MinIO with the media bucket; idempotent
 task run
-task seed     # optional display channels and posts, created through the API
 ```
 
 `task run` migrates (idempotent), then serves Go with Air, the frontend with
@@ -28,8 +30,6 @@ Vite, the media gateway (`task media:gateway`) and the media worker
 (`task media:worker`, `onlydemo media-worker`), reloading on change; open http://localhost:5173.
 The MinIO console is http://localhost:59001 (`onlydemo` / `onlydemo-dev-secret`). `task run:embedded` builds the frontend into
 the single Go binary and serves everything from http://localhost:3000.
-`task seed` targets http://127.0.0.1:3000; pass `-- --url <base>` for another
-server. It is idempotent.
 For payment flows while browsing Vite, start the backend with
 `PUBLIC_URL=http://localhost:5173 task run` and keep using that exact browser
 origin. Sessions and pending checkout attempts are stored per origin; switching
@@ -83,135 +83,62 @@ results are synchronous and OpenRails reconciles from the gateway.
 | `AUTH_SCHEMA`, `APP_SCHEMA`, `BILLING_SCHEMA`, `RIVER_SCHEMA` | Optional independent schema names; shared `public` is supported |
 | `MERCHANT_FILE` | The merchant declaration (default `merchant.yaml`) |
 | `TRUSTED_COUNTRY_HEADER` | Edge header with the buyer's country (e.g. `CF-IPCountry`) to preselect the billing country; unset = never trusted, the browser locale is used |
-| `MEMBERSHIP_PERIOD` | Renewal period of membership prices set afterwards, in whole hours (default `720h`; e.g. `1h` to test rebilling) |
 | `NOTIFICATION_RECEIPTS` | Include future optional successful-charge receipts (default `false`) |
-| `CONTENT_SCHEMA` | ContentKit schema (default `content`): the upload limiter's counters and content codes |
+| `CONTENT_SCHEMA` | ContentKit's schema (default `contentkit`); its media worker queue is `<CONTENT_SCHEMA>_media_worker` |
 | `MEDIA_S3_*` | Media bucket: `ENDPOINT`, `PUBLIC_ENDPOINT` (browser presign host), `BUCKET`, `REGION`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY` |
 | `MEDIA_URL`, `MEDIA_DELIVERY`, `MEDIA_COOKIE_DOMAIN` | media-gateway origin; `cookie` (default) or `url` delivery |
 | `MEDIA_TOKEN_KEY`, `MEDIA_TOKEN_KEY_PREVIOUS` | `{kid}:{base64 32+ bytes}` signing keys shared with media-gateway |
-| `MEDIA_UPLOAD_FILES_PER_HOUR`, `MEDIA_UPLOAD_BYTES_PER_DAY`, `MEDIA_CHANNEL_QUOTA_BYTES` | Upload limits (defaults 60, 100 GiB, 500 GiB) |
 
 There is no separate billing database URL or billing encryption key. Credentials
 are supplied as a host-owned snapshot (`merchant.yaml`). `onlydemo migrate`
-applies the app's and ContentKit's schemas and the shared River tables;
-`authkit.New` and `openrails.New` create or upgrade their own when the server
-starts. OpenRails v1 and AuthKit v1 do not upgrade older baselines: use a new
+applies the app's schema and the shared River tables; `authkit.New`,
+`openrails.New` and `contentkit.New` create or upgrade their own, there and
+when the server starts. OpenRails v1 and AuthKit v1 do not upgrade older baselines: use a new
 database, preserving old databases and receipts. Startup validates checksums and
 never rewrites them.
 
 ## Channels and reading
 
-Every post belongs to a channel. AuthKit is the only authority for publishing:
-channel owners can manage the channel and share owner/editor roles; editors can
-publish and edit but cannot manage owners or delete the channel. Ordinary readers,
-subscribers and purchasers are **not** added to the publishing group.
+A channel is a ContentKit group (`kind=channel` in
+[contentkit.yaml](contentkit.yaml)): its handle, name, cover and avatar, and its
+membership offer. Its AuthKit group, with the same id, is the group's
+`auth_scope`: owners manage the channel and share owner/editor roles; editors
+publish. Readers, members and buyers are never added to it.
+`POST /api/v1/channels` creates both halves and `DELETE /api/v1/channels/:id`
+retires both; ContentKit serves the rest (`/contentkit/v1/groups...`).
 
-`/c` lists channels, `/c/new` creates one and `/c/<handle>` is a channel. A
-post is ContentKit's uniform content URL, `/p/<CODE>/<slug>`: a permanent
-9-character code (ContentKit's `contenturl`, registered with `Put` when the
-post is created and again on a new title) and a slug from its title. The
-server reads only the code, so the slug is decoration. Before the app shell,
-the router answers a missing or stale slug, another spelling of the code or a
-trailing slash with a 301 to the canonical path, a deleted post with 410, and
-drafts and unknown codes like any unknown page; a canonical page carries
-`<link rel="canonical">`, `og:url` and `og:title` (and a `Link` header). The
-API takes the code (`/api/v1/posts/<CODE>`) and returns `code` and `slug`; the
-browser builds links with `@openrails/contentkit-ui/urls` and keeps the address
-bar canonical. `onlydemo urls backfill` (`task urls:backfill`) registers posts
-that have no code; it is idempotent.
-
-Posts have one of four content policies:
+Posts stay the app's (`/api/v1/posts[/:id]`) until ContentKit's catalog stores
+them. Each sits in one channel and has one of four policies, decided by
+ContentKit's access keys:
 
 - **Public:** free to read.
-- **Membership:** included while channel membership is active, including future posts.
-- **Members-only purchase:** active membership is required to start a purchase.
-- **One-time purchase:** anyone signed in can buy.
+- **Membership:** open to holders of the channel's key, including future posts.
+- **Members-only purchase:** bought by members.
+- **One-time purchase:** bought by anyone signed in.
 
-A purchased post stays readable permanently, even after membership ends or the
-post's access policy changes. Deleting a post hides it from everyone who did
-not buy it (feeds, the channel, its link) and archives its product: it is no
-longer sold, nobody is refunded, and its buyers keep it in their library and
-on its page. Payment history remains.
-
-The application stores content, its access policy and each channel's slug and
-name (AuthKit holds only the channel's permission group, with the channel's id),
-not a duplicate product, price or sales ledger. One merchant catalog holds a
-product per sold resource, keyed by the ContentKit entitlement it grants:
-`content:onlydemo:post:<id>` and `members:onlydemo:channel:<id>`, plus
-`members:onlydemo:channel:<id>:free`, the never-sold product granting a free
-member the membership. Catalog offers own native
-currency amounts, availability and immutable price versions. USD offers appear
-first; another displayed currency is charged only when explicitly selected.
-A channel has no membership until its owner creates one (`PUT
-/api/v1/channels/:id/membership` with `{"enabled": bool, "price": {...} | null}`;
-`null` is free, paid is at least $1.00). Membership and members-only posts
-require one. States:
-
-- **Open, paid:** new members subscribe; repricing affects new members only.
-- **Open, free:** `POST /join` grants the free membership product (no card);
-  `POST /leave` revokes the grant. Making a paid membership free stops paid renewals at
-  period end and grants those members the free membership.
-- **Closed** (`enabled: false`): no new joins. Existing members keep access,
-  including new membership posts, and keep renewing at their accepted price.
-  Free members stay members when a price is set again.
-
-Channel membership renews every `MEMBERSHIP_PERIOD` (default `720h`: **every 30 days**,
-not a calendar month); a change applies to prices set afterwards. Repricing moves a stable price key and preserves already accepted terms.
+Paid posts are sold once ContentKit stores them (phase B). Deleting a post
+hides it from everyone but its buyers.
 
 ## Media
 
-Images and videos use ContentKit media: one private bucket, an item per post,
-channel and user (`onlydemo/{kind}/{id}/`), declared once in the registry
-(`mediaKinds` in media.go). Browsers upload straight to the bucket with
-`@openrails/contentkit-ui` (npm, the ContentKit version). ContentKit's HTTP API
-is one mount, `/api/v1/contentkit`: the app presigns and commits
-(`/media/upload/*`), reads (`/media/*`) and resolves post codes (`/codes/*`).
-Posts are the app's own, so the content module there registers no kinds.
+Images and videos use ContentKit media through the engine
+(`contentkit.go`): one private bucket, an item per post, channel and user
+(`onlydemo/{kind}/{id}/`). Browsers upload straight to the bucket with
+`@openrails/contentkit-ui`, presigning and committing at
+`/contentkit/v1/media/upload/*` and reading at `/contentkit/v1/media/*`.
 
-- **Posts.** Uploads `images/{name}` (JPEG, PNG, WebP, GIF, AVIF; 25 MiB, 40
-  per post) and `videos/{name}` (MP4, WebM, MOV, MKV; 20 GiB multipart, 10 per
-  post). ContentKit orders each path, so a post shows its images, then its
-  videos. Private: `large` WebP renditions and an HLS ladder per video
-  (ContentKit's default rungs and 1:2.4–2.4:1 bounds; editors see failures).
-  Public: `preview`, the first image blurred, for everyone who can see the
-  post; everything else is private, all or nothing per viewer.
-- **Channels and users.** Public `avatar` (1:1, 128/512 px) and channel
-  `cover` (3:1, 900/3000 px, from 600 px wide); the API returns each as the
-  package's `PublicPreset`, read from the item's manifest: its published
-  renditions (generation-suffixed names), none before an upload, when the UI
-  shows its placeholder.
-  The package crops before saving (`AvatarUpload`, `SlotEditor`).
-- **Edits.** Crop and rotate are non-destructive `edit` ops on the kept
-  original; the post cropper draws the upload's editor view.
-- **Access.** One resolver for reads, playlists and uploads: ContentKit's
-  `access.Gate` over OpenRails (`contentkit/adapters/openrails`), with the
-  post's rule (public, members, ppv, members_ppv over the channel) and
-  ContentKit's keys: `content:onlydemo:post:<id>` (owning the post) and
-  `members:onlydemo:channel:<id>`, the catalog's product keys. Channel editors
-  and site admins read everything; drafts are their author's, publishing posts
-  their channel editors'. A page of posts costs one entitlement read.
+- **Posts.** `images/{name}` (25 MiB, 40 per post) and `videos/{name}` (20 GiB
+  multipart, 10 per post). Private `large` WebP renditions and an HLS ladder;
+  public `preview`, the first image blurred. The channel's editors upload; the
+  app decides who opens them until ContentKit stores posts.
+- **Channels.** ContentKit's group slots: covers (3:1) and avatars, uploaded
+  by holders of `channel:media:write` (owners).
+- **Users.** Avatars, each uploaded by its person.
 - **Worker.** `onlydemo media-worker` (`task media:worker`) is ContentKit's
-  media worker with this registry: it places uploads, renders images and
-  encodes video from its own River schema `onlydemo_media_worker`; readiness
-  and purges come back through the app's River queue. A publishing post goes
-  live when its media is ready (`ItemReady`), its preview exposed in the same
-  transaction. Env: `MEDIA_WORKER_*` (ContentKit's tuning: threads, codecs,
-  concurrency, encoder) and `MEDIA_HOST_RIVER_SCHEMA` (default
-  `RIVER_SCHEMA`).
-- **Composer.** The first file creates the post as a draft (hidden, its
-  author's only), files commit as they finish and Publish turns the draft into
-  the post. Cancel deletes the draft with its folder; drafts abandoned for
-  24 h are swept hourly.
-- **Uploads.** Post media needs `channel:posts:create`, channel images
-  `channel:settings:manage`, a user their own avatar. The upload limiter
-  rate-limits each uploader (429) and holds each channel's quota (413
-  `quota_exceeded`); site admins are exempt. Deleting a post never offered for
-  sale erases its folder (ContentKit keeps a deletion tombstone,
-  `manifest.json`) and releases quota; a post once offered keeps its folder for
-  its buyers and loses its public preview. Channel and account purges erase theirs.
-- **Maintenance.** `onlydemo media reprocess` redoes stale outputs after a
-  preset change; `onlydemo media sweep-orphans [--grace 24h] [--delete]`
-  reports or removes folders with no row.
+  media worker with the engine's registry: it places uploads, renders images
+  and encodes video from `<CONTENT_SCHEMA>_media_worker`; readiness and purges
+  come back through the host River fleet. Env: `MEDIA_WORKER_*` and
+  `MEDIA_HOST_RIVER_SCHEMA` (default `RIVER_SCHEMA`).
 - **Delivery.** Production uses cookie mode: the site and `media.` host share a
   registrable domain (`MEDIA_COOKIE_DOMAIN`) over HTTPS. Locally the app
   (`localhost:5173`) and gateway (`localhost:8090`) share no parent domain, so
@@ -234,10 +161,10 @@ Posts are the app's own, so the content module there registers no kinds.
 ## Notifications
 
 The signed-in bell and `/me?tab=notifications` use ContentKit's inbox at
-`/api/v1/contentkit/notifications`. The existing River fleet imports up to 100
+`/contentkit/v1/notifications`. The host River fleet imports up to 100
 pending OpenRails events every ten seconds under the stable `onlydemo-inbox`
-consumer. It verifies the customer against AuthKit's directory, stores the
-notice, then acknowledges that consumer's source event. Retry preserves local
+consumer. It verifies the customer against AuthKit's directory, publishes the
+notices through the engine's client, then acknowledges the source events. Retry preserves local
 read/archive state; reading or archiving does not resolve a billing issue.
 
 Successful-charge receipts default off. `NOTIFICATION_RECEIPTS=true` imports
@@ -248,43 +175,32 @@ application. Drain pending events before a merchant billing archive handoff.
 
 ## Buying and membership
 
-A purchase or a membership starts at the app: `POST /api/v1/posts/:code/checkout`
-or `POST /api/v1/channels/:id/subscribe` with `{price_id}`. The app checks its
-content and channel policy (members-only purchases need a membership, editors
-buy nothing, the price must be one of the offers it put on sale), then mints the
-buyer's unpaid order with `CreateOrder`. A stable `Idempotency-Key` preserves
-that order across a retry. The browser pays it in billing-ui's `OrderCheckout`
-on `/billing/v1/me/orders/:id`, including saved cards. OpenRails decides offer
-validity, repeat purchase eligibility, accepted terms and payment state; a
-redirect is never proof of payment. Direct `POST /billing/v1/me/orders` is
-blocked so every purchase passes the app's content rules first.
-After a post is physically removed, its purchase endpoint returns 404; an
-already paid order and its financial history remain.
+A channel's membership is a ContentKit group offer, set by its owner:
+`PUT /contentkit/v1/groups/{id}/offer` with `{"amount": "4.99", "renew_hours":
+720}` (paid, at least 1.00) or `{"amount": "0"}` (free); `DELETE` withdraws it.
+ContentKit creates and archives the OpenRails product (key and entitlement:
+`onlydemo:group:<id>`) and its prices. A free membership is
+`POST`/`DELETE /contentkit/v1/groups/{id}/join`. A paid one is an OpenRails
+order for the offer's `price_id` (`POST /billing/v1/me/orders`), paid in
+billing-ui's `OrderCheckout`, including saved cards. Withdrawing an offer stops
+new purchases; members and subscribers keep theirs.
 
-`/me` shows managed channels and a paginated purchased-post library. Its Billing
-tab is `@openrails/billing-ui`'s `AccountBilling` on the embedded `/billing/v1/me`
-API: subscriptions (cancel with feedback, resume, change card), saved cards
-(add with any PSP that supports in-page card setup, remove) and payment history.
+Billing in Account is `@openrails/billing-ui`'s `AccountBilling` on the
+embedded `/billing/v1/me` API: subscriptions, saved cards and payment history.
 Return URLs name `PUBLIC_URL` or the request's `Origin`; OpenRails refuses any
 origin outside `PUBLIC_URL` + `RETURN_ORIGINS`.
 
-Site admins (the root `admin` role: `root:customers:read`, `root:customers:update`)
-work on customers' billing through the OpenRails merchant API at
-`/billing/v1/merchant/*`, guarded by those permissions (`Routes.Guards`
-`StaffReads`, `StaffWrites`): billing import
-([runbook](https://github.com/open-rails/openrails/blob/master/docs/batch-import.md)),
-provider refresh, tier changes, refunds and the rest of the
-[route table](https://github.com/open-rails/openrails/blob/master/docs/api/routes.md).
+Site admins (the root `admin` role) are ContentKit staff (groups, offers,
+comment moderation) and work on customers' billing through the OpenRails
+merchant API at `/billing/v1/merchant/*`
+([route table](https://github.com/open-rails/openrails/blob/master/docs/api/routes.md)).
 Grant the role with `task admin:grant USER_ID=<id>`.
 
 ## Deletion and identity
 
-Deleting a channel sets `deleted_at` and hides content immediately. AuthKit retires
-its publishing group before successful acknowledgement, removing authorization
-and immediately unblocking the owner's account deletion. A durable River job
-archives offers, then waits until the stored deletion timestamp is at least 30 days
-old before physically removing retained posts, group and channel. Retries do not
-extend the deadline. Repeating DELETE on a deleted channel returns 404.
+Deleting a channel withdraws its membership offer, deletes its ContentKit group
+(hiding its posts) and retires its AuthKit group, removing authorization and
+unblocking the owner's account deletion.
 
 Native account deletion is recoverable for 30 days. A correct password login during
 that period returns a recovery proof; explicit confirmation restores the account.
@@ -301,7 +217,7 @@ refresh token is an HttpOnly cookie (`__Host-authkit_rt` on HTTPS, `authkit_rt`
 on local HTTP). Email verification is optional, but AuthKit refuses new sign-in
 methods (2FA, passkeys, providers, wallets) until the address is proven; the UI
 then asks for the code and retries. Two-factor (authenticator app or email) is
-opt-in from Account. `task seed` marks its `example.test` creators verified.
+opt-in from Account.
 Sign-in, registration, 2FA, recovery and the Account security panels are
 auth-ui's styled components; AuthKit's emailed links land on `/verify`
 (`VerifyLink`) and `/reset` (`ResetPasswordForm`), OIDC on `/login/callback`.
@@ -315,7 +231,7 @@ go run . admin grant --user-id <registered-user-id>
 go run . admin revoke --user-id <registered-user-id>
 ```
 
-## Build and manual walkthrough
+## Build and tests
 
 ```sh
 pnpm --dir frontend install --frozen-lockfile
@@ -323,39 +239,19 @@ pnpm --dir frontend lint
 pnpm --dir frontend build
 go build ./...
 go vet ./...
-SMOKE_DATABASE_URL='postgres://postgres:postgres@localhost:55433/postgres?sslmode=disable' task smoke
 ```
 
-`task smoke` loads `.env` for the `MEDIA_*` bucket settings.
+The integration tests run on real PostgreSQL (each test in schemas of its
+own), AuthKit, OpenRails, ContentKit and River, with OpenRails's `nmimock`
+gateway on loopback:
 
-The optional walkthrough creates and drops only its own uniquely named local
-database. It runs real HTTP, AuthKit, OpenRails and River with a closed fake Stripe
-transport. It covers purchases/replay, resource access, saved-card membership,
-explicit quote confirmation/cancellation and retained deletion. Unexpected provider
-requests fail locally; no real Stripe request or credential is used.
+- `TestChannelsOnContentKit` (needs MinIO): channels as ContentKit groups,
+  free and paid memberships through ContentKit offers and joins, the
+  OpenRails products ContentKit keeps, members-only posts, channel and post
+  uploads under AuthKit roles, deletion. `task dev:up && task test:channels`.
+- `TestNMIBillingEndToEnd`: a membership bought with a saved card opens the
+  channel's posts, renews, and a declined renewal enters dunning; billing
+  notices reach ContentKit's inbox. `task dev:up && task test:nmi`.
 
-`TestMediaEndToEnd` runs the media and URL proof on real PostgreSQL, MinIO,
-the ContentKit handlers, the app's media worker (libvips, ffmpeg), the
-`media-gateway` binary and the app's URL router (fake Stripe only): uploads and
-private WebP renditions, a mixed image/video post (HLS playlists and byte
-ranges, locked viewers, per-path ceilings), what anonymous, member, buyer and
-members_ppv buyer (after membership lapse) viewers get (everything, or the
-public blurred preview), editor/admin bypass, editor-only edits, rate and quota
-refusals (presign and commit), public avatars and covers (crop, rotate,
-re-crop), drafts, publishing after processing, content URLs (codes, canonical
-redirects and tags, 410 after deletion, the backfill), listing cost, and post
-deletion (a buyer keeps a deleted post, nobody is refunded; a never-offered post's
-folder is erased). `task dev:up && task test:media` runs it locally. `pnpm --dir frontend
-test` checks the browser's post links.
-
-`TestNMIBillingEndToEnd` runs billing against OpenRails's `nmimock` NMI gateway
-on loopback, with one fake clock for OpenRails and the gateway: signup, a saved
-card buys a post and a membership, the membership renews, and a declined renewal
-enters dunning (`past_due`). It needs only PostgreSQL (media's startup probe
-uses an in-process S3). `task dev:up && task test:nmi` runs it locally; CI runs
-it before the media proof. CI runs on pull requests only, by changed paths: Go, module
-or migration changes run vet, this proof and the smoke walkthrough; frontend
-changes lint and build the frontend; docs run nothing. Both workflows also
-run manually (`workflow_dispatch`). The libraries retain their full automated qualification. A real sandbox
-purchase/subscription walkthrough is a separate deliberate activity with retained
-provider receipts and idempotency keys.
+CI runs on pull requests, by changed paths: Go, module or migration changes run
+vet and both proofs; frontend changes lint, test and build the frontend.
