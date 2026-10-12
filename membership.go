@@ -39,10 +39,10 @@ func (api *channelAPI) membershipState(ctx context.Context, q interface {
 // channelMembership is the public membership view of a channel. Offer is the
 // purchasable price while a paid membership is open.
 type channelMembership struct {
-	Status string         `json:"status"`
-	Free   bool           `json:"free"`
-	Sync   string         `json:"sync"`
-	Offer  *billing.Offer `json:"offer"`
+	Status string `json:"status"`
+	Free   bool   `json:"free"`
+	Sync   string `json:"sync"`
+	Offer  *offer `json:"offer"`
 	// Member: the viewer holds a paid subscription or free grant.
 	Member bool `json:"member"`
 	// FreeMember: the viewer holds a free grant, which they can leave.
@@ -191,20 +191,21 @@ func (api *channelAPI) syncMembership(ctx context.Context, args membershipSyncAr
 // renewing at the end of the paid period. Change this one function to change
 // the policy.
 func (b *billingService) paidToFree(ctx context.Context, channelID string) error {
-	paid, err := b.client.GetProductByKey(ctx, membershipResource(channelID))
+	paid, err := b.productByKey(ctx, membershipResource(channelID))
 	if errors.Is(err, billing.ErrNotFound) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	params := billing.EntitlementCustomerListParams{PageRequest: billing.PageRequest{Limit: 100}}
+	params := billing.EntitlementListParams{Entitlements: []string{membershipResource(channelID)}, PageRequest: billing.PageRequest{Limit: 100}}
 	for {
-		page, err := b.client.ListEntitlementCustomers(ctx, membershipResource(channelID), params)
+		page, err := b.client.ListEntitlements(ctx, params)
 		if err != nil {
 			return err
 		}
-		for _, customer := range page.Items {
+		for _, entitlement := range page.Items {
+			customer := entitlement.CustomerID
 			renewing, err := b.renewing(ctx, customer, paid.ID)
 			if err != nil {
 				return err
@@ -257,9 +258,9 @@ func (b *billingService) freeGrants(ctx context.Context, user, channelID string)
 		return nil, err
 	}
 	out := []billing.ProductAccessGrant{}
-	params := billing.ProductAccessListParams{LiveOnly: true, PageRequest: billing.PageRequest{Limit: 100}}
+	params := billing.ProductAccessListParams{CustomerIDs: []billing.CustomerID{customer}, LiveOnly: true, PageRequest: billing.PageRequest{Limit: 100}}
 	for {
-		page, err := b.client.ListProductAccess(ctx, customer, params)
+		page, err := b.client.ListProductAccess(ctx, params)
 		if err != nil {
 			return nil, err
 		}
@@ -281,8 +282,8 @@ func (b *billingService) grantFree(ctx context.Context, user, channelID string) 
 	if err != nil {
 		return err
 	}
-	held, err := b.reads.CheckProductAccess(ctx, customer, billing.CheckProductAccessParams{ProductKeys: []string{freeMembershipProduct(channelID)}})
-	if err != nil || held[freeMembershipProduct(channelID)] {
+	grants, err := b.freeGrants(ctx, user, channelID)
+	if err != nil || len(grants) > 0 {
 		return err
 	}
 	product, err := b.ensureProduct(ctx, freeMembershipProduct(channelID), "Free membership", membershipResource(channelID))
@@ -348,12 +349,8 @@ func (api *channelAPI) freeMembership(c fiber.Ctx, joining bool) error {
 		if err != nil {
 			return billingUnavailable(c)
 		}
-		customer, err := customerID(user)
-		if err != nil {
-			return clientError(c, 401, "a user access token is required")
-		}
 		for _, g := range grants {
-			if err = api.billing.client.DeleteProductAccess(c.Context(), customer, g.ID); err != nil {
+			if err = api.billing.client.RevokeProductAccess(c.Context(), g.ID, billing.RevokeProductAccessParams{Reason: "left free membership"}); err != nil {
 				return billingUnavailable(c)
 			}
 		}

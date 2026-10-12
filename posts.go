@@ -15,14 +15,13 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	helpersauth "github.com/open-rails/authkit/auth"
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/authkit/verify"
 	"github.com/open-rails/contentkit/access"
 	"github.com/open-rails/contentkit/contentref"
 	"github.com/open-rails/contentkit/contenturl"
 	"github.com/open-rails/contentkit/media"
-	helpersauth "github.com/open-rails/helpers/auth"
-	"github.com/open-rails/openrails/billing"
 	"github.com/riverqueue/river"
 )
 
@@ -48,11 +47,11 @@ func newPosts(channels *channelAPI, cfg Config) (*postAPI, error) {
 }
 
 type post struct {
-	ID            string `json:"id"`
-	AuthorID      string `json:"author_id"`
-	ChannelID     string `json:"channel_id"`
-	ChannelSlug   string `json:"channel_slug"`
-	ChannelName   string `json:"channel_name"`
+	ID          string `json:"id"`
+	AuthorID    string `json:"author_id"`
+	ChannelID   string `json:"channel_id"`
+	ChannelSlug string `json:"channel_slug"`
+	ChannelName string `json:"channel_name"`
 	// Code and Slug make the post's URL, /p/{code}/{slug}; the slug follows
 	// the title, and a stale one redirects.
 	Code          string `json:"code"`
@@ -68,15 +67,15 @@ type post struct {
 	// Deleted posts stay readable to their buyers alone.
 	Deleted bool `json:"-"`
 	// MediaReadiness is a publishing post's media processing, for its editors.
-	MediaReadiness     *media.Readiness    `json:"media_readiness,omitempty"`
-	CanRead            bool                `json:"can_read"`
-	CanEdit            bool                `json:"can_edit"`
-	Purchased          bool                `json:"purchased"`
+	MediaReadiness     *media.Readiness `json:"media_readiness,omitempty"`
+	CanRead            bool             `json:"can_read"`
+	CanEdit            bool             `json:"can_edit"`
+	Purchased          bool             `json:"purchased"`
 	SubscriptionActive bool             `json:"has_membership"`
 	ChannelAvatar      *publicPreset    `json:"channel_avatar,omitempty"`
 	CreatedAt          time.Time        `json:"created_at"`
 	UpdatedAt          time.Time        `json:"updated_at"`
-	Offers             []billing.Offer  `json:"offers"`
+	Offers             []offer          `json:"offers"`
 }
 type postInput struct {
 	ChannelID    *string     `json:"channel_id"`
@@ -223,13 +222,13 @@ func (api *postAPI) decorate(c fiber.Ctx, posts []post, withOffers bool) error {
 			selling = append(selling, postResource(p.ID))
 		}
 	}
-	offers, err := api.billing.offers(ctx, billing.OfferPermanent, selling, 100)
+	offers, err := api.billing.offers(ctx, offerPermanent, selling, 100)
 	if err != nil {
 		return err
 	}
 	for i := range posts {
 		if posts[i].Offers = offers[postResource(posts[i].ID)]; posts[i].Offers == nil {
-			posts[i].Offers = []billing.Offer{}
+			posts[i].Offers = []offer{}
 		}
 	}
 	return nil
@@ -755,7 +754,7 @@ func (api *postAPI) settled(c fiber.Ctx, status int, id string, job *postOfferAr
 	if err != nil {
 		return databaseError(c, err)
 	}
-	p.CanRead, p.CanEdit, p.Offers = true, true, []billing.Offer{}
+	p.CanRead, p.CanEdit, p.Offers = true, true, []offer{}
 	if p.State == statePublishing {
 		if p.MediaReadiness, err = api.media.readiness(c.Context(), p.ID); err != nil {
 			return clientError(c, 500, "media store error")
@@ -773,7 +772,7 @@ func (api *postAPI) settled(c fiber.Ctx, status int, id string, job *postOfferAr
 	p = posts[0]
 	_ = api.pool.QueryRow(c.Context(), `SELECT slug,name FROM `+api.channels.table+` WHERE id=$1`, p.ChannelID).Scan(&p.ChannelSlug, &p.ChannelName)
 	if paidPolicy(p.AccessPolicy) && p.OfferStatus == "active" {
-		if offers, e := api.billing.offers(c.Context(), billing.OfferPermanent, []string{postResource(p.ID)}, 100); e == nil && offers[postResource(p.ID)] != nil {
+		if offers, e := api.billing.offers(c.Context(), offerPermanent, []string{postResource(p.ID)}, 100); e == nil && offers[postResource(p.ID)] != nil {
 			p.Offers = offers[postResource(p.ID)]
 		}
 	}

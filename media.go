@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
+	helpersauth "github.com/open-rails/authkit/auth"
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/authkit/verify"
 	"github.com/open-rails/contentkit"
@@ -28,7 +29,6 @@ import (
 	"github.com/open-rails/contentkit/media/token"
 	"github.com/open-rails/contentkit/media/workqueue"
 	"github.com/open-rails/contentkit/migrations"
-	helpersauth "github.com/open-rails/helpers/auth"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -494,8 +494,9 @@ type mediaActorKey struct{}
 func (m *mediaService) api(ctx context.Context, cfg Config, urls *contenturl.Router) (http.Handler, error) {
 	rt, err := contentkit.NewRuntime(ctx, contentkit.RuntimeConfig{
 		EmbeddedConfig: contentkit.EmbeddedConfig{PG: m.pool, PGSchema: contentSchema(cfg), Tenant: tenant},
-		Content:        content.Options{Identity: m, Authz: noContentPerms{}, Resolver: m.resolver},
-		Uploads:        m.uploads, Reader: m.reader, Codes: urls,
+		Auth:           m.auth.client.Authenticator(), UserInfo: m.auth.client.UserInfo(),
+		Content: content.Options{Resolver: m.resolver},
+		Uploads: m.uploads, Reader: m.reader, Codes: urls,
 	})
 	if err != nil {
 		return nil, err
@@ -504,11 +505,6 @@ func (m *mediaService) api(ctx context.Context, cfg Config, urls *contenturl.Rou
 }
 
 const contentkitPrefix = "/api/v1/contentkit"
-
-// noContentPerms grants none of the content module's staff permissions.
-type noContentPerms struct{}
-
-func (noContentPerms) Can(context.Context, access.Actor, string) (bool, error) { return false, nil }
 
 // readiness is a post's media processing; a post without media is ready.
 func (m *mediaService) readiness(ctx context.Context, id string) (*media.Readiness, error) {

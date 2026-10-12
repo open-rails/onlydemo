@@ -519,11 +519,11 @@ func TestMediaEndToEnd(t *testing.T) {
 		price := map[string]any{"price_id": stranger.call("GET", p.path(), nil, "", 200)["offers"].([]any)[0].(map[string]any)["price_id"]}
 		owner.call("DELETE", p.path(), nil, "", 204)
 
-		product, err := h.srv.billing.client.GetProductByKey(ctx, postResource(p.id))
+		product, err := h.srv.billing.productByKey(ctx, postResource(p.id))
 		if err != nil || !product.Archived {
 			t.Fatalf("product after deletion: %+v %v", product, err)
 		}
-		if offers, err := h.srv.billing.offers(ctx, billing.OfferPermanent, []string{postResource(p.id)}, 10); err != nil || len(offers) != 0 {
+		if offers, err := h.srv.billing.offers(ctx, offerPermanent, []string{postResource(p.id)}, 10); err != nil || len(offers) != 0 {
 			t.Fatalf("a deleted post is still offered: %v %v", offers, err)
 		}
 		customer, _ := customerID(buyer.id)
@@ -624,10 +624,10 @@ func (h *mediaHarness) testContentURLs(t *testing.T, owner, anon peer, channelID
 	// The slug is decoration: a missing or stale slug, another spelling of
 	// the code and a trailing slash redirect, keeping the query.
 	redirects := map[string]string{
-		"/p/" + code:                                 page,
-		"/p/" + code + "/old-title":                  page,
+		"/p/" + code:                page,
+		"/p/" + code + "/old-title": page,
 		"/p/" + strings.ToLower(code) + "/x?ref=feed": page + "?ref=feed",
-		page + "/":                                   page,
+		page + "/": page,
 	}
 	for from, to := range redirects {
 		if res, _ := anon.page(from); res.StatusCode != 301 || res.Header.Get("Location") != to {
@@ -958,6 +958,9 @@ func (p peer) do(method, path string, body any, key string) (*http.Response, []b
 	req.Header.Set("Content-Type", "application/json")
 	if p.token != "" {
 		req.Header.Set("Authorization", "Bearer "+p.token)
+	}
+	if key == "" && method == "POST" && (strings.HasSuffix(path, "/checkout") || strings.HasSuffix(path, "/subscribe")) {
+		key = uuid.NewString()
 	}
 	if key != "" {
 		req.Header.Set("Idempotency-Key", key)
@@ -1338,14 +1341,14 @@ func (h *mediaHarness) purchase(p peer, post testPost) {
 }
 
 // pay pays a minted session with its first payment option, as billing-ui does.
-func (h *mediaHarness) pay(p peer, session string) map[string]any {
-	path := "/billing/v1/me/checkout-sessions/" + session
-	options, _ := p.call("GET", path, nil, "", 200)["options"].([]any)
+func (h *mediaHarness) pay(p peer, orderID string) map[string]any {
+	path := "/billing/v1/me/orders/" + orderID
+	order := p.call("GET", path, nil, "", 200)
+	options, _ := order["payment_options"].([]any)
 	if len(options) == 0 {
-		h.t.Fatalf("session %s offers no payment option", session)
+		h.t.Fatalf("order %s offers no payment option", orderID)
 	}
-	option := options[0].(map[string]any)["id"]
-	return p.call("POST", path+"/pay", map[string]any{"option_id": option}, "", 200)
+	return p.call("POST", path+"/pay", map[string]any{"expected_total": order["total"], "payment": map[string]any{"psp_id": options[0].(map[string]any)["psp_id"], "return_url": h.base + "/me"}}, "", 200)
 }
 
 const testStripeAccount = "acct_demo_test"

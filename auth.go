@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
+	"github.com/open-rails/helpers/notify"
 	"github.com/open-rails/openrails/billing"
 )
 
@@ -37,8 +38,8 @@ var (
 	postReadPermission   = rbac.Root.Permission("posts", "read")
 	postEditPermission   = rbac.Root.Permission("posts", "edit")
 	postDeletePermission = rbac.Root.Permission("posts", "delete")
-	customersRead        = rbac.Root.Permission("customers", "read")
-	customersUpdate      = rbac.Root.Permission("customers", "update")
+	customersRead        = rbac.Root.Permission(billing.RootCustomerRead.Resource(), billing.RootCustomerRead.Action())
+	customersUpdate      = rbac.Root.Permission(billing.RootCustomerManage.Resource(), billing.RootCustomerManage.Action())
 	adminRole            = rbac.Root.Role("admin", postReadPermission, postEditPermission, postDeletePermission, customersRead, customersUpdate)
 )
 
@@ -46,6 +47,7 @@ type appAuth struct {
 	client  *authkit.Client
 	billing *billingService
 	media   *mediaService
+	notices *notifications
 	// observe sees each AuthKit read a request makes (tests count them).
 	observe func(context.Context)
 }
@@ -145,48 +147,13 @@ func (logEmail) Send(_ context.Context, msg iam.EmailMessage) error {
 
 func (logEmail) CheckHealth(context.Context) error { return nil }
 
-// onEvent keeps billing's customer facts current with the account, and a
-// deleted account's renewals stop. AuthKit retries a failure.
+// Billing reads current contacts through AuthKit's directory. Account deletion
+// still stops renewals; AuthKit retries a failure before acknowledging its event.
 func (a *appAuth) onEvent(ctx context.Context, event iam.Event) error {
-	switch event.Kind {
-	case iam.EventUserDeleted:
-		if err := a.cancelDeletedAccountBilling(ctx, event.UserID); err != nil {
-			return err
-		}
-		return a.pushCustomer(ctx, event.UserID)
-	case iam.EventUserRegistered, iam.EventUserEmailChanged, iam.EventUserUsernameChanged,
-		iam.EventUserBanned, iam.EventUserUnbanned, iam.EventUserRestored:
-		return a.pushCustomer(ctx, event.UserID)
+	if event.Kind == iam.EventUserDeleted {
+		return a.cancelDeletedAccountBilling(ctx, event.UserID)
 	}
 	return nil
-}
-
-// pushCustomer declares the account's facts to billing: a deleted or banned
-// account is blocked and has no email.
-func (a *appAuth) pushCustomer(ctx context.Context, userID string) error {
-	if a.billing == nil {
-		return errors.New("billing lifecycle has not been composed")
-	}
-	customer, err := billing.ParseCustomerID(userID)
-	if err != nil {
-		return err
-	}
-	users, err := a.client.Users(ctx, []string{userID})
-	if err != nil {
-		return err
-	}
-	p := billing.EnsureCustomerParams{ID: customer, Blocked: true}
-	if user, ok := users[userID]; ok {
-		p.Blocked = user.DeletedAt != nil || user.Ban != nil
-		if !p.Blocked && user.Email != nil && *user.Email != "" {
-			p.Email = user.Email
-		}
-		if user.Username != "" {
-			p.Username = &user.Username
-		}
-	}
-	_, err = a.billing.client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{p})
-	return err
 }
 
 // cancelDeletedAccountBilling stops the account's renewals, keeping the paid
@@ -227,6 +194,12 @@ func (a *appAuth) purgeDeletedAccount(ctx context.Context, deletion iam.UserDele
 	}
 	if a.media == nil {
 		return errors.New("media lifecycle has not been composed")
+	}
+	if a.notices == nil {
+		return errors.New("notification lifecycle has not been composed")
+	}
+	if err := a.notices.store.EraseRecipient(ctx, notify.Recipient{Audience: notify.AudienceUser, ID: deletion.UserID}); err != nil {
+		return err
 	}
 	return a.media.eraseUser(ctx, deletion.UserID)
 }

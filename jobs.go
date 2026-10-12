@@ -13,13 +13,14 @@ import (
 )
 
 // Compose all contributors before constructing the one host-owned client.
-func newJobs(ctx context.Context, pool *pgxpool.Pool, cfg Config, auth *appAuth, billing *billingService, channels *channelAPI, posts *postAPI, media *mediaService) (*river.Client[pgx.Tx], error) {
+func newJobs(ctx context.Context, pool *pgxpool.Pool, cfg Config, auth *appAuth, billing *billingService, channels *channelAPI, posts *postAPI, media *mediaService, notices *notifications) (*river.Client[pgx.Tx], error) {
 	contributions := []riverkit.Contribution{
 		auth.client.RiverJobs(),
 		channels.RiverJobs(),
 		posts.RiverJobs(),
 		billing.RiverJobs(),
 		media.jobs.RiverJobs(),
+		notices.RiverJobs(),
 	}
 	queues := map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 4}}
 	return riverkit.New(ctx, pool, &river.Config{Schema: riverSchema(cfg), Queues: queues}, contributions...)

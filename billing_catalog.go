@@ -59,7 +59,7 @@ func (b *billingService) access(ctx context.Context, user string, keys []string)
 		return nil, err
 	}
 	for chunk := range slices.Chunk(unique(keys), billing.MaxEntitlementChecks) {
-		check, err := b.reads.CheckEntitlements(ctx, customer, billing.CheckEntitlementsParams{Entitlements: chunk, At: time.Now()})
+		check, err := b.reads.CheckEntitlements(ctx, billing.CheckEntitlementsParams{CustomerID: customer, Entitlements: chunk, At: time.Now()})
 		if err != nil {
 			return nil, err
 		}
@@ -110,22 +110,64 @@ func (b *billingService) held(ctx context.Context, user string, f *access.Filter
 	return out, err
 }
 
-// offers lists each key's active offers, preferred currency first; limit
-// bounds each key's list.
-func (b *billingService) offers(ctx context.Context, kind billing.OfferKind, keys []string, limit int) (map[string][]billing.Offer, error) {
-	out := map[string][]billing.Offer{}
-	for chunk := range slices.Chunk(unique(keys), billing.MaxEntitlementChecks) {
-		pages, err := b.reads.ListOffers(ctx, billing.OfferListParams{Entitlements: chunk, Kind: kind, PreferredCurrency: "USD", Limit: limit})
-		if err != nil {
-			return nil, err
-		}
-		for key, page := range pages {
-			if len(page.Items) > 0 {
-				out[key] = page.Items
+type offerKind bool
+
+const (
+	offerPermanent offerKind = false
+	offerRecurring offerKind = true
+)
+
+type offer struct {
+	PriceID              billing.PriceID `json:"price_id"`
+	ProductKey           string          `json:"product_key"`
+	ProductName          string          `json:"product_name"`
+	UnitAmount           int64           `json:"unit_amount,string"`
+	Currency             string          `json:"currency"`
+	AccessDurationHours  *int            `json:"access_duration_hours"`
+	BillingIntervalHours *int            `json:"billing_interval_hours"`
+}
+
+// offers reads only the app's product keys and filters their current prices.
+func (b *billingService) offers(ctx context.Context, kind offerKind, keys []string, limit int) (map[string][]offer, error) {
+	out := map[string][]offer{}
+	live := false
+	for chunk := range slices.Chunk(unique(keys), billing.MaxBatchItems) {
+		params := billing.ProductListParams{Keys: chunk, Archived: &live, PageRequest: billing.PageRequest{Limit: 100}}
+		for {
+			page, err := b.reads.ListProducts(ctx, params)
+			if err != nil {
+				return nil, err
 			}
+			for _, product := range page.Items {
+				for _, price := range product.Prices {
+					if price.Archived || (price.BillingIntervalHours != nil) != bool(kind) || len(out[product.Key]) >= limit {
+						continue
+					}
+					if !bool(kind) && price.AccessDurationHours != nil {
+						continue
+					}
+					out[product.Key] = append(out[product.Key], offer{PriceID: price.ID, ProductKey: product.Key, ProductName: product.DisplayName,
+						UnitAmount: price.UnitAmount, Currency: price.Currency, AccessDurationHours: price.AccessDurationHours, BillingIntervalHours: price.BillingIntervalHours})
+				}
+			}
+			if page.Next == "" {
+				break
+			}
+			params.Cursor = page.Next
 		}
 	}
 	return out, nil
+}
+
+func (b *billingService) productByKey(ctx context.Context, key string) (*billing.Product, error) {
+	page, err := b.client.ListProducts(ctx, billing.ProductListParams{Keys: []string{key}, PageRequest: billing.PageRequest{Limit: 1}})
+	if err != nil {
+		return nil, err
+	}
+	if len(page.Items) == 0 {
+		return nil, billing.ErrNotFound
+	}
+	return &page.Items[0], nil
 }
 
 // Amounts are in micro-units; posts start at 0.50 and memberships at 1.00.
@@ -147,7 +189,10 @@ func checkPrice(price *offerPrice, min int64) (string, error) {
 
 // ensureProduct is the live product keyed by resource, granting resource.
 func (b *billingService) ensureProduct(ctx context.Context, key, title, resource string) (*billing.Product, error) {
-	product, err := b.client.EnsureProduct(ctx, billing.CreateProductParams{Key: key, DisplayName: title, Entitlements: []string{resource}})
+	product, err := b.productByKey(ctx, key)
+	if errors.Is(err, billing.ErrNotFound) {
+		product, err = b.client.CreateProduct(ctx, billing.CreateProductParams{Key: key, DisplayName: title, Entitlements: []string{resource}})
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -187,7 +232,7 @@ func (b *billingService) setOffer(ctx context.Context, resource, title string, p
 
 // archiveResource stops new sales of resource; buyers and members keep access.
 func (b *billingService) archiveResource(ctx context.Context, resource string) error {
-	product, err := b.client.GetProductByKey(ctx, resource)
+	product, err := b.productByKey(ctx, resource)
 	if errors.Is(err, billing.ErrNotFound) {
 		return nil
 	}
@@ -216,16 +261,46 @@ func mapped(in []string, f func(string) string) []string {
 	return out
 }
 
-// checkoutRequest mints the customer's checkout session for one price. A
-// session moves no money until the customer pays it.
-func checkoutRequest(user, username, email string, price billing.PriceID, publicURL string) (billing.CreateCheckoutSessionParams, error) {
+// checkoutRequest creates an unpaid order only after the host authorizes the
+// content purchase. A retry reuses its key; creating it never charges a card.
+func checkoutRequest(user string, price billing.PriceID, key string) (billing.CreateOrderParams, error) {
 	customer, err := customerID(user)
 	if err != nil {
-		return billing.CreateCheckoutSessionParams{}, err
+		return billing.CreateOrderParams{}, err
 	}
-	return billing.CreateCheckoutSessionParams{
-		Customer:   billing.CheckoutCustomerIdentity{ID: customer, Username: username, VerifiedEmail: email},
-		PriceID:    price,
-		SuccessURL: publicURL + "/me?tab=library",
-	}, nil
+	return billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price}}, IdempotencyKey: key}, nil
+}
+
+// heldProducts checks the requested grant products in bounded pages, retaining
+// the distinction between paid and freely granted channel membership.
+func (b *billingService) heldProducts(ctx context.Context, customer billing.CustomerID, keys []string) (map[string]bool, error) {
+	result := map[string]bool{}
+	for chunk := range slices.Chunk(unique(keys), billing.MaxBatchItems) {
+		products, err := b.reads.ListProducts(ctx, billing.ProductListParams{Keys: chunk, PageRequest: billing.PageRequest{Limit: 100}})
+		if err != nil {
+			return nil, err
+		}
+		ids := make([]billing.ProductID, 0, len(products.Items))
+		for _, product := range products.Items {
+			ids = append(ids, product.ID)
+		}
+		if len(ids) == 0 {
+			continue
+		}
+		params := billing.ProductAccessListParams{CustomerIDs: []billing.CustomerID{customer}, ProductIDs: ids, LiveOnly: true, PageRequest: billing.PageRequest{Limit: 100}}
+		for {
+			page, err := b.reads.ListProductAccess(ctx, params)
+			if err != nil {
+				return nil, err
+			}
+			for _, grant := range page.Items {
+				result[grant.ProductKey] = true
+			}
+			if page.Next == "" {
+				break
+			}
+			params.Cursor = page.Next
+		}
+	}
+	return result, nil
 }

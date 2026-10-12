@@ -27,21 +27,22 @@ type countingReads struct {
 	n *atomic.Int64
 }
 
-func (r countingReads) CheckEntitlements(ctx context.Context, customer billing.CustomerID, params billing.CheckEntitlementsParams, o ...openrails.RequestOption) (*billing.EntitlementCheck, error) {
+func (r countingReads) CheckEntitlements(ctx context.Context, params billing.CheckEntitlementsParams, o ...openrails.RequestOption) (*billing.EntitlementCheck, error) {
 	inRequest(ctx, r.n)
-	return r.entitlementReads.CheckEntitlements(ctx, customer, params, o...)
+	return r.entitlementReads.CheckEntitlements(ctx, params, o...)
 }
-func (r countingReads) ListCustomerEntitlements(ctx context.Context, customer billing.CustomerID, params billing.CustomerEntitlementListParams, o ...openrails.RequestOption) (*billing.ListPage[billing.CustomerEntitlement], error) {
+func (r countingReads) ListEntitlements(ctx context.Context, params billing.EntitlementListParams, o ...openrails.RequestOption) (*billing.ListPage[billing.CustomerEntitlement], error) {
 	inRequest(ctx, r.n)
-	return r.entitlementReads.ListCustomerEntitlements(ctx, customer, params, o...)
+	return r.entitlementReads.ListEntitlements(ctx, params, o...)
 }
-func (r countingReads) ListOffers(ctx context.Context, params billing.OfferListParams, o ...openrails.RequestOption) (billing.OfferPages, error) {
+func (r countingReads) ListProducts(ctx context.Context, params billing.ProductListParams, o ...openrails.RequestOption) (*billing.ListPage[billing.Product], error) {
 	inRequest(ctx, r.n)
-	return r.entitlementReads.ListOffers(ctx, params, o...)
+	return r.entitlementReads.ListProducts(ctx, params, o...)
 }
-func (r countingReads) CheckProductAccess(ctx context.Context, customer billing.CustomerID, params billing.CheckProductAccessParams, o ...openrails.RequestOption) (map[string]bool, error) {
+
+func (r countingReads) ListProductAccess(ctx context.Context, params billing.ProductAccessListParams, o ...openrails.RequestOption) (*billing.ListPage[billing.ProductAccessGrant], error) {
 	inRequest(ctx, r.n)
-	return r.entitlementReads.CheckProductAccess(ctx, customer, params, o...)
+	return r.entitlementReads.ListProductAccess(ctx, params, o...)
 }
 
 type cost struct{ queries, auth, billing int64 }
@@ -129,7 +130,9 @@ func (h *mediaHarness) testListingCost(t *testing.T, purchasedPost testPost, buy
 	if err := json.Unmarshal(raw, &library); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.ContainsFunc(library.Purchased, func(p post) bool { return p.ID == purchasedPost.id && p.Code == purchasedPost.code && p.Purchased && p.CanRead }) {
+	if !slices.ContainsFunc(library.Purchased, func(p post) bool {
+		return p.ID == purchasedPost.id && p.Code == purchasedPost.code && p.Purchased && p.CanRead
+	}) {
 		t.Fatalf("library %+v lacks purchased post %s", library.Purchased, purchasedPost)
 	}
 

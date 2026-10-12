@@ -206,11 +206,11 @@ func smoke() error {
 	if _, err = buyer.call("POST", path+"/checkout", buyerToken, purchase, "", 404); err != nil {
 		return fmt.Errorf("retired price still sells: %w", err)
 	}
-	accepted, err := buyer.call("GET", "/billing/v1/me/checkout-sessions/"+checkout["id"].(string), buyerToken, nil, "", 200)
+	accepted, err := buyer.call("GET", "/billing/v1/me/orders/"+checkout["id"].(string), buyerToken, nil, "", 200)
 	if err != nil {
 		return err
 	}
-	if accepted["status"] != "succeeded" {
+	if accepted["status"] != "completed" {
 		return fmt.Errorf("reprice changed the paid session: %v", accepted["status"])
 	}
 	gatedPost := map[string]any{"channel_id": ch["id"], "title": "Members buy separately", "body": "Extra permanent purchase", "access_policy": "members_ppv", "price": map[string]any{"unit_amount": "4990000", "currency": "USD"}}
@@ -423,22 +423,22 @@ func smoke() error {
 	if _, err = owner.call("DELETE", "/auth/v1/me", ownerToken, map[string]any{"password": "Manual-smoke-password-42!"}, "", 204); err != nil {
 		return fmt.Errorf("retired channel still blocked owner account deletion: %w", err)
 	}
-	fmt.Println("Manual smoke passed: native auth, content URLs, resource offers and reprice, saved-card checkout sessions, permanent paid access, members-only purchase refusal, membership checkout and cancellation, membership close/free/join/leave/paid transitions, future included posts, separate publishing roles, post soft deletion with archived product, retained channel soft deletion and owner account deletion. Zero real provider requests.")
+	fmt.Println("Manual smoke passed: native auth, content URLs, resource offers and reprice, saved-card orders, permanent paid access, members-only purchase refusal, membership checkout and cancellation, membership close/free/join/leave/paid transitions, future included posts, separate publishing roles, post soft deletion with archived product, retained channel soft deletion and owner account deletion. Zero real provider requests.")
 	return nil
 }
 
-// smokePay pays a minted checkout session with the saved card, as billing-ui does.
+// smokePay pays a minted order with the saved card, as billing-ui does.
 func smokePay(buyer smokeClient, token, session, method string) error {
-	path := "/billing/v1/me/checkout-sessions/" + session
+	path := "/billing/v1/me/orders/" + session
 	read, err := buyer.call("GET", path, token, nil, "", 200)
 	if err != nil {
 		return err
 	}
-	options, _ := read["options"].([]any)
+	options, _ := read["payment_options"].([]any)
 	if len(options) == 0 {
 		return fmt.Errorf("session %s offers no payment option", session)
 	}
-	paid, err := buyer.call("POST", path+"/pay", token, map[string]any{"option_id": options[0].(map[string]any)["id"], "payment_method_id": method}, "", 200)
+	paid, err := buyer.call("POST", path+"/pay", token, map[string]any{"expected_total": read["total"], "payment": map[string]any{"payment_method_id": method}}, "", 200)
 	// A charge the provider is still confirming settles in the background;
 	// the page reads the session until it ends.
 	for deadline := time.Now().Add(60 * time.Second); err == nil && paid["status"] == "processing" && time.Now().Before(deadline); {
@@ -448,7 +448,7 @@ func smokePay(buyer smokeClient, token, session, method string) error {
 	if err != nil {
 		return err
 	}
-	if paid["status"] != "succeeded" {
+	if paid["status"] != "completed" {
 		return fmt.Errorf("session %s: %v", session, paid)
 	}
 	return nil
@@ -611,6 +611,9 @@ func (s smokeClient) call(method, path, token string, body any, key string, stat
 	req.Header.Set("Content-Type", "application/json")
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if key == "" && method == "POST" && (strings.HasSuffix(path, "/checkout") || strings.HasSuffix(path, "/subscribe")) {
+		key = uuid.NewString()
 	}
 	if key != "" {
 		req.Header.Set("Idempotency-Key", key)

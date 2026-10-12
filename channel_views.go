@@ -17,12 +17,12 @@ import (
 var channelSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,99}$`)
 
 type channelView struct {
-	ID         string              `json:"id"`
-	Slug       string              `json:"slug"`
-	Name       string              `json:"name"`
-	Role       string              `json:"role,omitempty"`
-	CanManage  bool                `json:"can_manage"`
-	CanEdit    bool                `json:"can_edit"`
+	ID         string            `json:"id"`
+	Slug       string            `json:"slug"`
+	Name       string            `json:"name"`
+	Role       string            `json:"role,omitempty"`
+	CanManage  bool              `json:"can_manage"`
+	CanEdit    bool              `json:"can_edit"`
 	Avatar     publicPreset      `json:"avatar"`
 	Cover      publicPreset      `json:"cover"`
 	Membership channelMembership `json:"membership"`
@@ -74,7 +74,7 @@ func (api *channelAPI) views(ctx context.Context, user string, ids []string, gra
 		}
 		out = append(out, v)
 	}
-	offers, err := api.billing.offers(ctx, billing.OfferRecurring, selling, 1)
+	offers, err := api.billing.offers(ctx, offerRecurring, selling, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +99,7 @@ func (api *channelAPI) views(ctx context.Context, user string, ids []string, gra
 			if err != nil {
 				return nil, err
 			}
-			if free, err = api.billing.reads.CheckProductAccess(ctx, customer, billing.CheckProductAccessParams{ProductKeys: products}); err != nil {
+			if free, err = api.billing.heldProducts(ctx, customer, products); err != nil {
 				return nil, err
 			}
 		}
@@ -280,9 +280,9 @@ func (api *postAPI) me(c fiber.Ctx) error {
 	// The library is every post the viewer holds a purchase of, deleted ones included.
 	keys := []string{}
 	owned := access.OwnPrefix(tenant, kindPost)
-	params := billing.CustomerEntitlementListParams{Prefix: owned, PageRequest: billing.PageRequest{Limit: 100}}
+	params := billing.EntitlementListParams{CustomerIDs: []billing.CustomerID{customer}, Prefix: owned, PageRequest: billing.PageRequest{Limit: 100}}
 	for {
-		held, err := api.billing.reads.ListCustomerEntitlements(c.Context(), customer, params)
+		held, err := api.billing.reads.ListEntitlements(c.Context(), params)
 		if err != nil {
 			return billingUnavailable(c)
 		}

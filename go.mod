@@ -8,9 +8,9 @@ require (
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/knadh/koanf/providers/env/v2 v2.0.1
 	github.com/knadh/koanf/v2 v2.3.6
-	github.com/open-rails/authkit v1.10.1
+	github.com/open-rails/authkit v1.24.0
 	github.com/open-rails/migratekit v1.10.0
-	github.com/open-rails/openrails v0.233.2
+	github.com/open-rails/openrails v0.244.0
 	github.com/riverqueue/river v0.47.0
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.47.0 // indirect
 )
@@ -20,9 +20,9 @@ require (
 	github.com/johannesboyne/gofakes3 v1.2.0
 	github.com/joho/godotenv v1.5.1
 	github.com/jonboulle/clockwork v0.5.0
-	github.com/open-rails/contentkit v0.68.1
-	github.com/open-rails/contentkit/adapters/openrails v0.1.0
-	github.com/open-rails/helpers v1.2.0
+	github.com/open-rails/contentkit v0.75.0
+	github.com/open-rails/contentkit/adapters/openrails v0.1.1-0.20261012025109-6faa857c575e
+	github.com/open-rails/helpers v1.11.0
 	github.com/riverqueue/river/rivertype v0.47.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sync v0.23.0
@@ -106,6 +106,7 @@ require (
 	github.com/mr-tron/base58 v1.3.0 // indirect
 	github.com/muhlemmer/gu v0.3.1 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
+	github.com/nyaruka/phonenumbers v1.8.1 // indirect
 	github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729 // indirect
 	github.com/paulmach/orb v0.12.0 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect

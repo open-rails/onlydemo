@@ -49,23 +49,18 @@ func returnOrigin(c fiber.Ctx, publicURL string) string {
 	return publicURL
 }
 
-// mintCheckout mints the viewer's checkout session for price. The browser
-// pays it on the customer billing surface (billing-ui's checkout).
+// mintCheckout creates the viewer's order after host purchase authorization.
 func (api *channelAPI) mintCheckout(c fiber.Ctx, price billing.PriceID, publicURL string) error {
 	user := viewer(c)
-	account, err := api.auth.user(c.Context(), user)
-	if err != nil {
-		return billingUnavailable(c)
+	key := c.Get("Idempotency-Key")
+	if key == "" {
+		return clientError(c, 400, "Idempotency-Key is required")
 	}
-	email := ""
-	if account.Email != nil && account.EmailVerified {
-		email = *account.Email
-	}
-	request, err := checkoutRequest(user, account.Username, email, price, publicURL)
+	request, err := checkoutRequest(user, price, key)
 	if err != nil {
 		return clientError(c, 401, "a user access token is required")
 	}
-	session, err := api.billing.client.CreateCheckoutSession(c.Context(), request)
+	session, err := api.billing.client.CreateOrder(c.Context(), request)
 	if err != nil {
 		return checkoutError(c, err)
 	}
@@ -113,7 +108,7 @@ func (api *postAPI) checkout(c fiber.Ctx, publicURL string) error {
 	if post.OfferStatus != "active" {
 		return clientError(c, 409, "post price is pending")
 	}
-	if err := api.sold(c.Context(), postResource(post.ID), billing.OfferPermanent, in.PriceID); err != nil {
+	if err := api.sold(c.Context(), postResource(post.ID), offerPermanent, in.PriceID); err != nil {
 		return checkoutError(c, err)
 	}
 	editorial, err := api.channels.allowed(c.Context(), viewer(c), post.ChannelID, channelReadPermission)
@@ -137,11 +132,11 @@ func (api *postAPI) checkout(c fiber.Ctx, publicURL string) error {
 
 // sold requires price to be one of resource's current offers: a checkout
 // sells only what the app put on sale.
-func (api *postAPI) sold(ctx context.Context, resource string, kind billing.OfferKind, price billing.PriceID) error {
+func (api *postAPI) sold(ctx context.Context, resource string, kind offerKind, price billing.PriceID) error {
 	return api.channels.sold(ctx, resource, kind, price)
 }
 
-func (api *channelAPI) sold(ctx context.Context, resource string, kind billing.OfferKind, price billing.PriceID) error {
+func (api *channelAPI) sold(ctx context.Context, resource string, kind offerKind, price billing.PriceID) error {
 	offers, err := api.billing.offers(ctx, kind, []string{resource}, 100)
 	if err != nil {
 		return err
@@ -183,7 +178,7 @@ func (api *channelAPI) subscribe(c fiber.Ctx, publicURL string) error {
 	if state.Status != membershipOpen || state.Free {
 		return clientError(c, 409, "this channel has no paid membership open to join")
 	}
-	if err := api.sold(c.Context(), membershipResource(id), billing.OfferRecurring, in.PriceID); err != nil {
+	if err := api.sold(c.Context(), membershipResource(id), offerRecurring, in.PriceID); err != nil {
 		return checkoutError(c, err)
 	}
 	editorial, err := api.allowed(c.Context(), viewer(c), id, channelReadPermission)

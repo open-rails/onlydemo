@@ -37,6 +37,8 @@ type Config struct {
 	Media                mediaConfig
 	// MembershipHours is each new channel membership price's renewal period.
 	MembershipHours int
+	// NotificationReceipts opts in to future optional successful-charge notices.
+	NotificationReceipts bool
 }
 
 func loadConfig() (Config, error) {
@@ -57,7 +59,7 @@ func loadConfig() (Config, error) {
 			case "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_KEYS_PATH", "AUTH_SCHEMA", "APP_SCHEMA", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
 			default:
-				if key == "CONTENT_SCHEMA" || key == "MEMBERSHIP_PERIOD" || key == "MERCHANT_FILE" || key == "TRUSTED_COUNTRY_HEADER" || key == "RETURN_ORIGINS" || strings.HasPrefix(key, "MEDIA_") {
+				if key == "NOTIFICATION_RECEIPTS" || key == "CONTENT_SCHEMA" || key == "MEMBERSHIP_PERIOD" || key == "MERCHANT_FILE" || key == "TRUSTED_COUNTRY_HEADER" || key == "RETURN_ORIGINS" || strings.HasPrefix(key, "MEDIA_") {
 					return strings.ToLower(key), value
 				}
 				return "", nil
@@ -115,19 +117,20 @@ func loadConfig() (Config, error) {
 	}
 
 	cfg := Config{
-		Port:          port,
-		DatabaseURL:   databaseURL,
-		AuthIssuer:    authIssuer,
-		AuthAudience:  authAudience,
-		AuthKeysPath:  authKeysPath,
-		PublicURL:     publicURL,
-		ReturnOrigins: returnOrigins,
-		AuthSchema:    strings.TrimSpace(k.String("auth.schema")),
-		AppSchema:     strings.TrimSpace(k.String("app.schema")),
-		BillingSchema: strings.TrimSpace(k.String("billing.schema")),
-		RiverSchema:   strings.TrimSpace(k.String("river.schema")),
-		Merchant:      merchant,
-		ContentSchema: strings.TrimSpace(k.String("content_schema")),
+		NotificationReceipts: k.Bool("notification_receipts"),
+		Port:                 port,
+		DatabaseURL:          databaseURL,
+		AuthIssuer:           authIssuer,
+		AuthAudience:         authAudience,
+		AuthKeysPath:         authKeysPath,
+		PublicURL:            publicURL,
+		ReturnOrigins:        returnOrigins,
+		AuthSchema:           strings.TrimSpace(k.String("auth.schema")),
+		AppSchema:            strings.TrimSpace(k.String("app.schema")),
+		BillingSchema:        strings.TrimSpace(k.String("billing.schema")),
+		RiverSchema:          strings.TrimSpace(k.String("river.schema")),
+		Merchant:             merchant,
+		ContentSchema:        strings.TrimSpace(k.String("content_schema")),
 
 		TrustedCountryHeader: strings.TrimSpace(k.String("trusted_country_header")),
 	}

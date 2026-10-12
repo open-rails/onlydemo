@@ -118,6 +118,7 @@ type server struct {
 	posts    *postAPI
 	media    *mediaService
 	jobs     *river.Client[pgx.Tx]
+	notices  *notifications
 	app      *fiber.App
 	closers  []func()
 }
@@ -151,7 +152,11 @@ func startServer(ctx context.Context, config Config, pool *pgxpool.Pool, opts bi
 	if s.media, err = newMedia(ctx, config, pool, s.auth, s.billing, s.channels, s.posts); err != nil {
 		return nil, fmt.Errorf("initialize media: %w", err)
 	}
-	if s.jobs, err = newJobs(ctx, pool, config, s.auth, s.billing, s.channels, s.posts, s.media); err != nil {
+	if s.notices, err = newNotifications(ctx, config, s.billing, s.media); err != nil {
+		return nil, fmt.Errorf("initialize notifications: %w", err)
+	}
+	s.auth.notices = s.notices
+	if s.jobs, err = newJobs(ctx, pool, config, s.auth, s.billing, s.channels, s.posts, s.media, s.notices); err != nil {
 		return nil, fmt.Errorf("compose application jobs: %w", err)
 	}
 	s.closers = append(s.closers, func() {
@@ -242,7 +247,7 @@ func newApp(ctx context.Context, pool *pgxpool.Pool, authService *appAuth, billi
 	}
 	app.All(contentkitPrefix+"/*", optional, adaptor.HTTPHandlerWithContext(contentkit))
 	// Site admins work on customers' billing through the merchant API.
-	if err := billing.Mount(app, authService.client); err != nil {
+	if err := billing.Mount(app, authService.client.Authenticator()); err != nil {
 		return nil, err
 	}
 

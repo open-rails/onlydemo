@@ -39,7 +39,7 @@ type nmiHarness struct {
 }
 
 // TestNMIBillingEndToEnd: signup, a saved card buys a post and a membership
-// through app-minted checkout sessions, the membership renews, and a declined
+// through app-minted orders, the membership renews, and a declined
 // renewal enters dunning.
 func TestNMIBillingEndToEnd(t *testing.T) {
 	h := newNMIHarness(t)
@@ -175,16 +175,12 @@ func newNMIHarness(t *testing.T) *nmiHarness {
 }
 
 // confirm pays a minted session with the buyer's saved card.
-func (h *nmiHarness) confirm(p peer, session, method string) {
-	path := "/billing/v1/me/checkout-sessions/" + session
-	options, _ := p.call("GET", path, nil, "", 200)["options"].([]any)
-	if len(options) == 0 {
-		h.t.Fatalf("session %s offers no payment option", session)
-	}
-	option := options[0].(map[string]any)["id"]
-	done := p.call("POST", path+"/pay", map[string]any{"option_id": option, "payment_method_id": method}, "", 200)
-	if done["status"] != "succeeded" {
-		h.t.Fatalf("checkout %s: %v", session, done)
+func (h *nmiHarness) confirm(p peer, orderID, method string) {
+	path := "/billing/v1/me/orders/" + orderID
+	order := p.call("GET", path, nil, "", 200)
+	done := p.call("POST", path+"/pay", map[string]any{"expected_total": order["total"], "payment": map[string]any{"payment_method_id": method}}, "", 200)
+	if done["status"] != "completed" {
+		h.t.Fatalf("order %s: %v", orderID, done)
 	}
 }
 
