@@ -1,0 +1,24 @@
+# OnlyDemo's content model for ContentKit (contentkit.Config). Media
+# presets, schemas and secrets are wired in contentkit.go.
+tenant: onlydemo
+content:
+  languages: [en]
+  kinds:
+    # A creator post: one hidden version holding mixed images and videos.
+    post:
+      route: p
+      presentation: post
+      versions: {languages: one, hidden: true}
+      groups: [channel]
+      sort: newest
+  group_kinds:
+    # A creator channel: owned by a user, governed by its AuthKit group
+    # (auth_scope), sold as a membership; cover and avatar image slots.
+    channel:
+      route: c
+      owner: user
+      sellable: true
+      auth_scope: true
+offers:
+  currency: USD
+  minimum: {content: "0.50", group: "1.00"}

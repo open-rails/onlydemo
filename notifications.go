@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/open-rails/contentkit/notification"
+	"github.com/open-rails/contentkit"
 	"github.com/open-rails/helpers/notify"
 	riverkit "github.com/open-rails/helpers/river"
 	"github.com/open-rails/openrails"
@@ -16,30 +16,29 @@ import (
 )
 
 // OnlyDemo uses the same verified AuthKit subject as its billing customer ID.
-// Its independent consumer stores local receipts before acknowledging facts.
+// Its independent consumer publishes into ContentKit's inbox before
+// acknowledging facts.
 type notifications struct {
 	source          *openrails.NotificationConsumer
-	store           *notification.Store
+	content         *contentkit.Engine
 	auth            *appAuth
 	merchant        billing.MerchantID
 	includeOptional bool
 }
 
-func newNotifications(ctx context.Context, cfg Config, billing *billingService, media *mediaService) (*notifications, error) {
+func newNotifications(ctx context.Context, cfg Config, billing *billingService, auth *appAuth, content *contentkit.Engine) (*notifications, error) {
 	source, err := billing.client.NotificationEvents("onlydemo-inbox")
-	if err != nil {
-		return nil, err
-	}
-	store, err := notification.New(notification.Options{Pool: media.pool, Schema: contentSchema(cfg), Tenant: tenant})
 	if err != nil {
 		return nil, err
 	}
 	if err = source.Register(ctx); err != nil {
 		return nil, err
 	}
-	return &notifications{source: source, store: store, auth: media.auth, merchant: billing.client.MerchantID(), includeOptional: cfg.NotificationReceipts}, nil
+	return &notifications{source: source, content: content, auth: auth, merchant: billing.client.MerchantID(), includeOptional: cfg.NotificationReceipts}, nil
 }
 
+// importEvents publishes one pending page in one ContentKit transaction and
+// acknowledges it; skipped events are acknowledged too.
 func (n *notifications) importEvents(ctx context.Context) error {
 	events, err := n.source.Pending(ctx, 100)
 	if err != nil {
@@ -55,34 +54,32 @@ func (n *notifications) importEvents(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	ack := make([]billing.NotificationEventRef, 0, len(events))
-	var failures []error
+	var ack []billing.NotificationEventRef
+	var inputs []notify.Input
 	for _, event := range events {
 		if event.MerchantID != n.merchant {
-			failures = append(failures, errors.New("notification source returned another merchant"))
-			continue
+			return errors.New("notification source returned another merchant")
 		}
-		ref := billing.NotificationEventRef{MerchantID: event.MerchantID, ID: event.ID}
+		ack = append(ack, billing.NotificationEventRef{MerchantID: event.MerchantID, ID: event.ID})
 		user, exists := users[event.CustomerID.String()]
 		if (event.Optional && !n.includeOptional) || !exists || user.DeletedAt != nil {
-			ack = append(ack, ref)
 			continue
 		}
-		_, err := n.store.Publish(ctx, notify.Input{
+		inputs = append(inputs, notify.Input{
 			Recipient: notify.Recipient{Audience: notify.AudienceUser, ID: event.CustomerID.String()},
 			Origin:    notify.Origin{System: "openrails:onlydemo", Scope: event.MerchantID.String(), ID: event.ID.String(), Subject: event.CustomerID.String()},
 			Kind:      event.EventType, Data: event.Data, CreatedAt: event.CreatedAt, ActionRequested: event.ActionRequested,
 		})
-		if err != nil && !errors.Is(err, notify.ErrRecipientErased) {
-			failures = append(failures, fmt.Errorf("import billing notice %s: %w", event.ID, err))
-			continue
+	}
+	if len(inputs) > 0 {
+		if _, err := n.content.Client().PublishNotifications(ctx, inputs); err != nil {
+			return fmt.Errorf("publish billing notices: %w", err)
 		}
-		ack = append(ack, ref)
 	}
-	if len(ack) > 0 {
-		failures = append(failures, n.source.Acknowledge(ctx, ack))
+	if len(ack) == 0 {
+		return nil
 	}
-	return errors.Join(failures...)
+	return n.source.Acknowledge(ctx, ack)
 }
 
 type notificationPollArgs struct{}

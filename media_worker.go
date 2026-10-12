@@ -5,14 +5,13 @@ import (
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/open-rails/contentkit/media"
 	"github.com/open-rails/contentkit/media/worker"
 )
 
-// runMediaWorker runs ContentKit's media worker with this app's registry until
-// ctx ends: upload placement, image renditions and video encodes. Readiness
-// and purges go back to the app's River queue. MEDIA_WORKER_* tune it
-// (worker.Config.TuningFromEnv).
+// runMediaWorker runs ContentKit's media worker with the engine's registry
+// until ctx ends: upload placement, image renditions and video encodes.
+// Readiness and purges go back to the host fleet's River schema, where the
+// engine's media jobs run. MEDIA_WORKER_* tune it (worker.Config.TuningFromEnv).
 func runMediaWorker(ctx context.Context) error {
 	cfg, pool, err := openDatabase(ctx)
 	if err != nil {
@@ -27,7 +26,7 @@ func runMediaWorker(ctx context.Context) error {
 }
 
 func newMediaWorker(ctx context.Context, cfg Config, pool *pgxpool.Pool, tune func(*worker.Config) error) (*worker.Worker, error) {
-	kinds, err := newRegistry(cfg.Media, media.Hooks{Failed: mediaFailed})
+	kinds, err := workerRegistry(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -39,6 +38,6 @@ func newMediaWorker(ctx context.Context, cfg Config, pool *pgxpool.Pool, tune fu
 	if err := tune(&wc); err != nil {
 		return nil, err
 	}
-	wc.Schema = mediaWorkerSchema
+	wc.Schema = mediaWorkerSchema(cfg)
 	return worker.New(ctx, wc)
 }

@@ -9,8 +9,8 @@ require (
 	github.com/knadh/koanf/providers/env/v2 v2.0.1
 	github.com/knadh/koanf/v2 v2.3.6
 	github.com/open-rails/authkit v1.24.0
-	github.com/open-rails/migratekit v1.10.0
-	github.com/open-rails/openrails v0.244.0
+	github.com/open-rails/migratekit v1.11.1
+	github.com/open-rails/openrails v0.248.0
 	github.com/riverqueue/river v0.47.0
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.47.0 // indirect
 )
@@ -20,12 +20,12 @@ require (
 	github.com/johannesboyne/gofakes3 v1.2.0
 	github.com/joho/godotenv v1.5.1
 	github.com/jonboulle/clockwork v0.5.0
-	github.com/open-rails/contentkit v0.75.0
-	github.com/open-rails/contentkit/adapters/openrails v0.2.0
-	github.com/open-rails/helpers v1.11.0
+	github.com/open-rails/contentkit v0.78.1-0.20261012220233-5dc44acf32d3
+	github.com/open-rails/contentkit/adapters/openrails v0.2.1-0.20261012220233-5dc44acf32d3
+	github.com/open-rails/helpers v1.12.0
 	github.com/riverqueue/river/rivertype v0.47.0
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/sync v0.23.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -150,11 +150,11 @@ require (
 	golang.org/x/image v0.46.0 // indirect
 	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/oauth2 v0.37.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/term v0.46.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.49.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

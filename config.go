@@ -1,16 +1,18 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"regexp"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/knadh/koanf/providers/env/v2"
 	"github.com/knadh/koanf/v2"
+	"github.com/open-rails/contentkit/media"
+	mediaS3 "github.com/open-rails/contentkit/media/s3"
 	"github.com/open-rails/openrails"
 )
 
@@ -35,8 +37,6 @@ type Config struct {
 	TrustedCountryHeader string
 	ContentSchema        string
 	Media                mediaConfig
-	// MembershipHours is each new channel membership price's renewal period.
-	MembershipHours int
 	// NotificationReceipts opts in to future optional successful-charge notices.
 	NotificationReceipts bool
 }
@@ -59,7 +59,7 @@ func loadConfig() (Config, error) {
 			case "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_KEYS_PATH", "AUTH_SCHEMA", "APP_SCHEMA", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
 			default:
-				if key == "NOTIFICATION_RECEIPTS" || key == "CONTENT_SCHEMA" || key == "MEMBERSHIP_PERIOD" || key == "MERCHANT_FILE" || key == "TRUSTED_COUNTRY_HEADER" || key == "RETURN_ORIGINS" || strings.HasPrefix(key, "MEDIA_") {
+				if key == "NOTIFICATION_RECEIPTS" || key == "CONTENT_SCHEMA" || key == "MERCHANT_FILE" || key == "TRUSTED_COUNTRY_HEADER" || key == "RETURN_ORIGINS" || strings.HasPrefix(key, "MEDIA_") {
 					return strings.ToLower(key), value
 				}
 				return "", nil
@@ -134,9 +134,6 @@ func loadConfig() (Config, error) {
 
 		TrustedCountryHeader: strings.TrimSpace(k.String("trusted_country_header")),
 	}
-	if cfg.MembershipHours, err = parseMembershipPeriod(k.String("membership_period")); err != nil {
-		return Config{}, err
-	}
 	if cfg.Media, err = loadMediaConfig(k.String); err != nil {
 		return Config{}, err
 	}
@@ -169,18 +166,6 @@ func parseReturnOrigins(publicURL, raw string) ([]string, error) {
 	return origins, nil
 }
 
-// parseMembershipPeriod defaults to 720h; OpenRails periods are whole hours.
-func parseMembershipPeriod(raw string) (int, error) {
-	if raw = strings.TrimSpace(raw); raw == "" {
-		return 720, nil
-	}
-	d, err := time.ParseDuration(raw)
-	if err != nil || d < time.Hour || d%time.Hour != 0 {
-		return 0, fmt.Errorf("MEMBERSHIP_PERIOD must be whole hours of at least 1h, such as 720h")
-	}
-	return int(d / time.Hour), nil
-}
-
 // Libraries own distinct relation names and can share a schema. Validate
 // identifiers before any initializer runs; never change the host search_path.
 var databaseSchemaPattern = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
@@ -206,5 +191,61 @@ func contentSchema(cfg Config) string {
 	if schema := strings.TrimSpace(cfg.ContentSchema); schema != "" {
 		return schema
 	}
-	return "content"
+	return "contentkit"
+}
+
+type mediaConfig struct {
+	S3Endpoint       string
+	S3PublicEndpoint string
+	S3Bucket         string
+	S3Region         string
+	S3AccessKeyID    string
+	S3SecretKey      string
+	URL              string // media-gateway origin
+	Delivery         media.DeliveryMode
+	CookieDomain     string
+	TokenKey         string
+	TokenKeyPrevious string
+}
+
+func loadMediaConfig(get func(string) string) (mediaConfig, error) {
+	or := func(key, def string) string {
+		if v := strings.TrimSpace(get(key)); v != "" {
+			return v
+		}
+		return def
+	}
+	c := mediaConfig{
+		S3Endpoint:       or("media_s3_endpoint", ""),
+		S3Bucket:         or("media_s3_bucket", "onlydemo-media"),
+		S3Region:         or("media_s3_region", "us-east-1"),
+		S3AccessKeyID:    or("media_s3_access_key_id", ""),
+		S3SecretKey:      or("media_s3_secret_access_key", ""),
+		URL:              strings.TrimRight(or("media_url", ""), "/"),
+		Delivery:         media.DeliveryMode(or("media_delivery", string(media.DeliverCookie))),
+		CookieDomain:     or("media_cookie_domain", ""),
+		TokenKey:         or("media_token_key", ""),
+		TokenKeyPrevious: or("media_token_key_previous", ""),
+	}
+	c.S3PublicEndpoint = or("media_s3_public_endpoint", c.S3Endpoint)
+	for name, v := range map[string]string{"MEDIA_S3_ENDPOINT": c.S3Endpoint, "MEDIA_S3_ACCESS_KEY_ID": c.S3AccessKeyID,
+		"MEDIA_S3_SECRET_ACCESS_KEY": c.S3SecretKey, "MEDIA_URL": c.URL, "MEDIA_TOKEN_KEY": c.TokenKey} {
+		if v == "" {
+			return c, fmt.Errorf("%s is required", name)
+		}
+	}
+	return c, nil
+}
+
+// openMediaStore opens the bucket and checks it answers.
+func openMediaStore(ctx context.Context, mc mediaConfig) (*mediaS3.Store, error) {
+	store, err := mediaS3.New(mediaS3.Config{Bucket: mc.S3Bucket, Region: mc.S3Region, Endpoint: mc.S3Endpoint, PublicEndpoint: mc.S3PublicEndpoint,
+		AccessKeyID: mc.S3AccessKeyID, SecretAccessKey: mc.S3SecretKey, UsePathStyle: true})
+	if err != nil {
+		return nil, err
+	}
+	if err := store.Check(ctx, "_probe/"); err != nil {
+		return nil, fmt.Errorf("media bucket %s: %w", mc.S3Bucket, err)
+	}
+	return store, nil
 }

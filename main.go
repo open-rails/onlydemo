@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -12,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
 	authkitfiber "github.com/open-rails/authkit/adapters/fiber"
+	"github.com/open-rails/contentkit"
 	"github.com/open-rails/contentkit/access"
 	"github.com/riverqueue/river"
 )
@@ -26,7 +28,6 @@ func openDatabase(ctx context.Context) (Config, *pgxpool.Pool, error) {
 	if err != nil {
 		return Config{}, nil, fmt.Errorf("parse database URL: %w", err)
 	}
-	poolConfig.ConnConfig.Tracer = queryTracer{}
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		return Config{}, nil, fmt.Errorf("create database pool: %w", err)
@@ -46,12 +47,18 @@ func openDatabase(ctx context.Context) (Config, *pgxpool.Pool, error) {
 	return config, pool, nil
 }
 
+// migrate creates or upgrades every schema: each library's New migrates its own.
 func migrate(ctx context.Context) error {
-	_, pool, err := openDatabase(ctx)
+	config, pool, err := openDatabase(ctx)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
+	s, err := compose(ctx, config, pool, billingOptions{})
+	if err != nil {
+		return err
+	}
+	s.Close()
 	return nil
 }
 
@@ -114,9 +121,11 @@ func serve(ctx context.Context) error {
 type server struct {
 	auth     *appAuth
 	billing  *billingService
+	content  *contentkit.Engine
+	ck       *ckAPI
+	ckRoutes http.Handler
 	channels *channelAPI
 	posts    *postAPI
-	media    *mediaService
 	jobs     *river.Client[pgx.Tx]
 	notices  *notifications
 	app      *fiber.App
@@ -130,7 +139,9 @@ func (s *server) Close() {
 	}
 }
 
-func startServer(ctx context.Context, config Config, pool *pgxpool.Pool, opts billingOptions) (_ *server, err error) {
+// compose builds the libraries, each migrating its schema in New, and the
+// app's services over them.
+func compose(ctx context.Context, config Config, pool *pgxpool.Pool, opts billingOptions) (_ *server, err error) {
 	s := &server{}
 	defer func() {
 		if err != nil {
@@ -145,18 +156,45 @@ func startServer(ctx context.Context, config Config, pool *pgxpool.Pool, opts bi
 		return nil, fmt.Errorf("initialize OpenRails: %w", err)
 	}
 	s.closers = append(s.closers, func() { _ = s.billing.Close(context.Background()) })
-	s.channels = newChannels(pool, s.auth, s.billing, config)
-	if s.posts, err = newPosts(s.channels, config); err != nil {
+	ckConfig, err := contentKitConfig(config)
+	if err != nil {
 		return nil, err
 	}
-	if s.media, err = newMedia(ctx, config, pool, s.auth, s.billing, s.channels, s.posts); err != nil {
-		return nil, fmt.Errorf("initialize media: %w", err)
+	gate, err := newGate(ckConfig, s.billing)
+	if err != nil {
+		return nil, err
 	}
-	if s.notices, err = newNotifications(ctx, config, s.billing, s.media); err != nil {
+	s.posts = newPosts(pool, s.auth, gate, config)
+	if s.content, err = newContentKit(ctx, config, pool, s.auth, s.billing, s.posts); err != nil {
+		return nil, fmt.Errorf("initialize ContentKit: %w", err)
+	}
+	s.closers = append(s.closers, func() { _ = s.content.Close(context.Background()) })
+	s.auth.content = s.content
+	routes, err := s.content.Routes(contentkit.Routes{Prefix: contentkitPrefix, Groups: contentkit.AllRoutes})
+	if err != nil {
+		return nil, err
+	}
+	s.ckRoutes = routes[0].Handler
+	s.ck = newCKAPI(s.ckRoutes)
+	s.posts.ck = s.ck
+	s.channels = &channelAPI{auth: s.auth, ck: s.ck}
+	return s, nil
+}
+
+func startServer(ctx context.Context, config Config, pool *pgxpool.Pool, opts billingOptions) (_ *server, err error) {
+	s, err := compose(ctx, config, pool, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			s.Close()
+		}
+	}()
+	if s.notices, err = newNotifications(ctx, config, s.billing, s.auth, s.content); err != nil {
 		return nil, fmt.Errorf("initialize notifications: %w", err)
 	}
-	s.auth.notices = s.notices
-	if s.jobs, err = newJobs(ctx, pool, config, s.auth, s.billing, s.channels, s.posts, s.media, s.notices); err != nil {
+	if s.jobs, err = newJobs(ctx, pool, config, s.auth, s.billing, s.content, s.notices); err != nil {
 		return nil, fmt.Errorf("compose application jobs: %w", err)
 	}
 	s.closers = append(s.closers, func() {
@@ -172,21 +210,23 @@ func startServer(ctx context.Context, config Config, pool *pgxpool.Pool, opts bi
 	if err = s.billing.Start(ctx, s.jobs); err != nil {
 		return nil, fmt.Errorf("start OpenRails: %w", err)
 	}
+	if err = s.content.Start(ctx, contentkit.WithRiverClient(s.jobs)); err != nil {
+		return nil, fmt.Errorf("start ContentKit: %w", err)
+	}
 	if err = s.billing.requireReady(ctx); err != nil {
 		return nil, err
 	}
 	if err = s.jobs.Start(ctx); err != nil {
 		return nil, fmt.Errorf("start application jobs: %w", err)
 	}
-	if s.app, err = newApp(ctx, pool, s.auth, s.billing, config, s.channels, s.posts, s.media); err != nil {
+	if s.app, err = newApp(pool, s, config); err != nil {
 		return nil, fmt.Errorf("create application: %w", err)
 	}
 	return s, nil
 }
 
-func newApp(ctx context.Context, pool *pgxpool.Pool, authService *appAuth, billing *billingService, cfg Config, channels *channelAPI, posts *postAPI, media *mediaService) (*fiber.App, error) {
+func newApp(pool *pgxpool.Pool, s *server, cfg Config) (*fiber.App, error) {
 	app := fiber.New()
-	app.Use(countQueries)
 	// One entitlement read per request: the paywall gate memoizes it.
 	app.Use(func(c fiber.Ctx) error {
 		c.SetContext(access.WithMemo(c.Context()))
@@ -199,62 +239,36 @@ func newApp(ctx context.Context, pool *pgxpool.Pool, authService *appAuth, billi
 		pingContext, cancel := context.WithTimeout(c.Context(), 2*time.Second)
 		defer cancel()
 		if err := pool.Ping(pingContext); err != nil {
-			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-				"status": "unavailable",
-				"error":  "database is unavailable",
-			})
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"status": "unavailable", "error": "database is unavailable"})
 		}
-		if err := billing.Ready(pingContext); err != nil {
+		if err := s.billing.Ready(pingContext); err != nil {
 			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"status": "unavailable", "error": "billing workers are unavailable"})
 		}
-
-		return c.JSON(fiber.Map{
-			"status":   "ok",
-			"database": "ok",
-		})
+		if err := s.content.Ready(pingContext); err != nil {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"status": "unavailable", "error": "content workers are unavailable"})
+		}
+		return c.JSON(fiber.Map{"status": "ok", "database": "ok"})
 	})
 
-	optional := authkitfiber.Optional(authService.client)
-	required := authkitfiber.Required(authService.client)
-	channels.mount(app, required)
-	app.Get("/api/v1/channels", optional, channels.list)
-	app.Get("/api/v1/channels/:id", optional, channels.publicGet)
-	app.Put("/api/v1/channels/:id/membership", required, channels.setMembership)
-	app.Post("/api/v1/channels/:id/join", required, channels.join)
-	app.Post("/api/v1/channels/:id/leave", required, channels.leave)
-	app.Post("/api/v1/channels/:id/subscribe", required, func(c fiber.Ctx) error { return channels.subscribe(c, returnOrigin(c, cfg.PublicURL)) })
-	app.Get("/api/v1/channels/:id/members", required, channels.members)
-	app.Post("/api/v1/channels/:id/members", required, channels.members)
-	app.Delete("/api/v1/channels/:id/members/:user_id", required, channels.members)
-	app.Get("/api/v1/me", required, posts.me)
-	app.Get("/api/v1/me/channels", required, channels.mine)
+	optional := authkitfiber.Optional(s.auth.client)
+	required := authkitfiber.Required(s.auth.client)
+	s.channels.mount(app, required)
 	app.Get("/api/v1/config", publicConfiguration(cfg.TrustedCountryHeader))
-	app.Get("/api/v1/posts", optional, posts.list)
-	app.Post("/api/v1/posts", required, posts.create)
-	app.Get("/api/v1/posts/:code", optional, posts.get)
-	app.Patch("/api/v1/posts/:code", required, posts.update)
-	app.Delete("/api/v1/posts/:code", required, posts.delete)
-	app.Post("/api/v1/posts/:code/checkout", required, func(c fiber.Ctx) error {
-		return posts.checkout(c, returnOrigin(c, cfg.PublicURL))
-	})
-	urls, err := newURLRouter(posts, cfg)
-	if err != nil {
-		return nil, err
-	}
-	contentkit, err := media.api(ctx, cfg, urls)
-	if err != nil {
-		return nil, err
-	}
-	app.All(contentkitPrefix+"/*", optional, adaptor.HTTPHandlerWithContext(contentkit))
+	app.Get("/api/v1/posts", optional, s.posts.list)
+	app.Post("/api/v1/posts", required, s.posts.create)
+	app.Get("/api/v1/posts/:id", optional, s.posts.get)
+	app.Patch("/api/v1/posts/:id", required, s.posts.update)
+	app.Delete("/api/v1/posts/:id", required, s.posts.delete)
+	// ContentKit authenticates its own requests through AuthKit.
+	app.All(contentkitPrefix+"/v1/*", adaptor.HTTPHandler(s.ckRoutes))
 	// Site admins work on customers' billing through the merchant API.
-	if err := billing.Mount(app, authService.client.Authenticator()); err != nil {
+	if err := s.billing.Mount(app, s.auth.client.Authenticator()); err != nil {
 		return nil, err
 	}
-
 	// Register AuthKit endpoints on Fiber so they appear in its route table.
-	if err := authkitfiber.Mount(app, authService.client); err != nil {
+	if err := authkitfiber.Mount(app, s.auth.client); err != nil {
 		return nil, err
 	}
-	mountFrontend(app, urls, cfg.PublicURL, posts)
+	mountFrontend(app)
 	return app, nil
 }

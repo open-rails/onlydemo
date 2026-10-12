@@ -16,15 +16,21 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
+	"github.com/open-rails/contentkit"
 	"github.com/open-rails/contentkit/access"
-	"github.com/open-rails/helpers/notify"
+	"github.com/open-rails/contentkit/signal"
 	"github.com/open-rails/openrails/billing"
 )
 
 var (
-	rbac = demoRoles()
+	rbac = authkit.NewRoles()
 
-	// A channel is a permission group: its owners manage it, its editors publish.
+	// ContentKit's staff permissions, declared in the root scope.
+	contentkitPerms = rbac.Root.Declare(access.Names(access.Permissions()...)...)
+
+	// A channel is a ContentKit group whose AuthKit group (its auth_scope)
+	// holds these: owners hold all of them, editors publish posts.
+	// settings:manage and media:write are what ContentKit checks in the scope.
 	channelPersona          = rbac.Persona("channel")
 	channelReadPermission   = channelPersona.Permission("posts", "read")
 	channelCreatePermission = channelPersona.Permission("posts", "create")
@@ -32,39 +38,36 @@ var (
 	channelRemovePermission = channelPersona.Permission("posts", "delete")
 	channelSettingsRead     = channelPersona.Permission("settings", "read")
 	channelSettingsManage   = channelPersona.Permission("settings", "manage")
+	channelMediaWrite       = channelPersona.Permission("media", "write")
 	channelOwnerRole        = channelPersona.Owner
 	channelEditorRole       = channelPersona.Role("editor", channelReadPermission, channelCreatePermission, channelEditPermission, channelRemovePermission, channelSettingsRead, channelPersona.Members.Read)
 
-	// Site admins moderate every post and run billing for customers.
+	// Site admins moderate every post, group and offer, and run billing for
+	// customers.
 	postReadPermission   = rbac.Root.Permission("posts", "read")
 	postEditPermission   = rbac.Root.Permission("posts", "edit")
 	postDeletePermission = rbac.Root.Permission("posts", "delete")
 	customersRead        = rbac.Root.Permission(billing.RootCustomerRead.Resource(), billing.RootCustomerRead.Action())
 	customersUpdate      = rbac.Root.Permission(billing.RootCustomerManage.Resource(), billing.RootCustomerManage.Action())
-	adminRole            = rbac.Root.Role("admin", postReadPermission, postEditPermission, postDeletePermission, customersRead, customersUpdate)
+	adminRole            = rbac.Root.Role("admin", append([]iam.Grant{postReadPermission, postEditPermission, postDeletePermission, customersRead, customersUpdate},
+		staffGrants(access.GroupsWrite, access.OffersWrite, access.CommentsModerate, access.CommentsBan, access.ModerationReview)...)...)
 )
 
-func demoRoles() *authkit.Roles {
-	roles := authkit.NewRoles()
-	// Declare ContentKit names without granting them to the demo admin or
-	// channel editor. AuthKit's built-in root Owner retains its native authority.
-	roles.Root.Declare(access.Names(access.Permissions()...)...)
-	return roles
+// staffGrants are the declared ContentKit permissions among ps.
+func staffGrants(ps ...access.Permission) []iam.Grant {
+	var out []iam.Grant
+	for _, p := range contentkitPerms {
+		if slices.Contains(ps, access.Permission(p.String())) {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 type appAuth struct {
 	client  *authkit.Client
 	billing *billingService
-	media   *mediaService
-	notices *notifications
-	// observe sees each AuthKit read a request makes (tests count them).
-	observe func(context.Context)
-}
-
-func (a *appAuth) read(ctx context.Context) {
-	if a.observe != nil {
-		a.observe(ctx)
-	}
+	content *contentkit.Engine
 }
 
 func (a *appAuth) Close() {
@@ -196,21 +199,20 @@ func (a *appAuth) cancelDeletedAccountBilling(ctx context.Context, userID string
 	}
 }
 
-// A purge also erases the account's avatar folder.
+// A purge also erases the account from ContentKit; AuthKit retries until
+// every plane is erased.
 func (a *appAuth) purgeDeletedAccount(ctx context.Context, deletion iam.UserDeletion) error {
 	if err := a.cancelDeletedAccountBilling(ctx, deletion.UserID); err != nil {
 		return err
 	}
-	if a.media == nil {
-		return errors.New("media lifecycle has not been composed")
+	if a.content == nil {
+		return errors.New("content lifecycle has not been composed")
 	}
-	if a.notices == nil {
-		return errors.New("notification lifecycle has not been composed")
+	report, err := a.content.EraseSubjects(ctx, []signal.Subject{{UserID: deletion.UserID}})
+	if err == nil && !report.Complete() {
+		err = fmt.Errorf("content erasure pending: %v", report.Remaining)
 	}
-	if err := a.notices.store.EraseRecipient(ctx, notify.Recipient{Audience: notify.AudienceUser, ID: deletion.UserID}); err != nil {
-		return err
-	}
-	return a.media.eraseUser(ctx, deletion.UserID)
+	return err
 }
 
 // grantAdmin is only called by the explicit, one-off admin:grant command.
@@ -243,7 +245,6 @@ func (a *appAuth) can(ctx context.Context, user string, group iam.GroupRef, perm
 	if user == "" {
 		return false, nil
 	}
-	a.read(ctx)
 	return a.client.Can(ctx, iam.UserIdentity(user), group, perm)
 }
 
@@ -258,7 +259,6 @@ func (a *appAuth) effective(ctx context.Context, user string, channels []string)
 	for _, id := range channels {
 		refs = append(refs, iam.GroupByID(id))
 	}
-	a.read(ctx)
 	perms, err := a.client.EffectivePermissions(ctx, iam.UserIdentity(user), refs)
 	if err != nil {
 		return nil, err
@@ -278,7 +278,6 @@ func (a *appAuth) effective(ctx context.Context, user string, channels []string)
 }
 
 func (a *appAuth) user(ctx context.Context, id string) (iam.User, error) {
-	a.read(ctx)
 	user, err := a.client.User(ctx, iam.UserByID(id))
 	if err != nil {
 		return iam.User{}, fmt.Errorf("read account %s: %w", id, err)
@@ -288,33 +287,10 @@ func (a *appAuth) user(ctx context.Context, id string) (iam.User, error) {
 
 // live reports an account that holds authority: not deleted, not banned.
 func (a *appAuth) live(ctx context.Context, user string) (bool, error) {
-	a.read(ctx)
 	users, err := a.client.Users(ctx, []string{user})
 	if err != nil {
 		return false, err
 	}
 	u, ok := users[user]
 	return ok && u.DeletedAt == nil && u.Ban == nil, nil
-}
-
-// channels lists the channels user holds a role in.
-func (a *appAuth) channels(ctx context.Context, user string) ([]string, error) {
-	ids := []string{}
-	page := iam.PageRequest{Limit: 100}
-	for {
-		a.read(ctx)
-		memberships, err := a.client.ListMemberships(ctx, iam.UserSubject(user), page)
-		if err != nil {
-			return nil, err
-		}
-		for _, m := range memberships.Items {
-			if m.Group.Persona == channelPersona.Persona {
-				ids = append(ids, m.Group.ID)
-			}
-		}
-		if memberships.Next == "" {
-			return ids, nil
-		}
-		page.Cursor = memberships.Next
-	}
 }
