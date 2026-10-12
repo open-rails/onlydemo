@@ -10,6 +10,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { OrderCheckout } from "@openrails/billing-ui";
 import type { Order } from "@openrails/billing-ui/client";
 import { SignInPanel } from "@openrails/auth-ui";
+import { sessionIdentity, useSession } from "@openrails/auth-ui/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Tick02Icon } from "@hugeicons/core-free-icons";
 import { request, sessionKey } from "../api";
@@ -17,6 +18,7 @@ import { AccountBillingScope } from "../billing";
 import { useAuth } from "../session";
 import type { Offer } from "../models";
 import { money } from "../format";
+import { observePurchase, purchaseKey } from "../purchase-key";
 import { ErrorState, Loading } from "./states";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 
@@ -96,26 +98,30 @@ function PayModal({
   onClose: () => void;
   onPaid: () => void;
 }) {
-  const { user } = useAuth();
-  const [idempotencyKey] = useState(() => crypto.randomUUID());
+  const session = useSession();
+  const viewer = session.status === "authenticated" ? session.userId : null;
   const path =
     target.kind === "post"
       ? `/api/v1/posts/${target.id}/checkout`
       : `/api/v1/channels/${target.id}/subscribe`;
   const order = useQuery({
-    queryKey: ["purchase-order", sessionKey(), path, target.offer.price_id, idempotencyKey],
-    queryFn: () =>
-      request<Order>(path, {
+    queryKey: ["purchase-order", sessionIdentity(session), path, target.offer.price_id],
+    queryFn: async () => {
+      const idempotencyKey = purchaseKey(viewer!, target.offer.price_id);
+      const value = await request<Order>(path, {
         method: "POST",
         headers: { "Idempotency-Key": idempotencyKey },
         body: JSON.stringify({ price_id: target.offer.price_id }),
-      }),
-    enabled: !!user,
+      });
+      observePurchase(viewer!, target.offer.price_id, idempotencyKey, value.status);
+      return { value, idempotencyKey };
+    },
+    enabled: viewer !== null,
     staleTime: Infinity,
     gcTime: 0,
     retry: false,
   });
-  const gate = !user ? (
+  const gate = session.status === "loading" ? <Loading /> : !viewer ? (
     <SignInPanel
       initialTab="login"
       title="Sign in to continue"
@@ -135,9 +141,12 @@ function PayModal({
           <DialogDescription>{target.merchant} · Sandbox payments only</DialogDescription>
         </DialogHeader>
         {gate ?? (order.data && <OrderCheckout
-          orderId={order.data.id}
+          orderId={order.data.value.id}
           returnUrl={window.location.href}
-          onSettled={(paid) => { if (paid.status === "complete") onPaid(); }}
+          onSettled={(paid) => {
+            observePurchase(viewer!, target.offer.price_id, order.data.idempotencyKey, paid.status);
+            if (paid.status === "complete") onPaid();
+          }}
         />)}
       </DialogContent>
     </Dialog>
