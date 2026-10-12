@@ -160,7 +160,7 @@ func smoke() error {
 	if err != nil || len(psps.Items) != 1 {
 		return fmt.Errorf("stripe PSP: %v %w", psps, err)
 	}
-	setup, err := buyer.call("POST", "/billing/v1/me/payment-methods", buyerToken, map[string]any{"psp_id": psps.Items[0].ID}, "manual-card-setup", 201)
+	setup, err := buyer.call("POST", "/billing/v1/me/payment-methods", buyerToken, map[string]any{"psp_id": psps.Items[0].ID, "token": "pm_smoke"}, "manual-card-setup", 201)
 	if err != nil {
 		return err
 	}
@@ -707,7 +707,7 @@ func (s *smokeStripe) RoundTrip(req *http.Request) (*http.Response, error) {
 		s.customers++
 		data = map[string]any{"id": fmt.Sprintf("cus_smoke%d", s.customers), "object": "customer"}
 	case "POST /v1/setup_intents":
-		s.setup = map[string]any{"id": "seti_smoke", "status": "requires_payment_method", "customer": req.PostForm.Get("customer"), "payment_method": "pm_smoke", "usage": "off_session", "payment_method_types": []string{"card"}, "livemode": false, "metadata": smokeMetadata(req.PostForm), "client_secret": "seti_smoke_secret_fake"}
+		s.setup = map[string]any{"id": "seti_smoke", "status": "succeeded", "customer": req.PostForm.Get("customer"), "payment_method": "pm_smoke", "usage": "off_session", "payment_method_types": []string{"card"}, "livemode": false, "metadata": smokeMetadata(req.PostForm), "client_secret": "seti_smoke_secret_fake"}
 		data = s.setup
 	case "GET /v1/setup_intents/seti_smoke":
 		s.setup["status"] = "succeeded"
