@@ -20,8 +20,8 @@ require (
 	github.com/johannesboyne/gofakes3 v1.2.0
 	github.com/joho/godotenv v1.5.1
 	github.com/jonboulle/clockwork v0.5.0
-	github.com/open-rails/contentkit v0.78.1-0.20261012220233-5dc44acf32d3
-	github.com/open-rails/contentkit/adapters/openrails v0.2.1-0.20261012220233-5dc44acf32d3
+	github.com/open-rails/contentkit v0.78.1-0.20261012222403-a638bbb93f0b
+	github.com/open-rails/contentkit/adapters/openrails v0.2.1-0.20261012222403-a638bbb93f0b
 	github.com/open-rails/helpers v1.12.0
 	github.com/riverqueue/river/rivertype v0.47.0
 	github.com/spf13/cobra v1.10.2

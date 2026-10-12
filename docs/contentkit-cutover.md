@@ -7,7 +7,7 @@ ContentKit's catalog and discovery land on `next/117`.
 
 ## Phase A: done
 
-ContentKit `next/117` runs embedded (`contentkit.go`): its own schema
+ContentKit `next/117` (pinned at `a638bbb`) runs embedded (`contentkit.go`): its own schema
 (`CONTENT_SCHEMA`, default `contentkit`), its jobs on the host River fleet
 (`RiverJobs`, `WithRiverClient`), billing through `adapters/openrails.Billing`,
 and its routes at `/contentkit/v1`. `contentkit.yaml` is the content model.
@@ -94,7 +94,7 @@ Frontend (`frontend/src`, on contentkit-ui):
 
 ## Gaps
 
-Status as of `next/117` `5dc44ac`.
+Status as of `next/117` `a638bbb` (engine, groups, access, offers, version media, discovery).
 
 1. Creators can't create user-owned groups (`POST /v1/groups` is staff-only). Lane 120-user-groups.
 2. Group PATCH/DELETE/restore and offers admit only staff and `owner_user_id`, not `{kind}:settings:manage` holders. Lane 120-user-groups.

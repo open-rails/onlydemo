@@ -239,6 +239,9 @@ func (p peer) do(method, path string, body any, key string) (*http.Response, []b
 	if p.token != "" {
 		req.Header.Set("Authorization", "Bearer "+p.token)
 	}
+	if key == "" && method == "POST" && strings.HasSuffix(path, "/pay") {
+		key = uuid.NewString()
+	}
 	if key != "" {
 		req.Header.Set("Idempotency-Key", key)
 	}
