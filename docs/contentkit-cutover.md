@@ -86,7 +86,7 @@ calls those routes directly. Replace it with the package's once they land.
 - [ ] Locked bodies (lane 122-owner-group): the e2e asserts locked → no `body`, buyer → `body`.
 - [ ] Group payloads carry offers, viewer decision and avatars (gap 4); then drop `groupKey`, the storefront and entitlement reads in `content.ts`.
 - [ ] contentkit-ui stage 2: discovery, offers and content components replace `content.ts`.
-- [ ] Re-run `TestChannelsOnContentKit`, `TestNMIBillingEndToEnd`, `seed` and `smoke` once those land.
+- [ ] Re-run `TestChannelsOnContentKit`, `TestNMIBillingEndToEnd` and `TestSmoke` (smoke on a real server, creators without admin) once those land.
 
 ## Gaps
 
