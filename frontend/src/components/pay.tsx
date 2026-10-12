@@ -3,22 +3,22 @@ import {
   useCallback,
   useContext,
   useEffect,
-  useMemo,
   useState,
   type ReactNode,
 } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckoutModal, type CheckoutSource } from "@openrails/billing-ui";
-import type { CheckoutSessionLink } from "@openrails/billing-ui/client";
+import { OrderCheckout } from "@openrails/billing-ui";
+import type { Order } from "@openrails/billing-ui/client";
 import { SignInPanel } from "@openrails/auth-ui";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Tick02Icon } from "@hugeicons/core-free-icons";
-import { billing, request, sessionKey } from "../api";
+import { request, sessionKey } from "../api";
 import { AccountBillingScope } from "../billing";
 import { useAuth } from "../session";
-import type { AppConfig, Offer } from "../models";
+import type { Offer } from "../models";
 import { money } from "../format";
 import { ErrorState, Loading } from "./states";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 
 // What the buyer is paying for: a post unlock or a channel membership.
 export type PayTarget =
@@ -85,8 +85,8 @@ export function PayHost({ children }: { children: ReactNode }) {
   );
 }
 
-// The app mints the buyer's checkout session (its rules decide who may buy);
-// billing-ui reads and pays it on the customer surface, saved cards included.
+// The host checks who may buy and creates an order. Billing-ui reads and pays
+// that order through the customer API, including the customer's saved cards.
 function PayModal({
   target,
   onClose,
@@ -97,19 +97,17 @@ function PayModal({
   onPaid: () => void;
 }) {
   const { user } = useAuth();
-  const config = useQuery({
-    queryKey: ["config"],
-    queryFn: () => request<AppConfig>("/api/v1/config", {}, false),
-  });
+  const [idempotencyKey] = useState(() => crypto.randomUUID());
   const path =
     target.kind === "post"
       ? `/api/v1/posts/${target.id}/checkout`
       : `/api/v1/channels/${target.id}/subscribe`;
-  const session = useQuery({
-    queryKey: ["checkout-session", sessionKey(), path, target.offer.price_id],
+  const order = useQuery({
+    queryKey: ["purchase-order", sessionKey(), path, target.offer.price_id, idempotencyKey],
     queryFn: () =>
-      request<CheckoutSessionLink>(path, {
+      request<Order>(path, {
         method: "POST",
+        headers: { "Idempotency-Key": idempotencyKey },
         body: JSON.stringify({ price_id: target.offer.price_id }),
       }),
     enabled: !!user,
@@ -117,14 +115,6 @@ function PayModal({
     gcTime: 0,
     retry: false,
   });
-  // Stable for the modal's life: saving a card must not restart the panel.
-  const source = useMemo(
-    () =>
-      session.data
-        ? billing.checkoutSource(session.data.id, { customerBase: "/billing/v1/me" })
-        : null,
-    [session.data],
-  );
   const gate = !user ? (
     <SignInPanel
       initialTab="login"
@@ -132,33 +122,27 @@ function PayModal({
       description={`Then pay ${money(target.offer.unit_amount, target.offer.currency)} without leaving this page.`}
       onSignedIn={() => undefined}
     />
-  ) : session.error ? (
-    <ErrorState error={session.error} retry={() => void session.refetch()} />
-  ) : !source ? (
+  ) : order.error ? (
+    <ErrorState error={order.error} retry={() => void order.refetch()} />
+  ) : !order.data ? (
     <Loading />
   ) : undefined;
   return (
-    <CheckoutModal
-      open
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
-      gate={gate}
-      source={source ?? idleSource}
-      layout="compact"
-      appearance={{ theme: "inherit" }}
-      defaultCountry={config.data?.country || undefined}
-      onComplete={(result) => {
-        if (result.status === "succeeded") onPaid();
-      }}
-    />
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{target.kind === "post" ? "Unlock post" : "Join membership"}</DialogTitle>
+          <DialogDescription>{target.merchant} · Sandbox payments only</DialogDescription>
+        </DialogHeader>
+        {gate ?? (order.data && <OrderCheckout
+          orderId={order.data.id}
+          returnUrl={window.location.href}
+          onSettled={(paid) => { if (paid.status === "complete") onPaid(); }}
+        />)}
+      </DialogContent>
+    </Dialog>
   );
 }
-
-const idleSource: CheckoutSource = {
-  getSession: () => new Promise(() => undefined),
-  pay: () => Promise.resolve({ status: "processing" }),
-};
 
 /** Joins a free membership in one click; signed-out buyers sign in first. */
 export function useJoinFree(channelID: string) {

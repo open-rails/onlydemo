@@ -1,7 +1,7 @@
 import { useCallback, useSyncExternalStore, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { sessionUser } from "@openrails/auth-ui/react";
+import { sessionIdentity, sessionUser } from "@openrails/auth-ui/react";
 import { ContentKitUiProvider, defineMessages, useMessages } from "@openrails/contentkit-ui";
 import { ContentKitProvider, type ContentKitErrorHandler, type ContentKitOperation, type Navigate } from "@openrails/contentkit-ui/react";
 import type { ContentKitChange } from "@openrails/contentkit-ui/client";
@@ -31,6 +31,9 @@ const titles: Partial<Record<ContentKitOperation, string>> = {
   "slot.decode": "Couldn't open the image",
   "slot.save": "Couldn't save the image",
   "slot.remove": "Couldn't remove the image",
+  "notifications.load": "Couldn't load notifications",
+  "notifications.read": "Couldn't update the notification",
+  "notifications.dismiss": "Couldn't archive the notification",
 };
 
 /** ContentKit's client, URLs and look for the whole app; media failures are toasted. */
@@ -44,7 +47,8 @@ export function ContentKitHost({ navigate, children }: { navigate: Navigate; chi
 
 function Provider({ navigate, children }: { navigate: Navigate; children: ReactNode }) {
   const client = useQueryClient();
-  const viewer = useSyncExternalStore(auth.subscribe, () => sessionUser(auth.getSnapshot()));
+  const session = useSyncExternalStore(auth.subscribe, auth.getSnapshot);
+  const viewer = sessionUser(session);
   const { error: text } = useMessages();
   const onError = useCallback<ContentKitErrorHandler>(
     (error, { operation, file }) => {
@@ -62,7 +66,7 @@ function Provider({ navigate, children }: { navigate: Navigate; children: ReactN
     [client],
   );
   return (
-    <ContentKitProvider client={contentkit} viewer={viewer} urls={contentURLs} navigate={navigate} onChange={onChange} onError={onError}>
+    <ContentKitProvider client={contentkit} viewer={viewer} accessRevision={sessionIdentity(session)} urls={contentURLs} navigate={navigate} onChange={onChange} onError={onError}>
       {children}
     </ContentKitProvider>
   );

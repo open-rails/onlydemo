@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AccountSecurity } from "@openrails/auth-ui";
 import { AccountBilling } from "@openrails/billing-ui";
@@ -7,20 +7,16 @@ import {
   Add01Icon,
   Book02Icon,
   Settings02Icon,
-  Tick02Icon,
-  Wallet01Icon,
 } from "@hugeicons/core-free-icons";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { billing, request } from "../api";
+import { request } from "../api";
 import { AccountBillingScope } from "../billing";
 import type { AccountData, AppConfig } from "../models";
 import {
   EmptyState,
   ErrorState,
-  FormError,
   Loading,
 } from "../components/states";
 import { AvatarUpload } from "@openrails/contentkit-ui";
@@ -31,10 +27,12 @@ import { userRef } from "../media";
 import { useAuth } from "../session";
 import { channelsPath, newChannelPath } from "../paths";
 import { VerifyEmailBanner } from "../verify";
+import { AccountNotifications } from "../components/notifications";
 
 const titles: Record<string, string> = {
   library: "Purchased",
   billing: "Billing",
+  notifications: "Notifications",
   channels: "My channels",
   settings: "Account",
 };
@@ -44,6 +42,7 @@ export function AccountPage() {
   const auth = useAuth();
   const summary = useInfiniteQuery({
     queryKey: ["me-dashboard", auth.user?.id],
+    enabled: tab !== "notifications",
     initialPageParam: "",
     queryFn: ({ pageParam }) =>
       request<AccountData & { has_more?: boolean; next_cursor?: string }>(
@@ -77,14 +76,15 @@ export function AccountPage() {
           ))}
         </TabsList>
       </Tabs>
-      {search.get("setup_id") && <SetupReturn id={search.get("setup_id")!} />}
-      {summary.error && (
+      {tab !== "notifications" && summary.error && (
         <ErrorState
           error={summary.error}
           retry={() => void summary.refetch()}
         />
       )}
-      {summary.isPending ? (
+      {tab === "notifications" ? (
+        <AccountNotifications />
+      ) : summary.isPending ? (
         <Loading />
       ) : summary.error ? null : (
         <>
@@ -196,50 +196,10 @@ function Billing() {
     <AccountBillingScope>
       <AccountBilling
         plansHref={channelsPath}
-        cardSetupReturnURL={(id) =>
-          `${location.origin}/me?tab=billing&setup_id=${encodeURIComponent(id)}`
-        }
-        collectionCurrency="USD"
+        defaultCurrency="USD"
         defaultCountry={config.data?.country || undefined}
       />
     </AccountBillingScope>
-  );
-}
-function SetupReturn({ id }: { id: string }) {
-  const confirm = useMutation({
-    mutationFn: () => billing.confirmCardSetup(id),
-  });
-  const setup = useQuery({
-    queryKey: ["setup-return", id],
-    queryFn: () => billing.getCardSetup(id),
-  });
-  const done = !!(
-    setup.data?.payment_method_id || confirm.data?.payment_method_id
-  );
-  return (
-    <Alert className="mb-6">
-      <HugeiconsIcon
-        icon={done ? Tick02Icon : Wallet01Icon}
-        className={done ? "text-success" : undefined}
-      />
-      <AlertTitle>
-        {done ? "Card setup verified." : "Finish card verification"}
-      </AlertTitle>
-      <AlertDescription>
-        <p>
-          {done
-            ? "Return to the channel to review and start your membership."
-            : "Confirm the setup with the server after returning from card verification. This does not start a membership."}
-        </p>
-        {!done && (
-          <Button disabled={confirm.isPending} onClick={() => confirm.mutate()}>
-            {confirm.isPending && <Spinner data-icon="inline-start" />}
-            Verify saved card
-          </Button>
-        )}
-        <FormError>{setup.error?.message || confirm.error?.message}</FormError>
-      </AlertDescription>
-    </Alert>
   );
 }
 function AccountSettings({ user }: { user: AccountData["user"] }) {

@@ -11,6 +11,7 @@ import {
   LinkSquare02Icon,
   Logout03Icon,
   Moon02Icon,
+  Notification01Icon,
   QuillWrite02Icon,
   ShoppingBag01Icon,
   SquareLock02Icon,
@@ -26,6 +27,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { EmptyState, Loading } from "./components/states";
 import { UserAvatar, SuggestedCreators } from "./components/cards";
 import { channelsPath, newChannelPath, newPostPath } from "./paths";
+import { InboxBell } from "./components/notifications";
 
 export function AppLayout() {
   const auth = useAuth();
@@ -63,12 +65,13 @@ export function AppLayout() {
   const nav: [string, string, IconSvgElement][] = [
     ["/", "Home", Home01Icon],
     [channelsPath, "Explore", DiscoverCircleIcon],
+    ["/me?tab=notifications", "Notifications", Notification01Icon],
     ["/me?tab=billing", "Billing", Wallet01Icon],
     ["/me?tab=library", "Purchased", ShoppingBag01Icon],
     ["/me?tab=channels", "My channels", UserGroupIcon],
     ["/me?tab=settings", "Account", UserIcon],
   ];
-  const tabs = nav.filter(([to]) => to !== "/me?tab=channels");
+  const tabs = nav.filter(([to]) => to !== "/me?tab=channels" && to !== "/me?tab=notifications");
   const tabLink = ([to, label, icon]: (typeof nav)[number]) => (
     <Link
       key={to}
@@ -123,6 +126,7 @@ export function AppLayout() {
           <Logo />
         </Link>
         <div className="inline-actions">
+          {auth.user && <InboxBell />}
           <Button
             size="icon"
             className="rounded-full"
@@ -196,6 +200,7 @@ export function AppLayout() {
             </Button>
           </div>
           <div className="sidebar-footer">
+            {auth.user && <InboxBell />}
             {themeButton}
             {auth.loading ? (
               <Spinner aria-label="Loading account" />
