@@ -117,7 +117,8 @@ function PayModal({
       return { value, idempotencyKey };
     },
     enabled: viewer !== null,
-    staleTime: Infinity,
+    // Refreshing content after payment must not issue another create-order POST.
+    staleTime: "static",
     gcTime: 0,
     retry: false,
   });
