@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { request } from "../api";
+import { loadPost, posts } from "../content";
 import type { AccessPolicy, Channel, Post } from "../models";
-import { micros } from "../format";
+import { amount } from "../format";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowRight02Icon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
@@ -132,15 +132,9 @@ export function PostForm({
   // New posts upload into a draft created with the first file (files wait
   // for it in the folder); Publish turns it into the post, Cancel deletes it
   // with its media.
-  const [draft, setDraft] = useState<{ id: string; code: string }>();
-  const folder = useMediaFolder(draft ? postRef(draft.id) : null, { paths: postPaths, commit: "auto" });
-  const createDraft = useMutation({
-    mutationFn: () =>
-      request<{ id: string; code: string }>("/api/v1/posts", {
-        method: "POST",
-        body: JSON.stringify({ channel_id: channelID, draft: true }),
-      }),
-  });
+  const [draft, setDraft] = useState<{ id: string; version: string }>();
+  const folder = useMediaFolder(draft ? postRef(draft.id, draft.version) : null, { paths: postPaths, commit: "auto" });
+  const createDraft = useMutation({ mutationFn: () => posts.draft(channelID, "public") });
   const { mutate: create, isPending: creating } = createDraft;
   const waiting = folder.waiting.length;
   // A failed creation is tried again when more files are added.
@@ -158,7 +152,7 @@ export function PostForm({
   const discard = useMutation({
     mutationFn: async () => {
       folder.discard();
-      if (draft) await request(`/api/v1/posts/${draft.code}`, { method: "DELETE" });
+      if (draft) await posts.remove(draft.id);
     },
     onSuccess: () => onDiscarded?.(),
   });
@@ -175,17 +169,17 @@ export function PostForm({
   // Text is optional once the post has an image or video.
   const [hasText, setHasText] = useState(!!(post?.title.trim() || post?.body?.trim()));
   // A saved post's uploads; a new post has its draft's.
-  const saved = useMediaRead(postRef(post?.id ?? ""), { editor: true, read: post ? undefined : null });
+  const saved = useMediaRead(postRef(post?.id ?? "", post?.version ?? ""), { editor: true, read: post ? undefined : null });
   const hasMedia = folder.fileCount > 0 || !!saved.read?.files.some((f) => f.upload && !f.unattached);
   const mediaBusy = folder.busy || creating;
   const needsText = !hasMedia && !hasText;
   const offer = post?.offers?.find((value) => value.kind !== "recurring");
   const save = useMutation({
-    mutationFn: (body: object) =>
-      request<Post>(post ? `/api/v1/posts/${post.code}` : "/api/v1/posts", {
-        method: post ? "PATCH" : "POST",
-        body: JSON.stringify(body),
-      }),
+    mutationFn: async (input: { title: string; body: string; policy: AccessPolicy; price?: string }) => {
+      const id = post?.id ?? draft?.id ?? (await posts.draft(channelID, input.policy)).id;
+      await posts.save(id, post?.channel_id ?? channelID, input, !post);
+      return (await loadPost(id, true)).post;
+    },
     onSuccess: async (saved) => {
       // Follow a new title's slug (or open the new post) before refetching.
       onSaved(saved);
@@ -202,19 +196,10 @@ export function PostForm({
     const data = new FormData(event.currentTarget);
     try {
       save.mutate({
-        ...(post ? {} : { channel_id: channelID }),
-        ...(draft ? { draft_id: draft.id } : {}),
         title: String(data.get("title")).trim(),
         body: String(data.get("body")),
-        access_policy: policy,
-        ...(["ppv", "members_ppv"].includes(policy)
-          ? {
-              price: {
-                unit_amount: micros(String(data.get("amount"))),
-                currency: "USD",
-              },
-            }
-          : {}),
+        policy,
+        ...(["ppv", "members_ppv"].includes(policy) ? { price: amount(String(data.get("amount")), 0.5) } : {}),
       });
     } catch (error) {
       setValidation(

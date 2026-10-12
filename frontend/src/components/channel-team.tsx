@@ -105,18 +105,22 @@ export function ChannelTeam({ channel }: { channel: Channel }) {
       void invites.refetch();
     },
   });
+  // A role by username: AuthKit's directory names the person, then sets it.
+  const addByUsername = async (username: string, role: string) => {
+    try {
+      const found = await request<Page<{ id: string }>>(`/auth/v1/users?username=${encodeURIComponent(username)}`);
+      const user = found.data[0];
+      if (!user) return setError("No one has that username.");
+      mutate.mutate({ path: `${root}/members/users/${encodeURIComponent(user.id)}`, method: "PUT", body: { role: `channel:${role}` } });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not find that person.");
+    }
+  };
   const add = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError("");
     const data = new FormData(event.currentTarget);
-    mutate.mutate({
-      path: `/api/v1/channels/${channel.id}/members`,
-      method: "POST",
-      body: {
-        username: String(data.get("username")).trim(),
-        role: String(data.get("role")),
-      },
-    });
+    void addByUsername(String(data.get("username")).trim(), String(data.get("role")));
   };
   return (
     <div className="flex flex-col gap-4">
@@ -341,7 +345,7 @@ export function ChannelTeam({ channel }: { channel: Channel }) {
             onClick={() => {
               if (remove)
                 mutate.mutate({
-                  path: `/api/v1/channels/${channel.id}/members/${remove.subject.id}`,
+                  path: `${root}/members/users/${encodeURIComponent(remove.subject.id)}`,
                   method: "DELETE",
                 });
             }}

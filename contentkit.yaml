@@ -4,12 +4,12 @@ tenant: onlydemo
 content:
   languages: [en]
   kinds:
-    # A creator post: one hidden version holding mixed images and videos.
+    # A creator post: one hidden version holding mixed images and videos,
+    # owned by its channel (owner_group_id), never a member of it.
     post:
       route: p
       presentation: post
       versions: {languages: one, hidden: true}
-      groups: [channel]
       sort: newest
   group_kinds:
     # A creator channel: owned by a user, governed by its AuthKit group

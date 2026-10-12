@@ -1,6 +1,4 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { postPage } from "../api";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Add01Icon, Image01Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
@@ -11,26 +9,12 @@ import {
   SuggestedCreators,
 } from "../components/cards";
 import { PostView } from "../components/post-view";
-import { useChannels } from "../channels";
+import { useChannels, usePostFeed } from "../content";
 import { useAuth } from "../session";
 import { channelsPath, newChannelPath } from "../paths";
 
-function usePosts() {
-  const { user } = useAuth();
-  const query = useInfiniteQuery({
-    queryKey: ["posts", user?.id],
-    initialPageParam: "",
-    queryFn: ({ pageParam }) =>
-      postPage(
-        "/api/v1/posts" +
-          (pageParam ? "?before=" + encodeURIComponent(pageParam) : ""),
-      ),
-    getNextPageParam: (last) => last.next_cursor || undefined,
-  });
-  return { ...query, data: query.data?.pages.flatMap((page) => page.data) };
-}
 export function HomePage() {
-  const posts = usePosts();
+  const posts = usePostFeed();
   const channels = useChannels();
   const auth = useAuth();
   return (

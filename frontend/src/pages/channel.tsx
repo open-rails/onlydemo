@@ -1,17 +1,13 @@
-import {
-  useInfiniteQuery,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useEffect, useState, type FormEvent } from "react";
 import { cn } from "cn";
-import { APIError, request, postPage } from "../api";
+import { APIError, request } from "../api";
+import { ck, memberships, useChannel, usePostFeed } from "../content";
 import { NotFoundPage } from "../App";
 import { useAuth } from "../session";
 import type { Channel } from "../models";
-import { micros, money, duration } from "../format";
+import { amount as price, money, duration } from "../format";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Add01Icon,
@@ -62,6 +58,7 @@ import {
 import { Avatar, Cover } from "../components/cards";
 import { PostView } from "../components/post-view";
 import { membershipOffer, myChannelsKey, rememberPostChannel } from "../channels";
+import type { FileInfo } from "@openrails/contentkit-ui/client";
 import { ChannelTeam } from "../components/channel-team";
 import { SlotEditError, SlotEditMenu, SlotEditor } from "@openrails/contentkit-ui";
 import { channelRef } from "../media";
@@ -75,28 +72,15 @@ export function ChannelPage() {
   const client = useQueryClient();
   const pay = usePay();
   const [tab, setTab] = useState("posts");
-  const channel = useQuery({
-    queryKey: ["channel", slug, auth.user?.id],
-    queryFn: () =>
-      request<Channel>(`/api/v1/channels/${encodeURIComponent(slug)}`),
-  });
-  const id = channel.data?.id || "";
-  const postQuery = useInfiniteQuery({
-    queryKey: ["channel-posts", id, auth.user?.id],
-    initialPageParam: "",
-    queryFn: ({ pageParam }) =>
-      postPage(
-        `/api/v1/posts?channel_id=${encodeURIComponent(id)}${pageParam ? "&before=" + encodeURIComponent(pageParam) : ""}`,
-      ),
-    getNextPageParam: (last) => last.next_cursor || undefined,
-    enabled: !!id,
-    // An editor's publishing posts go live on their own.
-    refetchInterval: (q) =>
-      q.state.data?.pages.some((p) => p.data.some((post) => post.state === "publishing")) ? 3000 : false,
-  });
-  const posts = {
-    ...postQuery,
-    data: postQuery.data?.pages.flatMap((page) => page.data),
+  const channel = useChannel(slug);
+  const posts = usePostFeed(channel.data, !!channel.data);
+  // A newly uploaded cover becomes the channel's cover.
+  const selectCover = (file: FileInfo | null) => {
+    const name = file?.path.replace(/^cover\//, "").replace(/\.[^.]+$/, "");
+    if (channel.data && name)
+      void request(ck(`/groups/${channel.data.id}`), { method: "PATCH", body: JSON.stringify({ cover: { image: name } }) }).then(() =>
+        client.invalidateQueries(),
+      );
   };
   const canonical = channel.data?.slug;
   const editable = channel.data?.can_edit ? channel.data.id : "";
@@ -135,7 +119,7 @@ export function ChannelPage() {
             </small>
           </div>
           {current.can_manage && (
-            <SlotEditor item={channelRef(current.id)} path="cover" image={current.cover} minWidth={600}>
+            <SlotEditor item={channelRef(current.id)} path="cover/{name}" image={current.cover} minWidth={600} onChange={selectCover}>
               <SlotEditMenu
                 label="Edit cover"
                 render={
@@ -163,7 +147,7 @@ export function ChannelPage() {
                 className="avatar-xl"
               />
               {current.can_manage && (
-                <SlotEditor item={channelRef(current.id)} path="avatar" image={current.avatar} minWidth={128} round>
+                <SlotEditor item={channelRef(current.id)} path="avatar/{name}" image={current.avatar} minWidth={128} round>
                   <SlotEditMenu
                     label="Change avatar"
                     iconOnly
@@ -318,8 +302,7 @@ function MembershipBox({
   const membership = channel.membership;
   const offer = membershipOffer(channel);
   const change = useMutation({
-    mutationFn: (action: "join" | "leave") =>
-      request(`/api/v1/channels/${channel.id}/${action}`, { method: "POST" }),
+    mutationFn: (action: "join" | "leave") => memberships[action](channel.id),
     onSuccess: onChanged,
   });
   const pill = "h-12 w-full rounded-full px-6";
@@ -343,10 +326,6 @@ function MembershipBox({
             </Button>
           )}
         </>
-      ) : membership.status === "closed" ? (
-        <Button variant="secondary" size="lg" className={pill} disabled>
-          Membership closed
-        </Button>
       ) : membership.free ? (
         <Button
           size="lg"
@@ -392,33 +371,24 @@ function MembershipSettings({
   );
   const [error, setError] = useState("");
   const save = useMutation({
-    mutationFn: (body: object) =>
-      request(`/api/v1/channels/${channel.id}/membership`, {
-        method: "PUT",
-        body: JSON.stringify(body),
-      }),
+    mutationFn: (value: string | null) => memberships.set(channel.id, value),
     onSuccess: onUpdated,
   });
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError("");
-    if (!enabled) return save.mutate({ enabled: false, price: null });
-    if (free) return save.mutate({ enabled: true, price: null });
+    if (!enabled) return save.mutate(null);
+    if (free) return save.mutate("0");
     try {
-      const unit_amount = micros(amount.trim());
-      if (BigInt(unit_amount) < 1_000_000n)
-        throw new Error("A paid membership costs at least $1.00.");
-      save.mutate({ enabled: true, price: { unit_amount, currency: "USD" } });
+      save.mutate(price(amount.trim(), 1));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Invalid price.");
     }
   };
   const status =
     membership.status === "none"
-      ? "This channel has no membership. Posts can be free or sold individually."
-      : membership.status === "closed"
-        ? "Closed to new members. Existing members keep access and renew at the price they accepted."
-        : membership.free
+      ? "This channel sells no membership. Posts can be free or sold individually; existing members keep access."
+      : membership.free
           ? "Open: anyone can join free."
           : offer
             ? `Open: ${money(offer.unit_amount, offer.currency)} ${duration(offer.access_duration_hours)}.`
@@ -502,8 +472,8 @@ function MembershipSettings({
             {paidToFree && (
               <Alert>
                 <AlertDescription>
-                  Paid members keep access for free; their subscriptions stop
-                  renewing at the end of the current paid period.
+                  Paid members keep their subscriptions, which go on renewing
+                  until they cancel; new members join free.
                 </AlertDescription>
               </Alert>
             )}
@@ -552,9 +522,9 @@ function ChannelSettings({
         <CardHeader>
           <CardTitle>Delete channel</CardTitle>
           <CardDescription>
-            Deletion immediately hides the channel and retires its editorial
-            permissions. Channel content is retained for 30 days before
-            cleanup. Financial history remains separate.
+            Deletion immediately hides the channel, stops selling its
+            membership and retires its editorial permissions. Financial
+            history remains separate.
           </CardDescription>
         </CardHeader>
         <CardFooter>

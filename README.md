@@ -23,6 +23,8 @@ the media worker's image jobs are CGO) and ffmpeg with ffprobe (its video jobs).
 ```sh
 task dev:up   # PostgreSQL (with PGroonga) and MinIO with the media bucket; idempotent
 task run
+task seed     # optional display channels and posts, through ContentKit's routes
+task smoke    # walks a creator and a fan through the running server
 ```
 
 `task run` migrates (idempotent), then serves Go with Air, the frontend with
@@ -107,17 +109,17 @@ publish. Readers, members and buyers are never added to it.
 `POST /api/v1/channels` creates both halves and `DELETE /api/v1/channels/:id`
 retires both; ContentKit serves the rest (`/contentkit/v1/groups...`).
 
-Posts stay the app's (`/api/v1/posts[/:id]`) until ContentKit's catalog stores
-them. Each sits in one channel and has one of four policies, decided by
-ContentKit's access keys:
+A post is ContentKit content of the `post` kind, owned by its channel
+(`owner_group_id`), at `/p/<CODE>/<slug>`: its text, its one hidden version's
+media, its access rule and its offer. Each has one of four policies:
 
-- **Public:** free to read.
-- **Membership:** open to holders of the channel's key, including future posts.
-- **Members-only purchase:** bought by members.
-- **One-time purchase:** bought by anyone signed in.
+- **Public** (`public`): free to read.
+- **Membership** (`group`): open to holders of the channel's key, including future posts.
+- **Members-only purchase** (`group_ppv`): bought by members.
+- **One-time purchase** (`ppv`): bought by anyone signed in.
 
-Paid posts are sold once ContentKit stores them (phase B). Deleting a post
-hides it from everyone but its buyers.
+A purchase stays readable permanently, even after the post is deleted:
+ContentKit keeps it for holders of its key and lists it in their library.
 
 ## Media
 
@@ -246,12 +248,17 @@ own), AuthKit, OpenRails, ContentKit and River, with OpenRails's `nmimock`
 gateway on loopback:
 
 - `TestChannelsOnContentKit` (needs MinIO): channels as ContentKit groups,
-  free and paid memberships through ContentKit offers and joins, the
-  OpenRails products ContentKit keeps, members-only posts, channel and post
-  uploads under AuthKit roles, deletion. `task dev:up && task test:channels`.
-- `TestNMIBillingEndToEnd`: a membership bought with a saved card opens the
-  channel's posts, renews, and a declined renewal enters dunning; billing
-  notices reach ContentKit's inbox. `task dev:up && task test:nmi`.
+  posts as their content, free and paid memberships and a post's offer
+  through ContentKit, the OpenRails products ContentKit keeps, members-only
+  posts and their media, uploads under AuthKit roles, deletion. `task dev:up && task test:channels`.
+- `TestNMIBillingEndToEnd`: a saved card buys a post and a membership through
+  ContentKit's offers; the purchase opens the post (and keeps it, in the
+  library, after its deletion), the membership opens the channel's posts,
+  renews, and a declined renewal enters dunning; billing notices reach
+  ContentKit's inbox. `task dev:up && task test:nmi`.
+
+`task seed` and `task smoke` drive a running server (`--url`, default
+http://127.0.0.1:3000) through the same routes the browser uses.
 
 CI runs on pull requests, by changed paths: Go, module or migration changes run
 vet and both proofs; frontend changes lint, test and build the frontend.

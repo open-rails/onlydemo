@@ -32,11 +32,12 @@ export function duration(hours?: number | null) {
     ? `every ${hours / 24} days`
     : `every ${hours} hours`;
 }
-export function micros(input: string) {
+// A price as ContentKit's offers take it: a positive decimal, "4.99".
+export function amount(input: string, minimum = 0) {
   if (!/^\d+(\.\d{1,2})?$/.test(input))
     throw new Error("Enter a positive amount with up to two decimal places.");
-  const [whole, fraction = ""] = input.split(".");
-  const value = BigInt(whole) * 1_000_000n + BigInt(fraction.padEnd(6, "0"));
-  if (value <= 0n) throw new Error("Price must be greater than zero.");
-  return value.toString();
+  const value = Number(input);
+  if (value <= 0) throw new Error("Price must be greater than zero.");
+  if (value < minimum) throw new Error(`The price is at least $${minimum.toFixed(2)}.`);
+  return value.toFixed(2);
 }

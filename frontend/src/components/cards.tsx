@@ -7,7 +7,8 @@ import { cn } from "cn";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { type Channel } from "../models";
-import { hue, membershipOffer, useChannels } from "../channels";
+import { hue, membershipOffer } from "../channels";
+import { useChannels } from "../content";
 import { subscribeLabel, useJoinFree, usePay } from "./pay";
 import { channelsPath, channelPath } from "../paths";
 

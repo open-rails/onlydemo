@@ -1,14 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { Link, useBlocker, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { request } from "../api";
-import type { Channel } from "../models";
+import { useMyChannels } from "../content";
 import { useAuth } from "../session";
 import { Card, CardContent } from "@/components/ui/card";
 import { ErrorState, Loading } from "../components/states";
 import { PostForm } from "../components/post-editor";
 import { channelPath, newChannelPath, postPath } from "../paths";
-import { myChannelsKey, recallPostChannel, rememberPostChannel } from "../channels";
+import { recallPostChannel, rememberPostChannel } from "../channels";
 
 export function NewPostPage() {
   const auth = useAuth();
@@ -16,10 +14,7 @@ export function NewPostPage() {
   const [search] = useSearchParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const channels = useQuery({
-    queryKey: myChannelsKey(user),
-    queryFn: () => request<{ data: Channel[] }>("/api/v1/me/channels"),
-  });
+  const channels = useMyChannels();
   const list = channels.data?.data;
   const [picked, setPicked] = useState<string>();
   const [initial] = useState(() => ({

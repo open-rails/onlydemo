@@ -1,6 +1,6 @@
 import type { PublicPreset } from "@openrails/contentkit-ui/client";
 export type AccessPolicy = "public" | "membership" | "members_ppv" | "ppv";
-// An OpenRails offer: a product's current price for its entitlement.
+// An OpenRails price on sale for an access key (the product's key).
 export interface Offer {
   product_id: string;
   product_key: string;
@@ -13,6 +13,7 @@ export interface Offer {
   access_duration_hours: number | null;
   billing_interval_hours: number | null;
 }
+// A channel: a ContentKit group whose AuthKit group holds its editors.
 export interface Channel {
   id: string;
   slug: string;
@@ -22,55 +23,46 @@ export interface Channel {
   role?: "owner" | "editor";
   can_manage: boolean;
   can_edit: boolean;
-  avatar: PublicPreset;
-  cover: PublicPreset;
+  avatar: PublicPreset | null;
+  cover: PublicPreset | null;
   membership: ChannelMembership;
-  deleted_at?: string | null;
 }
-// A channel optionally sells one membership: "none" until created, then
-// "open" (free or paid) or "closed" to new joins. Existing members keep access.
+// A channel sells at most one membership, its ContentKit group offer:
+// "none" without one, else "open", free or at a renewing price.
 export interface ChannelMembership {
-  status: "none" | "open" | "closed";
+  status: "none" | "open";
   free: boolean;
-  sync: "none" | "pending" | "active" | "failed";
   offer: Offer | null;
   member: boolean;
   free_member: boolean;
 }
+// A post: ContentKit content of the post kind owned by its channel.
 export interface Post {
   id: string;
+  // The one (hidden) version holding its media.
+  version: string;
   channel_id: string;
   channel_slug: string;
   channel_name?: string;
-  author_id: string;
+  channel_avatar?: PublicPreset | null;
   // The post's URL is /p/{code}/{slug}; the slug follows the title.
   code: string;
   slug: string;
+  path: string;
   title: string;
   body?: string;
   can_read: boolean;
   can_edit?: boolean;
   purchased?: boolean;
   has_membership?: boolean;
-  channel_avatar?: PublicPreset;
   access_policy: AccessPolicy;
-  // "publishing": media still processing; only the channel's editors see it.
-  state: "draft" | "publishing" | "published";
-  offer_status: "none" | "pending" | "active" | "failed";
+  state: "draft" | "published" | "deleted";
   offers: Offer[];
   created_at: string;
-  updated_at: string;
 }
 export interface Page<T> {
   data: T[];
-  has_more?: boolean;
   next_cursor?: string | null;
-  total?: number;
-}
-export interface AccountData {
-  user: { id: string; username: string; email?: string; avatar: PublicPreset };
-  manageable_channels: Channel[];
-  purchased_posts: Post[];
 }
 export interface AppConfig {
   /** The buyer's country from a trusted edge header, else "". */

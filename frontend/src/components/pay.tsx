@@ -14,6 +14,7 @@ import { sessionIdentity, useSession } from "@openrails/auth-ui/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Tick02Icon } from "@hugeicons/core-free-icons";
 import { request, sessionKey } from "../api";
+import { memberships } from "../content";
 import { AccountBillingScope } from "../billing";
 import { useAuth } from "../session";
 import type { Offer } from "../models";
@@ -22,9 +23,10 @@ import { observePurchase, purchaseKey } from "../purchase-key";
 import { ErrorState, Loading } from "./states";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 
-// What the buyer is paying for: a post unlock or a channel membership.
+// What the buyer is paying for: a post unlock or a channel membership, each
+// an OpenRails price ContentKit put on sale for its access key.
 export type PayTarget =
-  // A post by its code; a membership by its channel id.
+  // A post by its content id; a membership by its channel id.
   | { kind: "post"; id: string; merchant: string; offer: Offer }
   | { kind: "membership"; id: string; merchant: string; offer: Offer };
 
@@ -87,8 +89,8 @@ export function PayHost({ children }: { children: ReactNode }) {
   );
 }
 
-// The host checks who may buy and creates an order. Billing-ui reads and pays
-// that order through the customer API, including the customer's saved cards.
+// The buyer's order for the offer's price; billing-ui reads and pays it
+// through the customer API, including the customer's saved cards.
 function PayModal({
   target,
   onClose,
@@ -100,18 +102,14 @@ function PayModal({
 }) {
   const session = useSession();
   const viewer = session.status === "authenticated" ? session.userId : null;
-  const path =
-    target.kind === "post"
-      ? `/api/v1/posts/${target.id}/checkout`
-      : `/api/v1/channels/${target.id}/subscribe`;
   const order = useQuery({
-    queryKey: ["purchase-order", sessionIdentity(session), path, target.offer.price_id],
+    queryKey: ["purchase-order", sessionIdentity(session), target.offer.price_id],
     queryFn: async () => {
       const idempotencyKey = purchaseKey(viewer!, target.offer.price_id);
-      const value = await request<Order>(path, {
+      const value = await request<Order>("/billing/v1/me/orders", {
         method: "POST",
         headers: { "Idempotency-Key": idempotencyKey },
-        body: JSON.stringify({ price_id: target.offer.price_id }),
+        body: JSON.stringify({ lines: [{ price_id: target.offer.price_id }] }),
       });
       observePurchase(viewer!, target.offer.price_id, idempotencyKey, value.status);
       return { value, idempotencyKey };
@@ -165,7 +163,7 @@ export function useJoinFree(channelID: string) {
     setPending(true);
     setError("");
     try {
-      await request(`/api/v1/channels/${channelID}/join`, { method: "POST" });
+      await memberships.join(channelID);
       await client.invalidateQueries();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not join.");

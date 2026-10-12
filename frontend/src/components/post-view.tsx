@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PolicyBadge } from "./policy-badge";
 import { Avatar } from "./cards";
-import { PostGallery, PublishingNotice } from "./post-media";
+import { PostGallery } from "./post-media";
 import type { ChannelMembership, Post } from "../models";
 import { subscribeLabel, unlockLabel, useJoinFree, usePay } from "./pay";
 import { channelPath, postPath } from "../paths";
@@ -64,7 +64,7 @@ export function PostView({
   const unlock = () => {
     if (needsMembership && membership?.free) void joinFree.join();
     else if (needsMembership && memberOffer) pay({ kind: "membership", id: post.channel_id, merchant: name, offer: memberOffer });
-    else if (!needsMembership && price && post.offer_status !== "pending") pay({ kind: "post", id: post.code, merchant: name, offer: price });
+    else if (!needsMembership && price) pay({ kind: "post", id: post.id, merchant: name, offer: price });
   };
   const body = post.can_read && post.body ? (full ? post.body : excerpt(post.body)) : "";
   const Title = full ? "h2" : "h3";
@@ -81,7 +81,7 @@ export function PostView({
         <div className="feed-meta">
           <span className="feed-date">
             <PolicyBadge policy={policy} offer={price} /> {badges}
-            {post.state === "publishing" && <Badge variant="outline">Publishing</Badge>}
+            {post.state === "draft" && <Badge variant="outline">Draft</Badge>}
             <Link to={postPath(post)} aria-label={`Open ${label}`}>
               <time dateTime={post.created_at}>{dateTime(post.created_at)}</time>
             </Link>
@@ -117,14 +117,13 @@ export function PostView({
             ))}
         </div>
       )}
-      {post.state === "publishing" && <PublishingNotice post={post} />}
       <div ref={watchMedia}>
         {mediaNear && (
           <PostGallery post={post} unlock={() => unlockRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })} />
         )}
       </div>
       {editor}
-      {!post.can_read && !(needsMembership && membership?.status === "closed") && (
+      {!post.can_read && (
         <div className="feed-unlock" ref={unlockRef}>
           {needsMembership && !membership?.free && !memberOffer ? (
             <Button size="lg" className="w-full" nativeButton={false} render={<Link to={channelPath(post.channel_slug)} />}>
@@ -135,7 +134,7 @@ export function PostView({
             <Button
               size="lg"
               className="w-full"
-              disabled={joinFree.pending || (!needsMembership && (!price || post.offer_status === "pending"))}
+              disabled={joinFree.pending || (!needsMembership && !price)}
               onClick={unlock}
             >
               <HugeiconsIcon icon={SquareLock02Icon} data-icon="inline-start" />
@@ -143,11 +142,9 @@ export function PostView({
                 ? membership?.free
                   ? "Join free to unlock"
                   : subscribeLabel(memberOffer!)
-                : post.offer_status === "pending"
-                  ? "Price pending"
-                  : price
-                    ? unlockLabel(price)
-                    : "Unlock post"}
+                : price
+                  ? unlockLabel(price)
+                  : "Unlock post"}
             </Button>
           )}
         </div>

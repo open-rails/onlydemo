@@ -83,16 +83,3 @@ export async function request<T>(
   inspectHeaders?.(response.headers);
   return body;
 }
-
-export async function postPage(path: string) {
-  let next: string | null = null;
-  const data = await request<import("./models").Post[]>(
-    path,
-    {},
-    true,
-    (headers) => {
-      next = headers.get("X-Next-Cursor");
-    },
-  );
-  return { data, next_cursor: next };
-}

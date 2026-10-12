@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { APIError, request } from "../api";
+import { APIError } from "../api";
+import { loadPost, posts as postWrites, resolveCode } from "../content";
 import { NotFoundPage } from "../App";
 import { useAuth } from "../session";
-import { visibilityLabels, type Channel, type Post } from "../models";
+import { visibilityLabels } from "../models";
 import { money } from "../format";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -41,7 +42,9 @@ import {
 import { useCanonicalContent } from "@openrails/contentkit-ui/react";
 import { channelPath, parseCode, postLink, postPath } from "../paths";
 export function PostPage() {
-  const code = parseCode(useParams().code ?? "");
+  const params = useParams();
+  const code = params.id ? "" : (parseCode(params.code ?? "") ?? "");
+  const byID = params.id ?? "";
   const location = useLocation();
   const auth = useAuth();
   const navigate = useNavigate();
@@ -49,19 +52,13 @@ export function PostPage() {
   const pay = usePay();
   const [editor, setEditor] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const post = useQuery({
-    queryKey: ["post", code, auth.user?.id],
-    queryFn: () => request<Post>(`/api/v1/posts/${code}`),
-    enabled: !!code,
-    refetchInterval: (query) =>
-      query.state.data?.offer_status === "pending" || query.state.data?.state === "publishing" ? 2000 : false,
+  const loaded = useQuery({
+    queryKey: ["post", code || byID, auth.user?.id],
+    queryFn: async () => loadPost(byID || (await resolveCode(code)), !!auth.user),
+    enabled: !!(code || byID),
   });
-  const channel = useQuery({
-    queryKey: ["channel", post.data?.channel_id, auth.user?.id],
-    queryFn: () =>
-      request<Channel>(`/api/v1/channels/${post.data!.channel_id}`),
-    enabled: !!post.data,
-  });
+  const post = { ...loaded, data: loaded.data?.post };
+  const channel = { data: loaded.data?.channel ?? undefined };
   const offer = post.data?.offers?.find((value) => value.kind !== "recurring");
   const joinFree = useJoinFree(post.data?.channel_id || "");
   // The slug is decoration: keep the address bar and head on the canonical URL.
@@ -78,14 +75,13 @@ export function PostPage() {
     };
   }, [pageTitle]);
   const remove = useMutation({
-    mutationFn: () =>
-      request(`/api/v1/posts/${post.data!.code}`, { method: "DELETE" }),
+    mutationFn: () => postWrites.remove(post.data!.id),
     onSuccess: () => {
       void client.invalidateQueries();
       navigate(channelPath(post.data?.channel_slug || ""));
     },
   });
-  if (!code) return <NotFoundPage />;
+  if (!code && !byID) return <NotFoundPage />;
   if (post.isPending) return <Loading />;
   if (post.error instanceof APIError && post.error.status === 404)
     return <NotFoundPage />;
@@ -93,7 +89,7 @@ export function PostPage() {
     return (
       <ErrorState
         error={post.error || new Error("Post not found.")}
-        retry={() => void post.refetch()}
+        retry={() => void loaded.refetch()}
       />
     );
   const item = post.data;
@@ -103,7 +99,6 @@ export function PostPage() {
     (policy === "members_ppv" && !channel.data?.membership.member);
   const joinable = canJoin(channel.data);
   const canEdit = item.can_edit || channel.data?.can_edit;
-  const pricePending = item.offer_status === "pending" && !mustJoin;
   const creator = channel.data?.name || item.channel_name || "Creator";
   const membership = membershipOffer(channel.data);
   const freeJoin = mustJoin && !!channel.data?.membership.free;
@@ -122,7 +117,7 @@ export function PostPage() {
     else if (mustJoin && membership)
       pay({ kind: "membership", id: item.channel_id, merchant: creator, offer: membership });
     else if (!mustJoin && offer)
-      pay({ kind: "post", id: item.code, merchant: creator, offer });
+      pay({ kind: "post", id: item.id, merchant: creator, offer });
   };
   return (
     <>
@@ -147,7 +142,6 @@ export function PostPage() {
           badges={
             <>
               {item.purchased && <Badge className="bg-success/10 text-success">Purchased</Badge>}{" "}
-              {canEdit && item.offer_status === "pending" && <Badge className="bg-warning/10 text-warning">Price pending</Badge>}{" "}
             </>
           }
           controls={
@@ -162,7 +156,7 @@ export function PostPage() {
               </div>
             )
           }
-          editor={canEdit && <PostMediaEditor postID={item.id} />}
+          editor={canEdit && <PostMediaEditor post={item} />}
         />
         <aside className="panel purchase-panel">
           <dl className="post-facts">
@@ -171,7 +165,7 @@ export function PostPage() {
             {policy !== "public" && policy !== "membership" && (
               <>
                 <dt>Price</dt>
-                <dd>{pricePending ? "Pending" : offer ? money(offer.unit_amount, offer.currency) : "—"}</dd>
+                <dd>{offer ? money(offer.unit_amount, offer.currency) : "—"}</dd>
               </>
             )}
             {item.purchased && (
@@ -181,7 +175,7 @@ export function PostPage() {
               </>
             )}
           </dl>
-          {!item.can_read && !pricePending && (offer || mustJoin) && (
+          {!item.can_read && (offer || mustJoin) && (
             <Button
               size="lg"
               className="w-full"
