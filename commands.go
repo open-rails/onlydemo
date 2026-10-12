@@ -49,8 +49,22 @@ func newRootCommand() *cobra.Command {
 		Use: "media-worker", Short: "Run the media worker: upload placement, image renditions, video encodes (needs libvips and ffmpeg)", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return runMediaWorker(cmd.Context()) },
 	})
-	root.AddCommand(admin)
+	root.AddCommand(admin, urlCommand("seed", "Create display channels and posts through a running server's routes", seed),
+		urlCommand("smoke", "Walk a running server through a creator's and a fan's journeys", smoke))
 	return root
+}
+
+// urlCommand runs action against a running server (--url).
+func urlCommand(name, description string, action func(context.Context, string, io.Writer) error) *cobra.Command {
+	var base string
+	cmd := &cobra.Command{
+		Use: name, Short: description, Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return action(cmd.Context(), strings.TrimRight(base, "/"), cmd.OutOrStdout())
+		},
+	}
+	cmd.Flags().StringVar(&base, "url", "http://127.0.0.1:3000", "running server base URL")
+	return cmd
 }
 
 func adminCommand(name, description string, action func(context.Context, string) error) *cobra.Command {

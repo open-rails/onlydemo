@@ -78,6 +78,16 @@ tasks:
         trap 'kill "$MEDIA_PID" "$WORKER_PID" 2>/dev/null || true' EXIT INT TERM
         go run . serve
 
+  seed:
+    desc: Create display channels and posts through the running server's routes
+    cmds:
+      - go run . seed {{.CLI_ARGS}}
+
+  smoke:
+    desc: Walk the running server through a creator's and a fan's journeys
+    cmds:
+      - go run . smoke {{.CLI_ARGS}}
+
   frontend:build:
     desc: Build the React application
     cmds:
