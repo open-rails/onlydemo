@@ -24,8 +24,8 @@ importers:
         specifier: 0.244.0
         version: 0.244.0(@tanstack/react-query@5.103.2(react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react-is@16.13.1)(react@19.3.0)(redux@5.0.1)
       '@openrails/contentkit-ui':
-        specifier: file:vendor/openrails-contentkit-ui-next117-56a1183.tgz
-        version: file:vendor/openrails-contentkit-ui-next117-56a1183.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+        specifier: file:vendor/openrails-contentkit-ui-next117-1f7d121.tgz
+        version: file:vendor/openrails-contentkit-ui-next117-1f7d121.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@tanstack/react-query':
         specifier: ^5.100.11
         version: 5.103.2(react@19.3.0)
@@ -465,8 +465,8 @@ packages:
       '@tanstack/react-query':
         optional: true
 
-  '@openrails/contentkit-ui@file:vendor/openrails-contentkit-ui-next117-56a1183.tgz':
-    resolution: {integrity: sha512-VIxilKGftKHkEO94kL462UzE2RAFp3ffmW26/oxOPlNsWfMOKe9OBlNmGCNemPcLWq15nFUfhFIPWKxr1VhuQw==, tarball: file:vendor/openrails-contentkit-ui-next117-56a1183.tgz}
+  '@openrails/contentkit-ui@file:vendor/openrails-contentkit-ui-next117-1f7d121.tgz':
+    resolution: {integrity: sha512-RTcB2VtxBGD2EYhTek92HoxZYi186QOyBj99nwo7oMuAstImpbo+5pCe6Z0K9T61LGX6jhAw7xvz53x7KKr0eA==, tarball: file:vendor/openrails-contentkit-ui-next117-1f7d121.tgz}
     version: 0.0.0
     engines: {node: '>=22.12.0'}
     peerDependencies:
@@ -3207,7 +3207,7 @@ snapshots:
       - react-is
       - redux
 
-  '@openrails/contentkit-ui@file:vendor/openrails-contentkit-ui-next117-56a1183.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
+  '@openrails/contentkit-ui@file:vendor/openrails-contentkit-ui-next117-1f7d121.tgz(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:
       '@base-ui/react': 1.8.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@dnd-kit/core': 6.3.1(react-dom@19.3.0(react@19.3.0))(react@19.3.0)

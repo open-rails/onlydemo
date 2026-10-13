@@ -1,7 +1,7 @@
 # ContentKit cutover (#117, OnlyDemo #125)
 
 OnlyDemo is configuration and glue around ContentKit, AuthKit and OpenRails.
-ContentKit `next/117` (pinned at `1d40ad8`) runs embedded (`contentkit.go`):
+ContentKit `next/117` (pinned at `1f7d121`) runs embedded (`contentkit.go`):
 its own schema (`CONTENT_SCHEMA`, default `contentkit`), its jobs on the host
 River fleet (`RiverJobs`, `WithRiverClient`), billing through
 `adapters/openrails.Billing`, the channels' AuthKit groups through
@@ -24,7 +24,7 @@ no tables and no content routes.
 | `GET /api/v1/channels`, `/channels/:id-or-slug` | `GET /contentkit/v1/groups?kind=channel[&slug=]`, `GET /contentkit/v1/groups/{id}`: with `avatar` and `access` (key, offer terms, the viewer's membership) |
 | `PUT /api/v1/channels/:id/membership` | `PUT` / `DELETE /contentkit/v1/groups/{id}/offer` (`amount: "0"` free; `renew_hours` paid) |
 | `POST /api/v1/channels/:id/join`, `/leave` | `POST` / `DELETE /contentkit/v1/groups/{id}/join` |
-| `POST /api/v1/channels/:id/subscribe`, `POST /api/v1/posts/:code/checkout` | OpenRails `POST /billing/v1/me/orders` for the offer's price (billing-ui `OrderCheckout`); the price id from `GET /billing/v1/products?keys=` by the key ContentKit sells (gap 10) |
+| `POST /api/v1/channels/:id/subscribe`, `POST /api/v1/posts/:code/checkout` | OpenRails `POST /billing/v1/me/orders` for the price ContentKit's sale names (`decision.offers[].price_id`, group `access.offer.price_id`), paid in billing-ui's `OrderCheckout` |
 | `GET`/`POST`/`DELETE /api/v1/channels/:id/members` | AuthKit `/auth/v1/groups/{id}/members[/users/{id}]`, `/auth/v1/users?username=`, invitations |
 | `GET /api/v1/me` | AuthKit `/auth/v1/me`; ContentKit `GET /contentkit/v1/me/library`; OpenRails `/billing/v1/me/*` |
 | `GET /api/v1/me/channels` | AuthKit `GET /auth/v1/me/groups` (gap 1) |
@@ -61,44 +61,35 @@ comment and moderation staff permissions and OpenRails customer staff ones.
 ## Frontend
 
 On `@openrails/contentkit-ui` as `next/117` builds it (vendored tarball,
-`frontend/vendor/`, built from `56a1183`): its client (contents, groups, codes, media,
-notifications) and media components. `src/content.ts` is the one data layer:
+`frontend/vendor/`, built from `1f7d121`); the app keeps page composition:
 
-| Module | Reads and writes |
+| Page | contentkit-ui |
 | --- | --- |
-| `pages/explore.tsx`, `components/cards.tsx` | `GET /contentkit/v1/contents` cards; `GET /contentkit/v1/groups?kind=channel` |
-| `pages/channel.tsx` | group create, read, delete; `?owner_group=` feed; group offer and `access`; joins; `SlotEditor` on `cover/{name}`, `avatar/{name}`, selected by `PATCH` |
-| `pages/post.tsx`, `post-view.tsx`, `post-media.tsx` | code → content, version decision, `MediaGallery` on the version |
-| `pages/compose.tsx`, `post-editor.tsx` | draft content, version media folder, text, rule, offer, publish |
-| `components/pay.tsx` | OpenRails order for the sold key's price; free join through ContentKit |
-| `components/channel-team.tsx` | AuthKit members, directory, invitations |
-| `pages/account.tsx` | ContentKit library, AuthKit roles, billing-ui |
+| home (`pages/explore.tsx`) | `ContentGrid` of `PostCard`s with their owner chip, suggested channels (`useGroups`) |
+| channels (`/c`) | `GroupDirectory` |
+| channel (`pages/channel.tsx`) | `GroupBanner` with `MembershipBox`, `ContentGrid` (`owner_group`), `GroupImageEditor` (cover, avatar), group offers (`offers.sellGroup`), `groups.create`/`remove` |
+| post (`pages/post.tsx`) | `useContentDetail`, `MediaGallery` on the version, `Paywall` |
+| compose, edit | `ContentEditor` with the channel as owner group |
+| account library | `offers.library` |
 
-Missing from contentkit-ui on `next/117` (PR #215, stage 2): discovery
-(lists, cards, search), offers (put, withdraw, join, library) and version
-clients, and content components (cards, paywall, editor); `content.ts`
-calls those routes directly. Replace it with the package's once they land.
-
-## Left to do
-
-- [ ] `?owner_group=`, owner chips and locked bodies (lane 122-owner-group): the e2e asserts locked → no `body`, buyer → `body`.
-- [ ] Decisions and group `access` carry the offer's price id (gap 10); then drop the storefront read in `content.ts` and `pay.tsx`.
-- [ ] contentkit-ui stage 2 (#215): discovery, offers and content components replace `content.ts`.
+The app's own: `components/pay.tsx` orders the price a `Paywall` or
+`MembershipBox` checkout names and shows billing-ui's `OrderCheckout`;
+`roles.ts` reads the viewer's channel roles from AuthKit (gap 1);
+`components/channel-team.tsx` is AuthKit's members, directory and invitations.
 
 ## Gaps
 
-Status as of `next/117` `1d40ad8`. Fixed by 120-user-groups (#217): creator
-group writes, settings and offer editors, `adapters/authkit` scopes, group
-`avatar` and `access`, the generated `Engine.Client()`, `channel:content:write`
-for owned content (no more 503), group delete cascades, `/v1/me/groups`.
+Status as of `next/117` `1f7d121`. Fixed since phase A: creator group and
+content writes with `channel:*` permissions (#217), `adapters/authkit`
+scopes, group `avatar` and `access`, the generated `Engine.Client()`,
+`/v1/me/groups`, the `owner_group` filter and owner chips, locked bodies,
+sales with price ids on decisions and group access, owner-group editors
+opening their content, and OpenRails refusing a `group_ppv` purchase
+without the group key (#218).
 
-1. `/v1/me/groups` lists groups the viewer owns, manages (`settings:manage`) or belongs to, not those they only write content in; the composer reads AuthKit's `/auth/v1/me/groups`.
+1. `/v1/me/groups` lists the groups the viewer owns, manages or belongs to, not those where they only write content; the app reads channel roles from AuthKit (`roles.ts`).
 2. The Engine exposes no media registry, so the media worker builds its own (`workerRegistry`).
 3. The Engine wires no upload limiter: OnlyDemo's files/hour, bytes/day and per-channel quota are gone.
-4. `GET /v1/contents` filters no owner group; cards and content carry no owner chip. Lane 122-owner-group.
-5. Catalog serves a locked post's `body` to anyone who sees it. Lane 122-owner-group.
-6. OpenRails must refuse a `group_ppv` purchase without the group key; editors can still buy.
-7. A membership going from paid to free keeps renewing existing subscriptions.
-8. ContentKit has no draft TTL; OnlyDemo swept drafts after 24 h.
-9. Cards carry the decision but not the rule: a post card a viewer opens can't say it is members-only.
-10. Decisions (`sell`) and group `access.offer` name keys and terms but no price id, so a checkout reads OpenRails' storefront for it.
+4. A membership going from paid to free keeps renewing existing subscriptions.
+5. ContentKit has no draft TTL; OnlyDemo swept drafts after 24 h.
+6. A channel's editors can still buy its posts.
