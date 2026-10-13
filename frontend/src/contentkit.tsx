@@ -8,6 +8,7 @@ import type { ContentKitChange } from "@openrails/contentkit-ui/client";
 import { auth } from "./api";
 import { contentkit } from "./media";
 import { contentURLs } from "./paths";
+import { purchaseCount, subscribePurchases } from "./purchases";
 import { openSignIn } from "./session";
 
 // The kit follows the page's shadcn tokens, .dark class and <html lang>.
@@ -50,6 +51,7 @@ function Provider({ navigate, children }: { navigate: Navigate; children: ReactN
   const client = useQueryClient();
   const session = useSyncExternalStore(auth.subscribe, auth.getSnapshot);
   const viewer = sessionUser(session);
+  const purchased = useSyncExternalStore(subscribePurchases, purchaseCount);
   const { error: text } = useMessages();
   const onError = useCallback<ContentKitErrorHandler>(
     (error, { operation, file }) => {
@@ -69,7 +71,7 @@ function Provider({ navigate, children }: { navigate: Navigate; children: ReactN
     <ContentKitProvider
       client={contentkit}
       viewer={viewer}
-      accessRevision={sessionIdentity(session)}
+      accessRevision={`${sessionIdentity(session)}:${purchased}`}
       onSignIn={openSignIn}
       urls={contentURLs}
       navigate={navigate}

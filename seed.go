@@ -56,6 +56,10 @@ var seedCreators = []seedCreator{
 // row is made by the same AuthKit, ContentKit and OpenRails code paths. It is
 // idempotent: a creator's channel and posts are reused by handle and title.
 func seed(ctx context.Context, base string, out io.Writer) error {
+	return withAuth(ctx, func(a *appAuth) error { return seedWith(ctx, base, a, out) })
+}
+
+func seedWith(ctx context.Context, base string, a *appAuth, out io.Writer) error {
 	for i, creator := range seedCreators {
 		c := newAPIClient(base, net.IPv4(127, 0, 1, byte(i+1)))
 		if err := c.signIn(ctx, creator.username); err != nil {
@@ -93,7 +97,7 @@ func seed(ctx context.Context, base string, out io.Writer) error {
 		}
 		fmt.Fprintf(out, "seeded @%s (%d posts)\n", creator.channel, len(creator.posts))
 	}
-	if err := markSeedCreatorsVerified(ctx); err != nil {
+	if err := markSeedCreatorsVerified(ctx, a); err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "creator logins: <username>@example.test / %s\n", seedPassword)
@@ -115,23 +119,22 @@ func postRule(policy, channel string) map[string]any {
 
 // Registration leaves addresses unproven, and AuthKit refuses new sign-in
 // methods until one is proven. The example.test addresses cannot receive mail,
-// so seed vouches for its own display accounts.
-func markSeedCreatorsVerified(ctx context.Context) error {
-	return withAuth(ctx, func(a *appAuth) error {
-		for _, creator := range seedCreators {
-			user, err := a.client.User(ctx, iam.UserByEmail(creator.username+"@example.test"))
-			if err != nil {
-				return fmt.Errorf("%s: account not found: %v", creator.username, err)
-			}
-			if !user.EmailVerified {
-				verified := true
-				if _, err := a.client.UpdateUser(ctx, iam.SystemIdentity(), user.ID, iam.UserUpdate{EmailVerified: &verified}); err != nil {
-					return fmt.Errorf("%s verify: %w", creator.username, err)
-				}
+// so seed vouches for its own display accounts. AuthKit retires the password
+// on a proof that does not show it, so the vouch restates it.
+func markSeedCreatorsVerified(ctx context.Context, a *appAuth) error {
+	for _, creator := range seedCreators {
+		user, err := a.client.User(ctx, iam.UserByEmail(creator.username+"@example.test"))
+		if err != nil {
+			return fmt.Errorf("%s: account not found: %v", creator.username, err)
+		}
+		if !user.EmailVerified {
+			verified, password := true, seedPassword
+			if _, err := a.client.UpdateUser(ctx, iam.SystemIdentity(), user.ID, iam.UserUpdate{EmailVerified: &verified, Password: &password}); err != nil {
+				return fmt.Errorf("%s verify: %w", creator.username, err)
 			}
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // apiClient is one person on a running server, from its own loopback

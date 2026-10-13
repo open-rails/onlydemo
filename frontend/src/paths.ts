@@ -12,4 +12,5 @@ export { parseCode };
 export const channelsPath = "/c";
 export const newChannelPath = "/c/new";
 export const channelPath = (slug: string) => `/c/${encodeURIComponent(slug)}`;
+export const searchPath = (q: string) => `/search?q=${encodeURIComponent(q)}`;
 export const newPostPath = (channel?: string) => "/post/new" + (channel ? `?channel=${encodeURIComponent(channel)}` : "");

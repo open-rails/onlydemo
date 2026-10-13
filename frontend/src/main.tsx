@@ -11,6 +11,7 @@ import { ChannelPage, NewChannelPage } from "./pages/channel";
 import { EditPostPage, PostPage } from "./pages/post";
 import { NewPostPage } from "./pages/compose";
 import { AccountPage } from "./pages/account";
+import { SearchPage } from "./pages/search";
 import { InvitePage } from "./components/channel-team";
 import {
   AuthCallbackPage,
@@ -39,6 +40,9 @@ const router = createBrowserRouter([
       { path: "/c/new", element: <NewChannelPage /> },
       { path: "/c/:channel", element: <ChannelPage /> },
       { path: "/p/:code/:slug?", element: <PostPage /> },
+      // ContentKit prefixes paths with a request's language; the page keeps the canonical one.
+      { path: "/:lang/p/:code/:slug?", element: <PostPage /> },
+      { path: "/search", element: <SearchPage /> },
       { path: "/post/:id", element: <PostPage /> },
       {
         path: "/post/:id/edit",

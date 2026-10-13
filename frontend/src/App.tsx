@@ -28,6 +28,7 @@ import { EmptyState, Loading } from "./components/states";
 import { UserAvatar, SuggestedCreators } from "./components/cards";
 import { channelsPath, newChannelPath, newPostPath } from "./paths";
 import { InboxBell } from "./components/notifications";
+import { SiteSearch } from "./pages/search";
 
 export function AppLayout() {
   const auth = useAuth();
@@ -242,6 +243,7 @@ export function AppLayout() {
           <Outlet />
         </main>
         <aside className="rail">
+          {location.pathname !== channelsPath && location.pathname !== "/search" && <SiteSearch className="rail-search" />}
           <SuggestedCreators />
           <div className="rail-footer">
             <Badge variant="outline" className="text-warning">

@@ -6,6 +6,7 @@ import { Add01Icon, Image01Icon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "../components/states";
 import { SuggestedCreators } from "../components/cards";
+import { SiteSearch } from "./search";
 import { useAuth } from "../session";
 import { channelPath, channelsPath, newChannelPath } from "../paths";
 
@@ -96,6 +97,7 @@ export function ChannelsPage() {
           </Button>
         )}
       </div>
+      <SiteSearch className="mb-4" />
       <GroupDirectory kind="channel" layout="grid" sort="newest" letters={false} href={(g) => channelPath(g.slug)} />
     </>
   );

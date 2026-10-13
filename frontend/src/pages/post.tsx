@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
-import { ContentEditor, GroupAvatar, MediaGallery, Paywall } from "@openrails/contentkit-ui";
+import { Comments, ContentEditor, GroupAvatar, MediaGallery, Paywall } from "@openrails/contentkit-ui";
 import { useCanonicalContent, useContentDetail } from "@openrails/contentkit-ui/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowLeft02Icon, Delete02Icon, PencilEdit02Icon } from "@hugeicons/core-free-icons";
@@ -116,7 +116,16 @@ export function PostPage() {
           </div>
           {version && <MediaGallery item={{ kind: "post", id: content.id, version: version.id }} className="post-gallery" label="Post media" />}
         </article>
-        <aside className="panel purchase-panel">{detail.decision && <Paywall decision={detail.decision} onCheckout={checkout} />}</aside>
+        {detail.decision && !detail.decision.allowed && (
+          <aside className="panel purchase-panel">
+            <Paywall decision={detail.decision} onCheckout={checkout} />
+          </aside>
+        )}
+        {content.comments !== "hidden" && (
+          <section className="panel post-comments">
+            <Comments item={{ type: "contents", id: content.id }} />
+          </section>
+        )}
       </div>
       <Dialog open={deleting} onOpenChange={setDeleting}>
         <DialogContent>

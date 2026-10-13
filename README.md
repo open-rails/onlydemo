@@ -152,8 +152,8 @@ Images and videos use ContentKit media through the engine
 - Serve `media-gateway` at `media.<domain>` and use cookie delivery:
   `MEDIA_URL=https://media.<domain>`, `MEDIA_DELIVERY=cookie`,
   `MEDIA_COOKIE_DOMAIN=<domain>`.
-- `MEDIA_GATEWAY_HOSTS=media.<domain>=onlydemo`; `MEDIA_GATEWAY_CORS_ORIGINS`
-  lists exactly the site origins.
+- `MEDIA_GATEWAY_HOSTS=media.<domain>=onlydemo`, `MEDIA_GATEWAY_BUCKETS=onlydemo=<bucket>`;
+  `MEDIA_GATEWAY_CORS_ORIGINS` lists exactly the site origins.
 - Keep the bucket private. The gateway gets a read-only key limited to
   `*/private/*` and `*/public/*`.
 - A CDN may cache `public/`; never let a shared cache store `private/`.

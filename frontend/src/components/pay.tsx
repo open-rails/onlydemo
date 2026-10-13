@@ -9,6 +9,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Tick02Icon } from "@hugeicons/core-free-icons";
 import { request, sessionKey } from "../api";
 import { AccountBillingScope } from "../billing";
+import { accessChanged } from "../purchases";
 import { observePurchase, purchaseKey } from "../purchase-key";
 import { ErrorState, Loading } from "./states";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
@@ -49,6 +50,7 @@ export function PayHost({ children }: { children: ReactNode }) {
     (done: PayTarget) => {
       setTarget(null);
       setNotice(done.offer.target.kind === "group" ? `Welcome to ${done.merchant}.` : "Unlocked.");
+      accessChanged();
       void client.invalidateQueries();
     },
     [client],

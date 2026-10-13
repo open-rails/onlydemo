@@ -308,6 +308,10 @@
     gap: 8px;
     padding: 0 4px;
   }
+  .rail-search {
+    display: block;
+    margin-bottom: 18px;
+  }
   .rail-footer {
     display: flex;
     flex-wrap: wrap;
@@ -843,6 +847,9 @@
   }
   .reader-main {
     min-width: 0;
+  }
+  .reader-layout > .panel + .panel {
+    margin-top: 0;
   }
   .reader-title {
     font-size: 1.4rem;

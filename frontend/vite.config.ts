@@ -12,6 +12,7 @@ export default defineConfig({
         "/api/v1",
         "/auth/v1",
         "/billing/v1",
+        "/contentkit/v1",
         "/.well-known",
         "/dev/routes",
         "/health",

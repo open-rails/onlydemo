@@ -98,8 +98,9 @@ export function ChannelPage() {
 function MembershipSettings({ group, onUpdated }: { group: GroupDetail; onUpdated: () => void }) {
   const terms = group.access?.offer?.terms;
   const [enabled, setEnabled] = useState(!!terms);
-  const [free, setFree] = useState(terms?.amount === "0");
-  const [amount, setAmount] = useState(terms && terms.amount !== "0" ? terms.amount : "");
+  const free0 = !!terms && Number(terms.amount) === 0;
+  const [free, setFree] = useState(free0);
+  const [amount, setAmount] = useState(terms && !free0 ? terms.amount : "");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -121,7 +122,7 @@ function MembershipSettings({ group, onUpdated }: { group: GroupDetail; onUpdate
   };
   const status = !terms
     ? "This channel sells no membership. Posts can be free or sold individually; existing members keep access."
-    : terms.amount === "0"
+    : free0
       ? "Open: anyone can join free."
       : `Open: ${money(String(Number(terms.amount) * 1_000_000), terms.currency)} ${duration(terms.renew_hours)}.`;
   return (
