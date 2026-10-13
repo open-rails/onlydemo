@@ -266,6 +266,8 @@ github.com/open-rails/contentkit v0.84.0 h1:crSvbCRIGvyFgdgjXP4x0ihdN8u/3PzgPz/W
 github.com/open-rails/contentkit v0.84.0/go.mod h1:TUnNlfSVVce8MiK8/6Zp2vS7h0d1j9IxSEnIfVGQhUc=
 github.com/open-rails/contentkit v0.85.0 h1:wiL0rO16hQ5/xybo5opmy/T10P03tXxZXwkNaERxFtI=
 github.com/open-rails/contentkit v0.85.0/go.mod h1:TUnNlfSVVce8MiK8/6Zp2vS7h0d1j9IxSEnIfVGQhUc=
+github.com/open-rails/contentkit v0.85.1 h1:bWLj/sykmHY0TEUaDSNXZvwsZXwN58OAGlvY7KW7FIg=
+github.com/open-rails/contentkit v0.85.1/go.mod h1:TUnNlfSVVce8MiK8/6Zp2vS7h0d1j9IxSEnIfVGQhUc=
 github.com/open-rails/contentkit/adapters/authkit v0.6.0 h1:7JwBzU8YsBRlGhUJeMTwFPc8Y1Fih0jF86C4IiRaHV8=
 github.com/open-rails/contentkit/adapters/authkit v0.6.0/go.mod h1:mHFqDEZzt+ci1rTdILpx8/DN3RWzo/J49hajU5+ZyQc=
 github.com/open-rails/contentkit/adapters/openrails v0.3.0 h1:Dj/AAntOd/5xl6ozEDpV6DX187m1EHfYNka6+LC9rU0=

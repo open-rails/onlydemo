@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { OrderCheckout } from "@openrails/billing-ui";
+import { OrderPayment } from "@openrails/billing-ui";
 import type { Order } from "@openrails/billing-ui/client";
 import type { Sale } from "@openrails/contentkit-ui/client";
 import { SignInPanel } from "@openrails/auth-ui";
@@ -123,7 +123,7 @@ function PayModal({ target, onClose, onPaid }: { target: PayTarget; onClose: () 
         </DialogHeader>
         {gate ??
           (order.data && (
-            <OrderCheckout
+            <OrderPayment
               orderId={order.data.value.id}
               returnUrl={window.location.href}
               onSettled={(paid) => {

@@ -21,11 +21,11 @@ importers:
         specifier: 1.24.0
         version: 1.24.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@openrails/billing-ui':
-        specifier: 0.244.0
-        version: 0.244.0(@tanstack/react-query@5.103.2(react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react-is@16.13.1)(react@19.3.0)(redux@5.0.1)
+        specifier: 0.252.1
+        version: 0.252.1(@tanstack/react-query@5.103.2(react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react-is@16.13.1)(react@19.3.0)(redux@5.0.1)
       '@openrails/contentkit-ui':
-        specifier: 0.82.0
-        version: 0.82.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+        specifier: 0.85.1
+        version: 0.85.1(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@tanstack/react-query':
         specifier: ^5.100.11
         version: 5.103.2(react@19.3.0)
@@ -454,8 +454,8 @@ packages:
       '@solana/wallet-adapter-react':
         optional: true
 
-  '@openrails/billing-ui@0.244.0':
-    resolution: {integrity: sha512-ZChovern/fLNziFgrXyumaKOjzdqSqf7QyvlYnvhuTYsFe3Hh0pV/n4fYQToG7p3m3dy648sl+W8fnWWSFBUsg==}
+  '@openrails/billing-ui@0.252.1':
+    resolution: {integrity: sha512-b4rSkfqMU19T0i+blKkrbhLv8OX7XxYoNZfsA8g9NayvLJ0rWCgteYs6iY2x+N/5LwsKndW8BON8FSJwLaPxng==}
     engines: {node: '>=22.12.0'}
     peerDependencies:
       '@tanstack/react-query': '>=5 <6'
@@ -465,8 +465,8 @@ packages:
       '@tanstack/react-query':
         optional: true
 
-  '@openrails/contentkit-ui@0.82.0':
-    resolution: {integrity: sha512-Dit9omMZ5lm5FxCd4M6ukLwv+SeAOOQtnvc2L/3lVHIIiowlYelblKREr+RwWhKeZgR9UaSl5Qa/mH9Lyc0GIw==}
+  '@openrails/contentkit-ui@0.85.1':
+    resolution: {integrity: sha512-KTWAWQ6lrFikxpDvuIdU/SDQyq0hrFrmfVsO4P5KPBr3W+Ln9bGvsdyNOP3NNPski60M+l8tdV2jhyDPjWAwpQ==}
     engines: {node: '>=22.12.0'}
     peerDependencies:
       '@tiptap/core': '>=3.31.4 <4'
@@ -3177,7 +3177,7 @@ snapshots:
       - '@types/react'
       - date-fns
 
-  '@openrails/billing-ui@0.244.0(@tanstack/react-query@5.103.2(react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react-is@16.13.1)(react@19.3.0)(redux@5.0.1)':
+  '@openrails/billing-ui@0.252.1(@tanstack/react-query@5.103.2(react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react-is@16.13.1)(react@19.3.0)(redux@5.0.1)':
     dependencies:
       '@base-ui/react': 1.8.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@hugeicons/core-free-icons': 4.3.5
@@ -3206,7 +3206,7 @@ snapshots:
       - react-is
       - redux
 
-  '@openrails/contentkit-ui@0.82.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
+  '@openrails/contentkit-ui@0.85.1(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:
       '@base-ui/react': 1.8.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@dnd-kit/core': 6.3.1(react-dom@19.3.0(react@19.3.0))(react@19.3.0)

@@ -94,9 +94,9 @@ export function ChannelPage() {
 }
 
 // The membership a channel sells: ContentKit's group offer (free or renewing
-// monthly), or none.
+// monthly), or none. Its owner reads it as GroupDetail.offer.
 function MembershipSettings({ group, onUpdated }: { group: GroupDetail; onUpdated: () => void }) {
-  const terms = group.access?.offer?.terms;
+  const terms = group.offer?.state === "active" ? group.offer.terms : undefined;
   const [enabled, setEnabled] = useState(!!terms);
   const free0 = !!terms && Number(terms.amount) === 0;
   const [free, setFree] = useState(free0);
