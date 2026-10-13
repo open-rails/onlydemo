@@ -10,7 +10,7 @@ require (
 	github.com/knadh/koanf/v2 v2.3.6
 	github.com/open-rails/authkit v1.24.0
 	github.com/open-rails/migratekit v1.11.1 // indirect
-	github.com/open-rails/openrails v0.249.0
+	github.com/open-rails/openrails v0.252.1
 	github.com/riverqueue/river v0.47.0
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.47.0 // indirect
 )
@@ -20,9 +20,9 @@ require (
 	github.com/johannesboyne/gofakes3 v1.2.0
 	github.com/joho/godotenv v1.5.1
 	github.com/jonboulle/clockwork v0.5.0
-	github.com/open-rails/contentkit v0.82.0
+	github.com/open-rails/contentkit v0.84.0
 	github.com/open-rails/contentkit/adapters/authkit v0.6.0
-	github.com/open-rails/contentkit/adapters/openrails v0.3.0
+	github.com/open-rails/contentkit/adapters/openrails v0.4.0
 	github.com/open-rails/helpers v1.12.0
 	github.com/riverqueue/river/rivertype v0.47.0
 	github.com/spf13/cobra v1.10.2

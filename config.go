@@ -114,6 +114,12 @@ func loadConfig() (Config, error) {
 	if len(merchant.PSPs) == 0 {
 		return Config{}, fmt.Errorf("%s must declare at least one PSP", merchantFile)
 	}
+	// The demo never moves real money.
+	for key, psp := range merchant.PSPs {
+		if psp.Environment == openrails.EnvironmentLive {
+			return Config{}, fmt.Errorf("%s: PSP %s is live; OnlyDemo takes only test or sandbox PSPs", merchantFile, key)
+		}
+	}
 
 	cfg := Config{
 		NotificationReceipts: k.Bool("notification_receipts"),

@@ -29,9 +29,8 @@ type billingOptions struct {
 	Sandbox *openrails.ProviderSandboxConfig
 }
 
-// newBilling is deliberately sandbox-only: OpenRails runs in sandbox posture
-// and each declared PSP must carry test credentials. New creates or upgrades
-// OpenRails' tables.
+// newBilling runs OpenRails over the merchant's non-live PSPs (loadConfig
+// refuses a live one). New creates or upgrades OpenRails' tables.
 func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth, options billingOptions) (*billingService, error) {
 	if pool == nil {
 		return nil, errors.New("billing requires the host PostgreSQL pool")
@@ -44,7 +43,6 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 	}
 	engine, err := openrails.New(ctx, openrails.Config{
 		Database:             openrails.DatabaseConfig{Schema: billingSchema(cfg), RiverSchema: riverSchema(cfg)},
-		TestMode:             openrails.Sandbox,
 		ProviderWriteMode:    openrails.ProviderWritesFull,
 		Merchants:            map[string]openrails.MerchantDeclaration{"onlydemo": merchant},
 		PublicBillingBaseURL: cfg.PublicURL + "/billing",

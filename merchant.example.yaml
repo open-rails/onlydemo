@@ -1,10 +1,12 @@
-# Copy to merchant.yaml (gitignored): the seller and its sandbox PSPs. Startup
-# refuses a PSP whose credentials are not sandbox. MERCHANT_FILE names another path.
+# Copy to merchant.yaml (gitignored): the seller and its PSPs. Startup refuses
+# a live PSP; OpenRails verifies each environment with the provider.
+# MERCHANT_FILE names another path.
 slug: onlydemo
 display_name: OnlyDemo
 psps:
   stripe:
     rail: stripe
+    environment: test
     account_id: acct_... # the Stripe account id
     settings:
       publishable_key: pk_test_... # in-page card entry (Stripe Elements)
@@ -13,10 +15,10 @@ psps:
       webhook_signing_secret: whsec_... # from task stripe:listen
   # nmi:
   #   rail: nmi
+  #   environment: test # a gateway account in test mode; sandbox for sandbox.nmi.com
   #   account_id: "000000" # the NMI dashboard's "Gateway ID"
   #   settings:
   #     tokenization_key: your-public-tokenization-key # Collect.js
-  #     endpoint_deployment: gateway # or sandbox
   #   secrets:
   #     security_key: your-test-mode-security-key
   #     webhook_signing_secret: your-webhook-signing-key

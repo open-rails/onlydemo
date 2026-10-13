@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"image/color"
+	"slices"
 	"testing"
 
 	"github.com/open-rails/authkit/iam"
@@ -55,9 +57,41 @@ func TestChannelsOnContentKit(t *testing.T) {
 	if offers, _ := decision["offers"].([]any); len(offers) != 0 {
 		t.Fatalf("a channel selling no membership offers %v", offers)
 	}
-	offer := contentkitPrefix + "/v1/groups/" + id + "/offer"
-	join := contentkitPrefix + "/v1/groups/" + id + "/join"
+	group := contentkitPrefix + "/v1/groups/" + id
+	offer := group + "/offer"
+	join := group + "/join"
+	if r := fan.call("POST", join, nil, "", 409); r["code"] != "not_joinable" {
+		t.Fatalf("joining a channel that sells nothing: %v", r)
+	}
+	if g := owner.call("GET", group, nil, "", 200); g["offer"] != nil {
+		t.Fatalf("an unsold channel's offer: %v", g["offer"])
+	}
+
+	// Comments follow the post's access: the owner writes, non-members read
+	// none and are refused.
+	thread := contentkitPrefix + "/v1/contents/" + members + "/comments"
+	owner.call("POST", thread, map[string]any{"body": "welcome, members"}, "", 201)
+	for _, p := range []peer{fan, anon} {
+		if got := p.comments(members); len(got) != 0 {
+			t.Fatalf("%s reads a members-only post's comments: %v", p.name, got)
+		}
+	}
+	if s := fan.call("GET", contentkitPrefix+"/v1/contents/"+members+"/can-comment", nil, "", 200); s["locked"] != true || s["can_comment"] == true {
+		t.Fatalf("a non-member's standing: %v", s)
+	}
+	if r := fan.call("POST", thread, map[string]any{"body": "let me in"}, "", 403); r["code"] != "comments_locked" {
+		t.Fatalf("a non-member's comment: %v", r)
+	}
+
+	// The owner manages the offer from the channel; the paywall offers it to
+	// everyone else.
 	owner.call("PUT", offer, map[string]any{"amount": "0"}, "", 200)
+	if g := owner.call("GET", group, nil, "", 200); g["offer"] == nil || g["access"].(map[string]any)["offer"] != nil {
+		t.Fatalf("the owner's channel: offer %v access %v", g["offer"], g["access"])
+	}
+	if g := fan.call("GET", group, nil, "", 200); g["offer"] != nil || g["access"].(map[string]any)["offer"] == nil {
+		t.Fatalf("a fan's channel: offer %v access %v", g["offer"], g["access"])
+	}
 	public, _ := owner.post(id, "Hello", "Everyone reads this", nil)
 	paid, _ := owner.post(id, "Paid", "Buyers read this", map[string]any{"level": "ppv"})
 	editor.post(id, "By the editor", "Hi", nil)
@@ -101,6 +135,10 @@ func TestChannelsOnContentKit(t *testing.T) {
 	}
 	if !fan.opens(members) || fan.opens(paid) || fan.body(members) != "Members read this" {
 		t.Fatal("joining did not open the members-only post alone")
+	}
+	fan.call("POST", thread, map[string]any{"body": "glad to be here"}, "", 201)
+	if got := fan.comments(members); !slices.Equal(got, []string{"glad to be here", "welcome, members"}) {
+		t.Fatalf("a member reads the comments %v", got)
 	}
 	// Its media too: the owner's upload to the post's version opens to members.
 	image := testPNG(t, 64, 64, color.RGBA{0, 0, 200, 255})
@@ -170,4 +208,19 @@ func TestChannelsOnContentKit(t *testing.T) {
 		g, err := h.srv.auth.client.Group(ctx, iam.GroupByID(id))
 		return err != nil || g.DeletedAt != nil
 	})
+}
+
+// comments are the bodies of content id's top-level comments, newest first.
+func (p peer) comments(id string) []string {
+	p.h.t.Helper()
+	res, raw := p.do("GET", contentkitPrefix+"/v1/contents/"+id+"/comments", nil, "")
+	var list []struct{ Body string }
+	if res.StatusCode != 200 || json.Unmarshal(raw, &list) != nil {
+		p.h.t.Fatalf("%s: comments on %s = %d: %s", p.name, id, res.StatusCode, raw)
+	}
+	out := []string{}
+	for _, c := range list {
+		out = append(out, c.Body)
+	}
+	return out
 }
