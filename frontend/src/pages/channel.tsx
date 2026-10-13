@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import type { ContentQuery, GroupDetail } from "@openrails/contentkit-ui/client";
+import type { GroupDetail } from "@openrails/contentkit-ui/client";
 import { ContentGrid, GroupBanner, GroupImageEditor } from "@openrails/contentkit-ui";
 import { useGroup, useGroups } from "@openrails/contentkit-ui/react";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -69,9 +69,8 @@ export function ChannelPage() {
         <ContentGrid
           className="feed"
           surface="channel"
-          // owner_group filters /contents; the SDK's ContentQuery does not type it yet.
-          query={{ kind: "post", owner_group: group.id, sort: "newest", mode: "lock" } as ContentQuery}
-          renderCard={(card) => <Post card={card} />}
+          query={{ kind: "post", owner_group: group.id, sort: "newest", mode: "lock" }}
+          renderCard={(card) => <Post card={card} owner={false} />}
           empty={
             <EmptyState
               title="No posts yet."

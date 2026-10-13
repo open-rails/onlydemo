@@ -9,12 +9,13 @@ import { SuggestedCreators } from "../components/cards";
 import { useAuth } from "../session";
 import { channelPath, channelsPath, newChannelPath } from "../paths";
 
-// A post card with its channel above it.
-export function Post({ card }: { card: Card }) {
-  const owner = card.owner;
+// A post card with its channel above it; owner={false} on that channel's own feed.
+export function Post({ card, owner: showOwner = true }: { card: Card; owner?: boolean }) {
+  const owner = showOwner ? card.owner : undefined;
   return (
     <PostCard
       card={card}
+      owner={showOwner}
       byline={
         owner && (
           <Link to={channelPath(owner.slug)} className="feed-author">

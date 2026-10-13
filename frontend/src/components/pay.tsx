@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { OrderCheckout } from "@openrails/billing-ui";
 import type { Order } from "@openrails/billing-ui/client";
-import type { DecisionOffer } from "@openrails/contentkit-ui/client";
+import type { Sale } from "@openrails/contentkit-ui/client";
 import { SignInPanel } from "@openrails/auth-ui";
 import { sessionIdentity, useSession } from "@openrails/auth-ui/react";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -17,7 +17,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 // offers (its key and its OpenRails price), and whose it is.
 export interface PayTarget {
   key: string;
-  offer: DecisionOffer;
+  offer: Sale;
   merchant: string;
 }
 
@@ -29,7 +29,7 @@ export const usePay = () => useContext(PayContext);
 export function useCheckout(merchant: string) {
   const pay = usePay();
   return useCallback(
-    ({ key, offer }: { key: string; offer?: DecisionOffer }) => {
+    ({ key, offer }: { key: string; offer?: Sale }) => {
       if (offer) pay({ key, offer, merchant });
     },
     [pay, merchant],

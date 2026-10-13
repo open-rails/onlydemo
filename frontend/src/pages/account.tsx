@@ -179,7 +179,7 @@ function Billing() {
 }
 function AccountSettings({ user }: { user: { id: string; username: string } }) {
   const navigate = useNavigate();
-  const avatar = usePublicImage("user", user.id, "avatar");
+  const avatar = usePublicImage(userRef(user.id), "avatar");
   return (
     <>
       <VerifyEmailBanner />

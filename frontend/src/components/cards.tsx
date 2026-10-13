@@ -6,6 +6,7 @@ import { usePublicImage, useGroups } from "@openrails/contentkit-ui/react";
 import { cn } from "cn";
 import { Button } from "@/components/ui/button";
 import { channelsPath, channelPath } from "../paths";
+import { userRef } from "../media";
 
 function hue(seed: string) {
   let h = 0;
@@ -15,7 +16,7 @@ function hue(seed: string) {
 
 // The signed-in user's avatar: their item's published avatar, else an initial.
 export function UserAvatar({ user, className }: { user: { id: string; username: string }; className?: string }) {
-  const avatar = usePublicImage("user", user.id, "avatar");
+  const avatar = usePublicImage(userRef(user.id), "avatar");
   return (
     <span className={cn("avatar", className)} style={{ "--h": hue(user.id) } as CSSProperties}>
       {(user.username || "?").slice(0, 1).toUpperCase()}
