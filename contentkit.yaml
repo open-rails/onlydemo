@@ -19,6 +19,8 @@ content:
       owner: user
       sellable: true
       auth_scope: true
+      # Per editor: 60 files an hour, 100 GiB a day; 500 GiB stored per channel.
+      uploads: {files_per_hour: 60, bytes_per_day: 107374182400, quota_bytes: 536870912000}
 offers:
   currency: USD
   minimum: {content: "0.50", group: "1.00"}

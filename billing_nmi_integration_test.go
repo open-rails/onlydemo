@@ -120,6 +120,13 @@ func TestNMIBillingEndToEnd(t *testing.T) {
 		t.Fatalf("a declined renewal moved money: %d cents", got)
 	}
 	h.assertBillingNotices(t, buyer, owner, observer)
+
+	// A membership made free stops paid renewals: each ends with its period.
+	owner.call("PUT", contentkitPrefix+"/v1/groups/"+channelID+"/offer", map[string]any{"amount": "0"}, "", 200)
+	eventually(t, "the paid membership to stop renewing", func() bool {
+		s := h.subscription(buyer.id)
+		return s.CancelScheduled || s.CanceledAt != nil || s.Status == billing.SubscriptionCanceled
+	})
 	if odd := h.nmi.Unexpected(); len(odd) > 0 {
 		t.Fatalf("requests nmimock does not model: %v", odd)
 	}

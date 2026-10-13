@@ -11,7 +11,7 @@ no tables and no content routes.
 | Config (`contentkit.yaml`) | Holds |
 | --- | --- |
 | `post` kind | route `p`, presentation `post`, one hidden version; owned by its channel (`owner_group_id`), never a member of it |
-| `channel` group kind | route `c`, `owner: user`, `sellable`, `auth_scope`; cover (3:1 banner) and avatar slots |
+| `channel` group kind | route `c`, `owner: user`, `sellable`, `auth_scope`, upload limits; cover (3:1 banner) and avatar slots |
 | media kinds | `post` (version media: images, videos, `large`, `hls`, blurred `preview`), `channel`, `user` (avatars) |
 | offers | USD, minimum 0.50 content, 1.00 group; PSPs from `merchant.yaml` |
 
@@ -89,7 +89,9 @@ without the group key (#218).
 
 1. `/v1/me/groups` lists the groups the viewer owns, manages or belongs to, not those where they only write content; the app reads channel roles from AuthKit (`roles.ts`).
 2. The Engine exposes no media registry, so the media worker builds its own (`workerRegistry`).
-3. The Engine wires no upload limiter: OnlyDemo's files/hour, bytes/day and per-channel quota are gone.
-4. A membership going from paid to free keeps renewing existing subscriptions.
-5. ContentKit has no draft TTL; OnlyDemo swept drafts after 24 h.
-6. A channel's editors can still buy its posts.
+3. ContentKit has no draft TTL; OnlyDemo swept drafts after 24 h.
+4. A channel's editors can still buy its posts.
+
+Upload limits are the `channel` kind's `uploads` (60 files an hour, 100 GiB a
+day per editor, 500 GiB per channel); a membership made free or withdrawn
+stops paid renewals (`StopRenewals`, proven in `TestNMIBillingEndToEnd`).
