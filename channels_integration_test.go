@@ -45,6 +45,10 @@ func TestChannelsOnContentKit(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Members-only posts need the channel to sell a membership; this one is free.
+	offer := contentkitPrefix + "/v1/groups/" + id + "/offer"
+	join := contentkitPrefix + "/v1/groups/" + id + "/join"
+	owner.call("PUT", offer, map[string]any{"amount": "0"}, "", 200)
 	public, _ := owner.post(id, "Hello", "Everyone reads this", nil)
 	members, membersVersion := owner.post(id, "Members", "Members read this", map[string]any{"level": "group", "group_id": id})
 	paid, _ := owner.post(id, "Paid", "Buyers read this", map[string]any{"level": "ppv"})
@@ -72,6 +76,10 @@ func TestChannelsOnContentKit(t *testing.T) {
 	}
 	other := fan.channel("other", "Other")
 	fan.post(other, "Elsewhere", "Not in the studio", nil)
+	if e := fan.call("POST", contentkitPrefix+"/v1/contents", map[string]any{"kind": kindPost, "owner_group_id": other,
+		"text": map[string]any{"en": map[string]string{"title": "Members"}}, "access": map[string]any{"level": "group", "group_id": other}}, "", 409); e["code"] != "no_membership" {
+		t.Fatalf("a members-only post in a channel selling no membership: %v", e)
+	}
 	feed := anon.call("GET", contentkitPrefix+"/v1/contents?kind=post&mode=lock&owner_group="+id, nil, "", 200)
 	locked := map[string]bool{}
 	for _, card := range feed["contents"].([]any) {
@@ -86,9 +94,6 @@ func TestChannelsOnContentKit(t *testing.T) {
 	}
 
 	// A free membership: ContentKit grants the group's key on join.
-	offer := contentkitPrefix + "/v1/groups/" + id + "/offer"
-	join := contentkitPrefix + "/v1/groups/" + id + "/join"
-	owner.call("PUT", offer, map[string]any{"amount": "0"}, "", 200)
 	if j := fan.call("POST", join, nil, "", 200); j["member"] != true {
 		t.Fatalf("join: %v", j)
 	}
