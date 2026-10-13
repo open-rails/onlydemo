@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AccountSecurity } from "@openrails/auth-ui";
 import { AccountBilling } from "@openrails/billing-ui";
@@ -14,9 +14,11 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { request } from "../api";
 import { AccountBillingScope } from "../billing";
 import type { AppConfig } from "../models";
-import { useLibrary, useMyChannels } from "../content";
+import { useMyChannels } from "../roles";
+import { contentkit } from "../media";
 import { Badge } from "@/components/ui/badge";
 import { usePublicImage } from "@openrails/contentkit-ui/react";
+import { GroupAvatar, GroupCover } from "@openrails/contentkit-ui";
 import {
   EmptyState,
   ErrorState,
@@ -24,10 +26,10 @@ import {
 } from "../components/states";
 import { AvatarUpload } from "@openrails/contentkit-ui";
 import { Card, CardContent } from "@/components/ui/card";
-import { UserAvatar, ChannelCard } from "../components/cards";
+import { UserAvatar } from "../components/cards";
 import { userRef } from "../media";
 import { useAuth } from "../session";
-import { channelsPath, newChannelPath, postByIDPath } from "../paths";
+import { channelPath, channelsPath, newChannelPath, postByIDPath } from "../paths";
 import { VerifyEmailBanner } from "../verify";
 import { AccountNotifications } from "../components/notifications";
 
@@ -71,7 +73,13 @@ export function AccountPage() {
 }
 // The posts the viewer bought, from ContentKit's library: deleted ones stay.
 function Library() {
-  const library = useLibrary();
+  const auth = useAuth();
+  const library = useInfiniteQuery({
+    queryKey: ["library", auth.user?.id],
+    initialPageParam: "",
+    queryFn: ({ pageParam }) => contentkit.offers.library({ limit: 50, cursor: pageParam || undefined }),
+    getNextPageParam: (last) => last.next_cursor || undefined,
+  });
   const items = library.data?.pages.flatMap((page) => page.items) ?? [];
   if (library.isPending) return <Loading />;
   if (library.error) return <ErrorState error={library.error} retry={() => void library.refetch()} />;
@@ -128,10 +136,21 @@ function MyChannels() {
         <Loading />
       ) : channels.error ? (
         <ErrorState error={channels.error} retry={() => void channels.refetch()} />
-      ) : channels.data?.data.length ? (
-        <div className="channel-grid">
-          {channels.data.data.map((channel) => (
-            <ChannelCard channel={channel} key={channel.id} />
+      ) : channels.data?.length ? (
+        <div className="suggested-list">
+          {channels.data.map(({ group, role }) => (
+            <Link to={channelPath(group.slug)} key={group.id} className="suggested-item">
+              <GroupCover group={group} className="cover" />
+              <span className="suggested-info">
+                <GroupAvatar group={group} className="avatar" />
+                <span>
+                  <strong>{group.name}</strong>
+                  <small>
+                    @{group.slug} · {role === "owner" ? "Owner" : "Editor"}
+                  </small>
+                </span>
+              </span>
+            </Link>
           ))}
         </div>
       ) : (

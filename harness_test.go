@@ -38,11 +38,9 @@ import (
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/authkit/iam"
-	"github.com/open-rails/contentkit/access"
 	"github.com/open-rails/contentkit/media"
 	mediaS3 "github.com/open-rails/contentkit/media/s3"
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/openrailstest/nmimock"
 )
 
@@ -416,21 +414,43 @@ func (p peer) channel(slug, name string) string {
 	return created[0].ID
 }
 
-// offerPrice waits for OpenRails to sell key and returns its live price.
-func (h *harness) offerPrice(key access.Key) string {
-	h.t.Helper()
+// contentPrice waits for content id's paywall to offer key on sale and
+// returns the offer's OpenRails price, as the browser's Paywall reads it.
+func (p peer) contentPrice(id string) string {
+	p.h.t.Helper()
 	var price string
-	eventually(h.t, "the price of "+key.String(), func() bool {
-		page, err := h.srv.billing.client.ListProducts(h.ctx, billing.ProductListParams{Keys: []string{key.String()}})
-		if err != nil || len(page.Items) != 1 || page.Items[0].Archived {
-			return false
-		}
-		for _, p := range page.Items[0].Prices {
-			if !p.Archived {
-				price = p.ID.String()
+	eventually(p.h.t, "the price of "+id, func() bool {
+		c := p.call("GET", contentkitPrefix+"/v1/contents/"+id, nil, "", 200)
+		d := c["versions"].([]any)[0].(map[string]any)["decision"].(map[string]any)
+		offers, _ := d["offers"].([]any)
+		for _, o := range offers {
+			if pid, _ := o.(map[string]any)["price_id"].(string); pid != "" {
+				price = pid
 			}
 		}
 		return price != ""
 	})
 	return price
+}
+
+// groupPrice waits for channel id's membership to sell and returns its
+// OpenRails price, as the browser's MembershipBox reads it.
+func (p peer) groupPrice(id string) string {
+	p.h.t.Helper()
+	var price string
+	eventually(p.h.t, "the membership price of "+id, func() bool {
+		a, _ := p.call("GET", contentkitPrefix+"/v1/groups/"+id, nil, "", 200)["access"].(map[string]any)
+		if o, ok := a["offer"].(map[string]any); ok {
+			price, _ = o["price_id"].(string)
+		}
+		return price != ""
+	})
+	return price
+}
+
+// body is content id's text body as p reads it; "" when withheld.
+func (p peer) body(id string) string {
+	p.h.t.Helper()
+	b, _ := p.call("GET", contentkitPrefix+"/v1/contents/"+id, nil, "", 200)["body"].(string)
+	return b
 }

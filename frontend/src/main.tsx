@@ -8,7 +8,7 @@ import { ContentKitHost } from "./contentkit";
 import { AppLayout, NotFoundPage, RequireAccount } from "./App";
 import { HomePage, ChannelsPage } from "./pages/explore";
 import { ChannelPage, NewChannelPage } from "./pages/channel";
-import { PostPage } from "./pages/post";
+import { EditPostPage, PostPage } from "./pages/post";
 import { NewPostPage } from "./pages/compose";
 import { AccountPage } from "./pages/account";
 import { InvitePage } from "./components/channel-team";
@@ -40,6 +40,14 @@ const router = createBrowserRouter([
       { path: "/c/:channel", element: <ChannelPage /> },
       { path: "/p/:code/:slug?", element: <PostPage /> },
       { path: "/post/:id", element: <PostPage /> },
+      {
+        path: "/post/:id/edit",
+        element: (
+          <RequireAccount reason="Sign in to edit your post.">
+            <EditPostPage />
+          </RequireAccount>
+        ),
+      },
       {
         path: "/post/new",
         element: (

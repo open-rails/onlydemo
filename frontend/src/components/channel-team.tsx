@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { request } from "../api";
-import type { Channel, Page } from "../models";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Add01Icon, UserGroupIcon, UserIcon } from "@hugeicons/core-free-icons";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +36,12 @@ import { Spinner } from "@/components/ui/spinner";
 import { EmptyState, ErrorState, FormError, Loading } from "./states";
 import { date } from "../format";
 
+// AuthKit's list page.
+interface Page<T> {
+  data: T[];
+  next_cursor?: string;
+}
+
 // AuthKit's group member: role text is qualified (channel:owner).
 interface Member {
   subject: { id: string; kind: string };
@@ -51,7 +56,7 @@ interface Invite {
   redeemed_at?: string;
   revoked_at?: string;
 }
-export function ChannelTeam({ channel }: { channel: Channel }) {
+export function ChannelTeam({ channel }: { channel: { id: string; can_manage: boolean } }) {
   // The channel's AuthKit group has the channel's id.
   const root = `/auth/v1/groups/${encodeURIComponent(channel.id)}`;
   const client = useQueryClient();

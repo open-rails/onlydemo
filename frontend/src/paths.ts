@@ -6,10 +6,10 @@ export const contentURLs = createContentURLs({ routes: { post: "p" } });
 export const postLink = (post: { code: string; slug: string }) => ({ content_kind: "post", code: post.code, slug: post.slug });
 export const postPath = (post: { code: string; slug: string; path?: string }) => post.path || contentURLs.path(postLink(post));
 export const postByIDPath = (id: string) => `/post/${encodeURIComponent(id)}`;
+export const editPostPath = (id: string) => `/post/${encodeURIComponent(id)}/edit`;
 export { parseCode };
 
 export const channelsPath = "/c";
 export const newChannelPath = "/c/new";
 export const channelPath = (slug: string) => `/c/${encodeURIComponent(slug)}`;
-export const newPostPath = (channelSlug?: string) =>
-  "/post/new" + (channelSlug ? `?channel=${encodeURIComponent(channelSlug)}` : "");
+export const newPostPath = (channel?: string) => "/post/new" + (channel ? `?channel=${encodeURIComponent(channel)}` : "");

@@ -8,6 +8,7 @@ import type { ContentKitChange } from "@openrails/contentkit-ui/client";
 import { auth } from "./api";
 import { contentkit } from "./media";
 import { contentURLs } from "./paths";
+import { openSignIn } from "./session";
 
 // The kit follows the page's shadcn tokens, .dark class and <html lang>.
 const language = document.documentElement.lang;
@@ -57,16 +58,24 @@ function Provider({ navigate, children }: { navigate: Navigate; children: ReactN
     },
     [text],
   );
-  // Channel and user images are listed by the app's API: refetch after a save.
+  // A purchase, join or edit changes what the app's queries show.
   const onChange = useCallback(
     (change: ContentKitChange) => {
-      if ((change.type === "media.committed" || change.type === "media.processed") && change.ref.kind !== "post")
-        void client.invalidateQueries();
+      if (change.type === "access.changed" || change.type === "groups.changed" || change.type === "content.changed") void client.invalidateQueries();
     },
     [client],
   );
   return (
-    <ContentKitProvider client={contentkit} viewer={viewer} accessRevision={sessionIdentity(session)} urls={contentURLs} navigate={navigate} onChange={onChange} onError={onError}>
+    <ContentKitProvider
+      client={contentkit}
+      viewer={viewer}
+      accessRevision={sessionIdentity(session)}
+      onSignIn={openSignIn}
+      urls={contentURLs}
+      navigate={navigate}
+      onChange={onChange}
+      onError={onError}
+    >
       {children}
     </ContentKitProvider>
   );

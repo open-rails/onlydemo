@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { auth } from "./api";
 import { BillingHost } from "./billing";
-import { SignInContext, type SignInMode } from "./session";
+import { registerSignIn, SignInContext, type SignInMode } from "./session";
 
 // AuthKit here soft-deletes: accounts are restorable for 30 days.
 const messages = {
@@ -61,6 +61,10 @@ function SignInHost({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [mode, setMode] = useState<SignInMode | null>(null);
+  useEffect(() => {
+    registerSignIn(setMode);
+    return () => registerSignIn(null);
+  }, []);
   return (
     <SignInContext.Provider value={setMode}>
       {children}

@@ -1,21 +1,36 @@
 import { Link } from "react-router-dom";
+import type { Card } from "@openrails/contentkit-ui/client";
+import { ContentGrid, GroupAvatar, GroupDirectory, PostCard } from "@openrails/contentkit-ui";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Add01Icon, Image01Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
+import { Add01Icon, Image01Icon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
-import { EmptyState, ErrorState, Loading } from "../components/states";
-import {
-  ChannelCard,
-  SuggestedCreators,
-} from "../components/cards";
-import { PostView } from "../components/post-view";
-import { useChannels, usePostFeed } from "../content";
+import { EmptyState } from "../components/states";
+import { SuggestedCreators } from "../components/cards";
 import { useAuth } from "../session";
-import { channelsPath, newChannelPath } from "../paths";
+import { channelPath, channelsPath, newChannelPath } from "../paths";
+
+// A post card with its channel above it.
+export function Post({ card }: { card: Card }) {
+  const owner = card.owner;
+  return (
+    <PostCard
+      card={card}
+      byline={
+        owner && (
+          <Link to={channelPath(owner.slug)} className="feed-author">
+            <GroupAvatar group={owner} className="avatar" />
+            <span>
+              <strong>{owner.name}</strong>
+              <small>@{owner.slug}</small>
+            </span>
+          </Link>
+        )
+      }
+    />
+  );
+}
 
 export function HomePage() {
-  const posts = usePostFeed();
-  const channels = useChannels();
   const auth = useAuth();
   return (
     <>
@@ -26,17 +41,10 @@ export function HomePage() {
         <section className="welcome-card">
           <div>
             <h2>Support the creators you love.</h2>
-            <p>
-              Subscribe for members-only posts, unlock individual posts, and
-              keep everything you buy.
-            </p>
+            <p>Subscribe for members-only posts, unlock individual posts, and keep everything you buy.</p>
           </div>
           <div className="inline-actions">
-            <Button
-              size="lg"
-              className="bg-white text-primary hover:bg-white/90"
-              onClick={auth.openRegister}
-            >
+            <Button size="lg" className="bg-white text-primary hover:bg-white/90" onClick={auth.openRegister}>
               Sign up
             </Button>
             <Button
@@ -51,54 +59,30 @@ export function HomePage() {
         </section>
       )}
       <SuggestedCreators strip />
-      {posts.isPending ? (
-        <Loading cards />
-      ) : posts.error ? (
-        <ErrorState error={posts.error} retry={() => void posts.refetch()} />
-      ) : posts.data?.length ? (
-        <div className="feed">
-          {posts.data.map((post) => (
-            <PostView
-              key={post.id}
-              post={post}
-              handle={post.channel_slug}
-              membership={
-                channels.data?.data.find((item) => item.id === post.channel_id)
-                  ?.membership
-              }
-            />
-          ))}
-        </div>
-      ) : (
-        <EmptyState
-          icon={Image01Icon}
-          title="Your feed is empty."
-          action={
-            <Button nativeButton={false} render={<Link to={channelsPath} />}>
-              Find creators
-            </Button>
-          }
-        >
-          New posts appear here as creators publish them.
-        </EmptyState>
-      )}
-      {posts.hasNextPage && (
-        <div className="pagination">
-          <Button
-            variant="outline"
-            disabled={posts.isFetchingNextPage}
-            onClick={() => void posts.fetchNextPage()}
+      <ContentGrid
+        className="feed"
+        surface="home"
+        query={{ kind: "post", sort: "newest", mode: "lock" }}
+        renderCard={(card) => <Post card={card} />}
+        empty={
+          <EmptyState
+            icon={Image01Icon}
+            title="Your feed is empty."
+            action={
+              <Button nativeButton={false} render={<Link to={channelsPath} />}>
+                Find creators
+              </Button>
+            }
           >
-            {posts.isFetchingNextPage && <Spinner data-icon="inline-start" />}
-            Load more
-          </Button>
-        </div>
-      )}
+            New posts appear here as creators publish them.
+          </EmptyState>
+        }
+      />
     </>
   );
 }
+
 export function ChannelsPage() {
-  const channels = useChannels();
   const auth = useAuth();
   return (
     <>
@@ -111,44 +95,7 @@ export function ChannelsPage() {
           </Button>
         )}
       </div>
-      {channels.isPending ? (
-        <Loading cards />
-      ) : channels.error ? (
-        <ErrorState
-          error={channels.error}
-          retry={() => void channels.refetch()}
-        />
-      ) : channels.data?.data.length ? (
-        <div className="channel-grid">
-          {channels.data.data.map((channel) => (
-            <ChannelCard channel={channel} key={channel.id} />
-          ))}
-        </div>
-      ) : (
-        <EmptyState
-          icon={UserGroupIcon}
-          title="No channels yet."
-          action={
-            !auth.user ? (
-              <Button onClick={auth.openRegister}>Create an account</Button>
-            ) : undefined
-          }
-        >
-          Be the first creator on OnlyDemo.
-        </EmptyState>
-      )}
-      {channels.hasNextPage && (
-        <div className="pagination">
-          <Button
-            variant="outline"
-            disabled={channels.isFetchingNextPage}
-            onClick={() => void channels.fetchNextPage()}
-          >
-            {channels.isFetchingNextPage && <Spinner data-icon="inline-start" />}
-            More creators
-          </Button>
-        </div>
-      )}
+      <GroupDirectory kind="channel" layout="grid" sort="newest" letters={false} href={(g) => channelPath(g.slug)} />
     </>
   );
 }

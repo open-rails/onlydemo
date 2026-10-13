@@ -7,6 +7,13 @@ export const SignInContext = createContext<((mode: SignInMode) => void) | null>(
   null,
 );
 
+// The sign-in dialog for code outside the router (ContentKit's provider).
+let opener: ((mode: SignInMode) => void) | null = null;
+export const registerSignIn = (open: ((mode: SignInMode) => void) | null) => {
+  opener = open;
+};
+export const openSignIn = () => opener?.("login");
+
 // The app's view of AuthKit: profile, sign-in dialog opener and sign-out.
 // On reload auth-ui's signed-in hint stands in for the profile until /me
 // loads, so the signed-in shell renders at once.

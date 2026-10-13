@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/open-rails/contentkit/access"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/openrailstest/nmimock"
@@ -41,14 +40,12 @@ func TestNMIBillingEndToEnd(t *testing.T) {
 	stranger := h.register("nmistranger", "127.0.0.4")
 	channelID := owner.channel("nmi-studio", "NMI studio")
 	owner.call("PUT", contentkitPrefix+"/v1/groups/"+channelID+"/offer", map[string]any{"amount": "9.99", "renew_hours": 720}, "", 200)
-	groupKey, _ := access.GroupKey(tenant, channelID)
-	membershipPrice := h.offerPrice(groupKey)
+	membershipPrice := buyer.groupPrice(channelID)
 	included, _ := owner.post(channelID, "Members", "Members read this", map[string]any{"level": "group", "group_id": channelID})
 	paid, _ := owner.post(channelID, "Paid", "Paid content", map[string]any{"level": "ppv"})
 	owner.call("PUT", contentkitPrefix+"/v1/contents/"+paid+"/offer", map[string]any{"amount": "4.99"}, "", 200)
-	contentKey, _ := access.ContentKey(tenant, paid)
-	postPrice := h.offerPrice(contentKey)
-	if buyer.opens(included) || buyer.opens(paid) {
+	postPrice := buyer.contentPrice(paid)
+	if buyer.opens(included) || buyer.opens(paid) || buyer.body(paid) != "" {
 		t.Fatal("posts open before any purchase")
 	}
 
@@ -68,8 +65,8 @@ func TestNMIBillingEndToEnd(t *testing.T) {
 	// A purchase opens the post, and only that post.
 	buy(postPrice, "post-order")
 	eventually(t, "the purchase opening the post", func() bool { return buyer.opens(paid) })
-	if buyer.opens(included) {
-		t.Fatal("buying a post opened the members-only post")
+	if buyer.opens(included) || buyer.body(paid) != "Paid content" {
+		t.Fatal("buying a post opened the members-only post, or not its own body")
 	}
 	library := func() []any {
 		return buyer.call("GET", contentkitPrefix+"/v1/me/library", nil, "", 200)["items"].([]any)

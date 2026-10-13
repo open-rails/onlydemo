@@ -1,400 +1,129 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useEffect, useState, type FormEvent } from "react";
-import { cn } from "cn";
-import { APIError, request } from "../api";
-import { ck, memberships, useChannel, usePostFeed } from "../content";
-import { NotFoundPage } from "../App";
-import { useAuth } from "../session";
-import type { Channel } from "../models";
-import { amount as price, money, duration } from "../format";
+import { useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import type { GroupDetail } from "@openrails/contentkit-ui/client";
+import { ContentGrid, GroupBanner, GroupImageEditor } from "@openrails/contentkit-ui";
+import { useGroup, useGroups } from "@openrails/contentkit-ui/react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  Add01Icon,
-  ArrowLeft02Icon,
-  ArrowRight02Icon,
-  Tick02Icon,
-  UserGroupIcon,
-} from "@hugeicons/core-free-icons";
+import { Add01Icon, ArrowRight02Icon, Tick02Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button, buttonVariants } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-  FieldTitle,
-} from "@/components/ui/field";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet, FieldTitle } from "@/components/ui/field";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  EmptyState,
-  ErrorState,
-  FormError,
-  Loading,
-} from "../components/states";
-import { Avatar, Cover } from "../components/cards";
-import { PostView } from "../components/post-view";
-import { membershipOffer, myChannelsKey, rememberPostChannel } from "../channels";
-import type { FileInfo } from "@openrails/contentkit-ui/client";
+import { NotFoundPage } from "../App";
+import { EmptyState, ErrorState, FormError, Loading } from "../components/states";
 import { ChannelTeam } from "../components/channel-team";
-import { SlotEditError, SlotEditMenu, SlotEditor } from "@openrails/contentkit-ui";
-import { channelRef } from "../media";
-import { subscribeLabel, usePay } from "../components/pay";
-import { channelsPath, channelPath, newPostPath } from "../paths";
+import { useCheckout } from "../components/pay";
+import { Post } from "./explore";
+import { contentkit } from "../media";
+import { useAuth } from "../session";
+import { rememberPostChannel, useChannelRoles } from "../roles";
+import { amount as price, money, duration } from "../format";
+import { channelPath, channelsPath, newPostPath } from "../paths";
 
+// A channel's page: ContentKit's banner and membership box, its posts
+// (owner_group), and for its team the AuthKit roster and its settings.
 export function ChannelPage() {
   const { channel: slug = "" } = useParams();
   const auth = useAuth();
-  const navigate = useNavigate();
-  const client = useQueryClient();
-  const pay = usePay();
   const [tab, setTab] = useState("posts");
-  const channel = useChannel(slug);
-  const posts = usePostFeed(channel.data, !!channel.data);
-  // A newly uploaded cover or avatar becomes the channel's.
-  const select = (slot: "cover" | "avatar") => (file: FileInfo | null) => {
-    const name = file?.path.replace(/^[a-z]+\//, "").replace(/\.[^.]+$/, "");
-    if (channel.data && name)
-      void request(ck(`/groups/${channel.data.id}`), { method: "PATCH", body: JSON.stringify({ [slot]: { image: name } }) }).then(() =>
-        client.invalidateQueries(),
-      );
-  };
-  const canonical = channel.data?.slug;
-  const editable = channel.data?.can_edit ? channel.data.id : "";
+  const found = useGroups({ kind: "channel", slug });
+  const id = found.items[0]?.id ?? null;
+  const read = useGroup(id);
+  const roles = useChannelRoles();
+  const group = read.group;
+  const role = id ? roles.data?.get(id) : undefined;
+  const checkout = useCheckout(group?.name ?? "Creator");
   const userID = auth.user?.id;
   useEffect(() => {
-    if (userID && editable) rememberPostChannel(userID, editable);
-  }, [userID, editable]);
-  useEffect(() => {
-    // A former slug still resolves; show the current URL.
-    if (canonical && canonical !== slug)
-      navigate(channelPath(canonical), { replace: true });
-  }, [canonical, slug, navigate]);
-  if (channel.isPending) return <Loading />;
-  if (channel.error instanceof APIError && channel.error.status === 404)
-    return <NotFoundPage />;
-  if (channel.error || !channel.data)
-    return (
-      <ErrorState
-        error={channel.error || new Error("Channel not found.")}
-        retry={() => void channel.refetch()}
-      />
-    );
-  const current = channel.data;
-  const postCount = current.post_count ?? posts.data?.length ?? 0;
+    if (userID && id && role) rememberPostChannel(userID, id);
+  }, [userID, id, role]);
+  if (found.loading || (id && !group && !read.error)) return <Loading />;
+  if (!id) return found.error ? <ErrorState error={found.error} retry={found.reload} /> : <NotFoundPage />;
+  if (read.error || !group) return <ErrorState error={read.error ?? new Error("Channel not found.")} retry={read.reload} />;
+  const manage = role === "owner";
   return (
     <>
-      <section className="profile">
-        <Cover seed={current.id} image={current.cover} sizes="(min-width: 768px) 720px, 100vw" className="profile-cover">
-          <Link to={channelsPath} className="cover-back" aria-label="Back">
-            <HugeiconsIcon icon={ArrowLeft02Icon} size={20} />
-          </Link>
-          <div className="cover-title">
-            <strong>{current.name}</strong>
-            <small>
-              {postCount} {postCount === 1 ? "post" : "posts"}
-            </small>
-          </div>
-          {current.can_manage && (
-            <SlotEditor item={channelRef(current.id)} path="cover/{name}" image={current.cover} minWidth={600} onChange={select("cover")}>
-              <SlotEditMenu
-                label="Edit cover"
-                render={
-                  <button
-                    type="button"
-                    className={cn(
-                      buttonVariants({ variant: "secondary", size: "sm" }),
-                      "cover-edit rounded-full border-white/20 bg-black/55 text-white backdrop-blur-md hover:bg-black/70",
-                    )}
-                  />
-                }
-              />
-              <SlotEditError className="slot-error" />
-            </SlotEditor>
-          )}
-        </Cover>
-        <div className="profile-body">
-          <div className="profile-top">
-            <span className="avatar-slot">
-              <Avatar
-                name={current.name}
-                seed={current.id}
-                image={current.avatar}
-                sizes="112px"
-                className="avatar-xl"
-              />
-              {current.can_manage && (
-                <SlotEditor item={channelRef(current.id)} path="avatar/{name}" image={current.avatar} minWidth={128} round onChange={select("avatar")}>
-                  <SlotEditMenu
-                    label="Change avatar"
-                    iconOnly
-                    render={
-                      <button
-                        type="button"
-                        className={cn(
-                          buttonVariants({ variant: "secondary", size: "icon-sm" }),
-                          "avatar-edit rounded-full border-2 border-card shadow-sm",
-                        )}
-                      />
-                    }
-                  />
-                  <SlotEditError className="slot-error" />
-                </SlotEditor>
-              )}
-            </span>
-            <div className="inline-actions">
-              {current.can_edit && (
-                <Button
-                  nativeButton={false}
-                  render={<Link to={newPostPath(current.slug)} />}
-                >
-                  <HugeiconsIcon icon={Add01Icon} data-icon="inline-start" />
-                  New post
-                </Button>
-              )}
-            </div>
-          </div>
-          <h1 className="profile-name">
-            {current.name}
-          </h1>
-          <p className="handle">
-            @{current.slug}
-          </p>
-          {current.description && (
-            <p className="profile-bio">{current.description}</p>
-          )}
-          {!current.can_edit && current.membership.status !== "none" && (
-            <MembershipBox
-              channel={current}
-              onSubscribe={() => {
-                const offer = membershipOffer(current);
-                if (offer) pay({ kind: "membership", id: current.id, merchant: current.name, offer });
-              }}
-              onChanged={() => void client.invalidateQueries()}
-            />
-          )}
-        </div>
-      </section>
+      <GroupBanner group={group} onCheckout={checkout}>
+        {role && (
+          <Button nativeButton={false} render={<Link to={newPostPath(group.slug)} />}>
+            <HugeiconsIcon icon={Add01Icon} data-icon="inline-start" />
+            New post
+          </Button>
+        )}
+      </GroupBanner>
       <Tabs value={tab} onValueChange={(value) => setTab(String(value))} className="my-4">
         <TabsList variant="line" aria-label="Channel sections" className="w-full">
-          <TabsTrigger value="posts">
-            {postCount} {postCount === 1 ? "Post" : "Posts"}
-          </TabsTrigger>
-          <TabsTrigger value="about">About</TabsTrigger>
-          {current.can_edit && <TabsTrigger value="team">Team</TabsTrigger>}
-          {current.can_manage && (
-            <TabsTrigger value="settings">Settings</TabsTrigger>
-          )}
+          <TabsTrigger value="posts">Posts</TabsTrigger>
+          {role && <TabsTrigger value="team">Team</TabsTrigger>}
+          {manage && <TabsTrigger value="settings">Settings</TabsTrigger>}
         </TabsList>
       </Tabs>
-      {tab === "posts" &&
-        (posts.isPending ? (
-          <Loading cards />
-        ) : posts.error ? (
-          <ErrorState error={posts.error} retry={() => void posts.refetch()} />
-        ) : posts.data?.length ? (
-          <div className="feed">
-            {posts.data.map((post) => (
-              <PostView
-                post={{ ...post, channel_name: current.name }}
-                handle={current.slug}
-                membership={current.membership}
-                key={post.id}
-              />
-            ))}
-          </div>
-        ) : (
-          <EmptyState
-            title="No posts yet."
-            action={
-              current.can_edit ? (
-                <Button
-                  nativeButton={false}
-                  render={<Link to={newPostPath(current.slug)} />}
-                >
-                  Write the first post
-                </Button>
-              ) : undefined
-            }
-          >
-            Check back soon for the first post from this creator.
-          </EmptyState>
-        ))}
-      {tab === "posts" && posts.hasNextPage && (
-        <div className="pagination">
-          <Button
-            variant="outline"
-            disabled={posts.isFetchingNextPage}
-            onClick={() => void posts.fetchNextPage()}
-          >
-            {posts.isFetchingNextPage && <Spinner data-icon="inline-start" />}
-            Older posts
-          </Button>
-        </div>
-      )}
-      {tab === "about" && (
-        <Card>
-          <CardHeader>
-            <CardTitle>About {current.name}</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-          <p>
-            {current.description ||
-              "A creator on OnlyDemo."}
-          </p>
-          <p className="muted">
-            Members read posts marked “Included with membership”. Some posts
-            are sold separately. Every purchased post keeps permanent access,
-            even after membership ends.
-          </p>
-          <p className="muted">
-            Channel owners and editors manage publication. Paying readers do not
-            receive editing permissions.
-          </p>
-          </CardContent>
-        </Card>
-      )}
-      {tab === "team" && current.can_edit && <ChannelTeam channel={current} />}
-      {tab === "settings" && current.can_manage && (
-        <ChannelSettings
-          channel={current}
-          onUpdated={() =>
-            void client.invalidateQueries({ queryKey: ["channel", slug] })
+      {tab === "posts" && (
+        <ContentGrid
+          className="feed"
+          surface="channel"
+          query={{ kind: "post", owner_group: group.id, sort: "newest", mode: "lock" }}
+          renderCard={(card) => <Post card={card} />}
+          empty={
+            <EmptyState
+              title="No posts yet."
+              action={
+                role ? (
+                  <Button nativeButton={false} render={<Link to={newPostPath(group.slug)} />}>
+                    Write the first post
+                  </Button>
+                ) : undefined
+              }
+            >
+              Check back soon for the first post from this creator.
+            </EmptyState>
           }
         />
       )}
+      {tab === "team" && role && <ChannelTeam channel={{ id: group.id, can_manage: manage }} />}
+      {tab === "settings" && manage && <ChannelSettings group={group} onUpdated={read.reload} />}
     </>
   );
 }
-function MembershipBox({
-  channel,
-  onSubscribe,
-  onChanged,
-}: {
-  channel: Channel;
-  onSubscribe: () => void;
-  onChanged: () => void;
-}) {
-  const auth = useAuth();
-  const membership = channel.membership;
-  const offer = membershipOffer(channel);
-  const change = useMutation({
-    mutationFn: (action: "join" | "leave") => memberships[action](channel.id),
-    onSuccess: onChanged,
-  });
-  const pill = "h-12 w-full rounded-full px-6";
-  return (
-    <div className="subscribe-box">
-      <span className="subscribe-label">Membership</span>
-      {membership.member ? (
-        <>
-          <Button variant="secondary" size="lg" className={cn(pill, "text-success")} disabled>
-            <HugeiconsIcon icon={Tick02Icon} data-icon="inline-start" />
-            You're a member
-          </Button>
-          {membership.free_member && (
-            <Button
-              variant="link"
-              size="sm"
-              disabled={change.isPending}
-              onClick={() => change.mutate("leave")}
-            >
-              Leave membership
-            </Button>
-          )}
-        </>
-      ) : membership.free ? (
-        <Button
-          size="lg"
-          className={cn(pill, "uppercase")}
-          disabled={change.isPending}
-          onClick={() => (auth.user ? change.mutate("join") : auth.openLogin())}
-        >
-          {change.isPending && <Spinner data-icon="inline-start" />}
-          Join free
-        </Button>
-      ) : offer ? (
-        <Button
-          size="lg"
-          className={pill}
-          onClick={onSubscribe}
-        >
-          {subscribeLabel(offer)}
-        </Button>
-      ) : (
-        <Button variant="secondary" size="lg" className={pill} disabled>
-          Price pending
-        </Button>
-      )}
-      <FormError>{change.error?.message}</FormError>
-    </div>
-  );
-}
-function MembershipSettings({
-  channel,
-  onUpdated,
-}: {
-  channel: Channel;
-  onUpdated: () => void;
-}) {
-  const membership = channel.membership;
-  const offer = membershipOffer(channel);
-  const [enabled, setEnabled] = useState(membership.status === "open");
-  const [free, setFree] = useState(
-    membership.status === "none" ? false : membership.free,
-  );
-  const [amount, setAmount] = useState(
-    offer ? (Number(offer.unit_amount) / 1_000_000).toFixed(2) : "",
-  );
+
+// The membership a channel sells: ContentKit's group offer (free or renewing
+// monthly), or none.
+function MembershipSettings({ group, onUpdated }: { group: GroupDetail; onUpdated: () => void }) {
+  const terms = group.access?.offer?.terms;
+  const [enabled, setEnabled] = useState(!!terms);
+  const [free, setFree] = useState(terms?.amount === "0");
+  const [amount, setAmount] = useState(terms && terms.amount !== "0" ? terms.amount : "");
   const [error, setError] = useState("");
-  const save = useMutation({
-    mutationFn: (value: string | null) => memberships.set(channel.id, value),
-    onSuccess: onUpdated,
-  });
-  const submit = (event: FormEvent<HTMLFormElement>) => {
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError("");
-    if (!enabled) return save.mutate(null);
-    if (free) return save.mutate("0");
+    setSaved(false);
+    setSaving(true);
     try {
-      save.mutate(price(amount.trim(), 1));
+      if (!enabled) await contentkit.offers.withdrawGroup(group.id);
+      else await contentkit.offers.sellGroup(group.id, free ? { amount: "0", currency: "USD" } : { amount: price(amount.trim(), 1), currency: "USD", renew_hours: 720 });
+      setSaved(true);
+      onUpdated();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Invalid price.");
+      setError(cause instanceof Error ? cause.message : "Could not save the membership.");
+    } finally {
+      setSaving(false);
     }
   };
-  const status =
-    membership.status === "none"
-      ? "This channel sells no membership. Posts can be free or sold individually; existing members keep access."
-      : membership.free
-          ? "Open: anyone can join free."
-          : offer
-            ? `Open: ${money(offer.unit_amount, offer.currency)} ${duration(offer.access_duration_hours)}.`
-            : "Open: price pending.";
-  const paidToFree =
-    enabled && free && membership.status !== "none" && !membership.free;
+  const status = !terms
+    ? "This channel sells no membership. Posts can be free or sold individually; existing members keep access."
+    : terms.amount === "0"
+      ? "Open: anyone can join free."
+      : `Open: ${money(String(Number(terms.amount) * 1_000_000), terms.currency)} ${duration(terms.renew_hours)}.`;
   return (
     <Card>
       <CardHeader>
@@ -402,32 +131,19 @@ function MembershipSettings({
         <CardDescription>{status}</CardDescription>
       </CardHeader>
       <CardContent>
-        <form onSubmit={submit}>
+        <form onSubmit={(event) => void save(event)}>
           <FieldGroup>
             <Field orientation="horizontal">
-              <Switch
-                id="membership-enabled"
-                checked={enabled}
-                onCheckedChange={setEnabled}
-              />
+              <Switch id="membership-enabled" checked={enabled} onCheckedChange={setEnabled} />
               <FieldContent>
-                <FieldLabel htmlFor="membership-enabled">
-                  Accept new members
-                </FieldLabel>
-                <FieldDescription>
-                  Turning this off stops new joins. Existing members keep
-                  access and see new membership posts.
-                </FieldDescription>
+                <FieldLabel htmlFor="membership-enabled">Accept new members</FieldLabel>
+                <FieldDescription>Turning this off stops new joins. Existing members keep access and see new membership posts.</FieldDescription>
               </FieldContent>
             </Field>
             {enabled && (
               <FieldSet>
                 <FieldLegend variant="label">Price</FieldLegend>
-                <RadioGroup
-                  className="grid gap-3 sm:grid-cols-2"
-                  value={free ? "free" : "paid"}
-                  onValueChange={(value) => setFree(value === "free")}
-                >
+                <RadioGroup className="grid gap-3 sm:grid-cols-2" value={free ? "free" : "paid"} onValueChange={(value) => setFree(value === "free")}>
                   <FieldLabel htmlFor="membership-free">
                     <Field orientation="horizontal">
                       <FieldContent>
@@ -441,7 +157,7 @@ function MembershipSettings({
                     <Field orientation="horizontal">
                       <FieldContent>
                         <FieldTitle>Paid</FieldTitle>
-                        <FieldDescription>Renews automatically.</FieldDescription>
+                        <FieldDescription>Renews every 30 days.</FieldDescription>
                       </FieldContent>
                       <RadioGroupItem value="paid" id="membership-paid" />
                     </Field>
@@ -451,9 +167,7 @@ function MembershipSettings({
             )}
             {enabled && !free && (
               <Field>
-                <FieldLabel htmlFor="membership-amount">
-                  Price {duration(offer?.access_duration_hours ?? 720)} (USD)
-                </FieldLabel>
+                <FieldLabel htmlFor="membership-amount">Price every 30 days (USD)</FieldLabel>
                 <Input
                   id="membership-amount"
                   required
@@ -463,36 +177,19 @@ function MembershipSettings({
                   onChange={(event) => setAmount(event.target.value)}
                   placeholder="5.00"
                 />
-                <FieldDescription>
-                  Minimum $1.00. New members pay the new price; existing
-                  members keep the price they accepted.
-                </FieldDescription>
+                <FieldDescription>Minimum $1.00. New members pay the new price; existing members keep the price they accepted.</FieldDescription>
               </Field>
             )}
-            {paidToFree && (
-              <Alert>
-                <AlertDescription>
-                  Paid members keep their subscriptions, which go on renewing
-                  until they cancel; new members join free.
-                </AlertDescription>
-              </Alert>
-            )}
-            <FormError>{error || save.error?.message}</FormError>
-            {save.isSuccess && (
+            <FormError>{error}</FormError>
+            {saved && (
               <Alert role="status">
                 <HugeiconsIcon icon={Tick02Icon} />
                 <AlertDescription>Membership saved.</AlertDescription>
               </Alert>
             )}
-            <Button
-              type="submit"
-              className="self-start"
-              disabled={
-                save.isPending || (!enabled && membership.status !== "open")
-              }
-            >
-              {save.isPending && <Spinner data-icon="inline-start" />}
-              {membership.status === "none" ? "Create membership" : "Save membership"}
+            <Button type="submit" className="self-start" disabled={saving || (!enabled && !terms)}>
+              {saving && <Spinner data-icon="inline-start" />}
+              {terms ? "Save membership" : "Create membership"}
             </Button>
           </FieldGroup>
         </form>
@@ -500,31 +197,45 @@ function MembershipSettings({
     </Card>
   );
 }
-function ChannelSettings({
-  channel,
-  onUpdated,
-}: {
-  channel: Channel;
-  onUpdated: () => void;
-}) {
+
+function ChannelSettings({ group, onUpdated }: { group: GroupDetail; onUpdated: () => void }) {
   const navigate = useNavigate();
+  const client = useQueryClient();
   const [deleting, setDeleting] = useState(false);
   const [confirmation, setConfirmation] = useState("");
-  const remove = useMutation({
-    mutationFn: () =>
-      request(ck(`/groups/${channel.id}`), { method: "DELETE" }),
-    onSuccess: () => navigate("/me?tab=channels"),
-  });
+  const [removing, setRemoving] = useState(false);
+  const [error, setError] = useState("");
+  const remove = async () => {
+    setRemoving(true);
+    setError("");
+    try {
+      await contentkit.groups.remove(group.id);
+      await client.invalidateQueries();
+      navigate("/me?tab=channels");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not delete the channel.");
+    } finally {
+      setRemoving(false);
+    }
+  };
   return (
     <div className="flex flex-col gap-4">
-      <MembershipSettings channel={channel} onUpdated={onUpdated} />
+      <Card>
+        <CardHeader>
+          <CardTitle>Images</CardTitle>
+          <CardDescription>The cover across the channel's page and its avatar.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          <GroupImageEditor group={group} slot="cover" />
+          <GroupImageEditor group={group} slot="avatar" />
+        </CardContent>
+      </Card>
+      <MembershipSettings group={group} onUpdated={onUpdated} />
       <Card>
         <CardHeader>
           <CardTitle>Delete channel</CardTitle>
           <CardDescription>
-            Deletion immediately hides the channel, stops selling its
-            membership and retires its editorial permissions. Financial
-            history remains separate.
+            Deletion immediately hides the channel, stops selling its membership and retires its editorial permissions. Financial history remains separate.
           </CardDescription>
         </CardHeader>
         <CardFooter>
@@ -537,32 +248,19 @@ function ChannelSettings({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete this channel?</DialogTitle>
-            <DialogDescription>
-              The channel becomes inaccessible immediately. This does not
-              automatically refund purchases or cancel subscriptions.
-            </DialogDescription>
+            <DialogDescription>The channel becomes inaccessible immediately. This does not refund purchases or cancel subscriptions.</DialogDescription>
           </DialogHeader>
           <Field>
-            <FieldLabel htmlFor="delete-channel-confirm">
-              Type {channel.slug} to confirm
-            </FieldLabel>
-            <Input
-              id="delete-channel-confirm"
-              value={confirmation}
-              onChange={(event) => setConfirmation(event.target.value)}
-            />
+            <FieldLabel htmlFor="delete-channel-confirm">Type {group.slug} to confirm</FieldLabel>
+            <Input id="delete-channel-confirm" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} />
           </Field>
-          <FormError>{remove.error?.message}</FormError>
+          <FormError>{error}</FormError>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setDeleting(false)}>
               Keep channel
             </Button>
-            <Button
-              variant="destructive"
-              disabled={confirmation !== channel.slug || remove.isPending}
-              onClick={() => remove.mutate()}
-            >
-              {remove.isPending && <Spinner data-icon="inline-start" />}
+            <Button variant="destructive" disabled={confirmation !== group.slug || removing} onClick={() => void remove()}>
+              {removing && <Spinner data-icon="inline-start" />}
               Delete channel
             </Button>
           </DialogFooter>
@@ -571,49 +269,35 @@ function ChannelSettings({
     </div>
   );
 }
+
+// A creator's new channel: ContentKit makes it and its AuthKit group, the
+// creator its owner.
 export function NewChannelPage() {
   const auth = useAuth();
   const navigate = useNavigate();
   const client = useQueryClient();
-  // Arrived from Post without a channel: continue to the composer after.
   const thenPost = useSearchParams()[0].get("then") === "post";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   if (!auth.user)
-    return (
-      <EmptyState
-        icon={UserGroupIcon}
-        title="Sign in to start a channel."
-        action={<Button onClick={auth.openLogin}>Sign in</Button>}
-      />
-    );
+    return <EmptyState icon={UserGroupIcon} title="Sign in to start a channel." action={<Button onClick={auth.openLogin}>Sign in</Button>} />;
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setBusy(true);
     setError("");
     const data = new FormData(event.currentTarget);
     try {
-      // ContentKit makes the channel and its AuthKit group, the viewer its owner.
-      const [channel] = await request<{ id: string; slug: string }[]>(ck("/groups"), {
-        method: "POST",
-        body: JSON.stringify([
-          {
-            kind: "channel",
-            slug: String(data.get("slug")).trim().toLowerCase(),
-            names: [{ language: "en", kind: "name", name: String(data.get("name")).trim() }],
-          },
-        ]),
-      });
-      await client.invalidateQueries({ queryKey: myChannelsKey(auth.user?.id) });
-      navigate(thenPost ? newPostPath(channel.slug) : channelPath(channel.slug), {
-        replace: thenPost,
-      });
+      const [channel] = await contentkit.groups.create([
+        {
+          kind: "channel",
+          slug: String(data.get("slug")).trim().toLowerCase(),
+          names: [{ language: "en", kind: "name", name: String(data.get("name")).trim() }],
+        },
+      ]);
+      await client.invalidateQueries();
+      navigate(thenPost ? newPostPath(channel.slug) : channelPath(channel.slug), { replace: thenPost });
     } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "Channel could not be created.",
-      );
+      setError(cause instanceof Error ? cause.message : "Channel could not be created.");
     } finally {
       setBusy(false);
     }
@@ -630,44 +314,20 @@ export function NewChannelPage() {
       </div>
       <Card>
         <CardContent>
-          <form
-            onSubmit={(event) => {
-              void submit(event);
-            }}
-          >
+          <form onSubmit={(event) => void submit(event)}>
             <FieldGroup>
               <Field>
                 <FieldLabel htmlFor="channel-name">Channel name</FieldLabel>
-                <Input
-                  id="channel-name"
-                  name="name"
-                  required
-                  maxLength={120}
-                  autoFocus
-                  placeholder="Your creator name"
-                />
+                <Input id="channel-name" name="name" required maxLength={120} autoFocus placeholder="Your creator name" />
               </Field>
               <Field>
-                <FieldLabel htmlFor="channel-slug">Slug</FieldLabel>
-                <Input
-                  id="channel-slug"
-                  name="slug"
-                  required
-                  pattern="[a-z0-9\-]+"
-                  placeholder="my-channel"
-                />
-                <FieldDescription>
-                  Lowercase letters, numbers, and dashes. Channel names are
-                  unique, and some are reserved.
-                </FieldDescription>
+                <FieldLabel htmlFor="channel-slug">Handle</FieldLabel>
+                <Input id="channel-slug" name="slug" required pattern="[a-z0-9\-]+" placeholder="my-channel" />
+                <FieldDescription>Lowercase letters, numbers, and dashes. Handles are unique.</FieldDescription>
               </Field>
               <FormError>{error}</FormError>
               <div className="form-actions">
-                <Button
-                  variant="ghost"
-                  nativeButton={false}
-                  render={<Link to={channelsPath} />}
-                >
+                <Button variant="ghost" nativeButton={false} render={<Link to={channelsPath} />}>
                   Cancel
                 </Button>
                 <Button type="submit" disabled={busy}>

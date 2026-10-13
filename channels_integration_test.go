@@ -55,22 +55,31 @@ func TestChannelsOnContentKit(t *testing.T) {
 		who  peer
 		post string
 		want bool
-	}{{anon, public, true}, {anon, members, false}, {fan, members, false}, {owner, members, true}, {fan, paid, false}} {
+	}{{anon, public, true}, {anon, members, false}, {fan, members, false}, {owner, members, true}, {editor, members, true}, {fan, paid, false}} {
 		if got := c.who.opens(c.post); got != c.want {
 			t.Fatalf("%s opens %s: %v, want %v", c.who.name, c.post, got, c.want)
 		}
 	}
-	// Pending ContentKit: a channel editor reading another's visible post is
-	// neither its editor nor opens it (catalog asks editorship only of hidden
-	// items).
+	if c := editor.call("GET", contentkitPrefix+"/v1/contents/"+members, nil, "", 200); c["editor"] != true {
+		t.Fatalf("the channel's editor does not edit its post: %v", c)
+	}
+	// A locked post's body is withheld; its description is the teaser.
+	if b := fan.body(members); b != "" {
+		t.Fatalf("a locked post served its body: %q", b)
+	}
 	if c := fan.call("GET", contentkitPrefix+"/v1/contents/"+members, nil, "", 200); c["owner_group_id"] != id || c["title"] != "Members" {
 		t.Fatalf("members-only post: %v", c)
 	}
-	feed := anon.call("GET", contentkitPrefix+"/v1/contents?kind=post&mode=lock", nil, "", 200)
+	other := fan.channel("other", "Other")
+	fan.post(other, "Elsewhere", "Not in the studio", nil)
+	feed := anon.call("GET", contentkitPrefix+"/v1/contents?kind=post&mode=lock&owner_group="+id, nil, "", 200)
 	locked := map[string]bool{}
 	for _, card := range feed["contents"].([]any) {
 		card := card.(map[string]any)
 		locked[card["id"].(string)] = card["access"].(map[string]any)["allowed"] != true
+		if owner, _ := card["owner"].(map[string]any); owner["id"] != id || owner["name"] != "Studio" {
+			t.Fatalf("card owner: %v", card["owner"])
+		}
 	}
 	if len(locked) != 4 || locked[public] || !locked[members] || !locked[paid] {
 		t.Fatalf("feed: %v", locked)
@@ -83,7 +92,7 @@ func TestChannelsOnContentKit(t *testing.T) {
 	if j := fan.call("POST", join, nil, "", 200); j["member"] != true {
 		t.Fatalf("join: %v", j)
 	}
-	if !fan.opens(members) || fan.opens(paid) {
+	if !fan.opens(members) || fan.opens(paid) || fan.body(members) != "Members read this" {
 		t.Fatal("joining did not open the members-only post alone")
 	}
 	// Its media too: the owner's upload to the post's version opens to members.
@@ -113,9 +122,9 @@ func TestChannelsOnContentKit(t *testing.T) {
 		return page.Items[0]
 	}
 	owner.call("PUT", offer, map[string]any{"amount": "4.99", "renew_hours": 720}, "", 200)
-	h.offerPrice(groupKey)
+	fan.groupPrice(id)
 	if a := fan.call("GET", contentkitPrefix+"/v1/groups/"+id, nil, "", 200)["access"].(map[string]any); a["key"] != groupKey.String() ||
-		a["member"] != false || a["offer"].(map[string]any)["amount"] != "4.99" {
+		a["member"] != false || a["offer"].(map[string]any)["terms"].(map[string]any)["amount"] != "4.99" {
 		t.Fatalf("group access: %v", a)
 	}
 	if p := product(groupKey); p.Archived || len(p.Entitlements) != 1 || p.Entitlements[0] != groupKey.String() {
@@ -123,7 +132,7 @@ func TestChannelsOnContentKit(t *testing.T) {
 	}
 	fan.call("POST", join, nil, "", 409)
 	owner.call("PUT", contentkitPrefix+"/v1/contents/"+paid+"/offer", map[string]any{"amount": "2.50"}, "", 200)
-	h.offerPrice(contentKey)
+	fan.contentPrice(paid)
 	if p := product(contentKey); p.DisplayName != "Paid" || len(p.Prices) != 1 || p.Prices[0].UnitAmount != 2_500_000 {
 		t.Fatalf("post product: %+v", p)
 	}
