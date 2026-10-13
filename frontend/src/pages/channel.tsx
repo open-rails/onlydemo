@@ -1,12 +1,12 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import type { GroupDetail } from "@openrails/contentkit-ui/client";
 import { ContentGrid, GroupBanner, GroupImageEditor } from "@openrails/contentkit-ui";
 import { useGroup, useGroups } from "@openrails/contentkit-ui/react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Add01Icon, ArrowRight02Icon, Tick02Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Add01Icon, ArrowRight02Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -44,7 +44,8 @@ export function ChannelPage() {
   useEffect(() => {
     if (userID && id && role) rememberPostChannel(userID, id);
   }, [userID, id, role]);
-  if (found.loading || (id && !group && !read.error)) return <Loading />;
+  // Lists reload on every change; show Loading only before the first read.
+  if ((found.loading && !id) || (id && !group && !read.error)) return <Loading />;
   if (!id) return found.error ? <ErrorState error={found.error} retry={found.reload} /> : <NotFoundPage />;
   if (read.error || !group) return <ErrorState error={read.error ?? new Error("Channel not found.")} retry={read.reload} />;
   const manage = role === "owner";
@@ -94,7 +95,8 @@ export function ChannelPage() {
 }
 
 // The membership a channel sells: ContentKit's group offer (free or renewing
-// monthly), or none. Its owner reads it as GroupDetail.offer.
+// monthly), or none. Its owner reads it as GroupDetail.offer; keyed by that
+// offer, the form starts over from each saved one.
 function MembershipSettings({ group, onUpdated }: { group: GroupDetail; onUpdated: () => void }) {
   const terms = group.offer?.state === "active" ? group.offer.terms : undefined;
   const [enabled, setEnabled] = useState(!!terms);
@@ -103,16 +105,14 @@ function MembershipSettings({ group, onUpdated }: { group: GroupDetail; onUpdate
   const [amount, setAmount] = useState(terms && !free0 ? terms.amount : "");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError("");
-    setSaved(false);
     setSaving(true);
     try {
       if (!enabled) await contentkit.offers.withdrawGroup(group.id);
       else await contentkit.offers.sellGroup(group.id, free ? { amount: "0", currency: "USD" } : { amount: price(amount.trim(), 1), currency: "USD", renew_hours: 720 });
-      setSaved(true);
+      toast.success("Membership saved.");
       onUpdated();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not save the membership.");
@@ -182,12 +182,6 @@ function MembershipSettings({ group, onUpdated }: { group: GroupDetail; onUpdate
               </Field>
             )}
             <FormError>{error}</FormError>
-            {saved && (
-              <Alert role="status">
-                <HugeiconsIcon icon={Tick02Icon} />
-                <AlertDescription>Membership saved.</AlertDescription>
-              </Alert>
-            )}
             <Button type="submit" className="self-start" disabled={saving || (!enabled && !terms)}>
               {saving && <Spinner data-icon="inline-start" />}
               {terms ? "Save membership" : "Create membership"}
@@ -231,7 +225,7 @@ function ChannelSettings({ group, onUpdated }: { group: GroupDetail; onUpdated: 
           <GroupImageEditor group={group} slot="avatar" />
         </CardContent>
       </Card>
-      <MembershipSettings group={group} onUpdated={onUpdated} />
+      <MembershipSettings key={group.offer ? `${group.offer.id}:${group.offer.revision}` : "none"} group={group} onUpdated={onUpdated} />
       <Card>
         <CardHeader>
           <CardTitle>Delete channel</CardTitle>

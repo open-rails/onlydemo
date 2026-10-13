@@ -27,9 +27,12 @@ tasks:
       - docker compose down -v
 
   media:gateway:
-    desc: Run the media gateway (ContentKit cmd/media-gateway at the go.mod version)
+    desc: Run the media gateway (ContentKit cmd/media-gateway at the go.mod version), serving the default avatars media-defaults renders
     cmds:
       - |
+        set -e
+        defaults=$(go run . media-defaults)
+        MEDIA_GATEWAY_DEFAULTS="$defaults" \
         MEDIA_GATEWAY_LISTEN="${MEDIA_GATEWAY_LISTEN:-127.0.0.1:8090}" \
         MEDIA_GATEWAY_S3_ENDPOINT="$MEDIA_S3_ENDPOINT" \
         MEDIA_GATEWAY_BUCKETS="onlydemo=${MEDIA_S3_BUCKET:-onlydemo-media}" \

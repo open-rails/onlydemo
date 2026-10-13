@@ -137,7 +137,9 @@ Images and videos use ContentKit media through the engine
   app decides who opens them until ContentKit stores posts.
 - **Channels.** ContentKit's group slots: covers (3:1) and avatars, uploaded
   by holders of `channel:media:write` (owners).
-- **Users.** Avatars, each uploaded by its person.
+- **Users.** Avatars, each uploaded by its person. Until then the gateway
+  serves a default: `onlydemo media-defaults` renders it into the bucket and
+  prints `MEDIA_GATEWAY_DEFAULTS` (`task media:gateway` runs it).
 - **Worker.** `onlydemo media-worker` (`task media:worker`) is ContentKit's
   media worker with the engine's registry: it places uploads, renders images
   and encodes video from `<CONTENT_SCHEMA>_media_worker`; readiness and purges
@@ -154,7 +156,8 @@ Images and videos use ContentKit media through the engine
   `MEDIA_URL=https://media.<domain>`, `MEDIA_DELIVERY=cookie`,
   `MEDIA_COOKIE_DOMAIN=<domain>`.
 - `MEDIA_GATEWAY_HOSTS=media.<domain>=onlydemo`, `MEDIA_GATEWAY_BUCKETS=onlydemo=<bucket>`;
-  `MEDIA_GATEWAY_CORS_ORIGINS` lists exactly the site origins.
+  `MEDIA_GATEWAY_CORS_ORIGINS` lists exactly the site origins;
+  `MEDIA_GATEWAY_DEFAULTS` is what `onlydemo media-defaults` prints on each deploy.
 - Keep the bucket private. The gateway gets a read-only key limited to
   `*/private/*` and `*/public/*`.
 - A CDN may cache `public/`; never let a shared cache store `private/`.

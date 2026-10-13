@@ -53,7 +53,8 @@ export function PostPage() {
     };
   }, [content?.title]);
   if (post.missing) return <NotFoundPage />;
-  if (post.loading || detail.loading) return <Loading />;
+  // Reads reload on every change; show Loading only before the first one.
+  if (post.loading || (detail.loading && !detail.content)) return <Loading />;
   if (detail.error?.status === 404) return <NotFoundPage />;
   if (detail.error || !content) return <ErrorState error={detail.error ?? new Error("Post not found.")} retry={detail.reload} />;
   const remove = async () => {

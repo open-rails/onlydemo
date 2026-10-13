@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 
@@ -45,6 +46,21 @@ func newRootCommand() *cobra.Command {
 		adminCommand("grant", "Grant the admin role", grantAdmin),
 		adminCommand("revoke", "Revoke the admin role", revokeAdmin),
 	)
+	root.AddCommand(&cobra.Command{
+		Use: "media-defaults", Short: "Render the default media images (avatars) into the bucket and print the gateway's MEDIA_GATEWAY_DEFAULTS (needs libvips)", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			value, err := publishMediaDefaults(cmd.Context(), cfg)
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), value)
+			return err
+		},
+	})
 	root.AddCommand(&cobra.Command{
 		Use: "media-worker", Short: "Run the media worker: upload placement, image renditions, video encodes (needs libvips and ffmpeg)", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return runMediaWorker(cmd.Context()) },
