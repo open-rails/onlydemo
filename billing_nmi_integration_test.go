@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/contentkit/access"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/openrailstest/nmimock"
@@ -38,16 +39,15 @@ func TestNMIBillingEndToEnd(t *testing.T) {
 	owner := h.register("nmiowner", "127.0.0.2")
 	buyer := h.register("nmibuyer", "127.0.0.3")
 	stranger := h.register("nmistranger", "127.0.0.4")
-	if err := h.srv.auth.grantAdmin(ctx, owner.id); err != nil {
-		t.Fatal(err)
-	}
-	channelID := owner.call("POST", "/api/v1/channels", map[string]any{"slug": "nmi-studio", "name": "NMI studio"}, "", 201)["id"].(string)
+	channelID := owner.channel("nmi-studio", "NMI studio")
 	owner.call("PUT", contentkitPrefix+"/v1/groups/"+channelID+"/offer", map[string]any{"amount": "9.99", "renew_hours": 720}, "", 200)
-	membershipPrice := owner.offerPrice(channelID)
+	groupKey, _ := access.GroupKey(tenant, channelID)
+	membershipPrice := h.offerPrice(groupKey)
 	included, _ := owner.post(channelID, "Members", "Members read this", map[string]any{"level": "group", "group_id": channelID})
 	paid, _ := owner.post(channelID, "Paid", "Paid content", map[string]any{"level": "ppv"})
 	owner.call("PUT", contentkitPrefix+"/v1/contents/"+paid+"/offer", map[string]any{"amount": "4.99"}, "", 200)
-	postPrice := owner.offerPrice(paid)
+	contentKey, _ := access.ContentKey(tenant, paid)
+	postPrice := h.offerPrice(contentKey)
 	if buyer.opens(included) || buyer.opens(paid) {
 		t.Fatal("posts open before any purchase")
 	}

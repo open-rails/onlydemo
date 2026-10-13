@@ -9,8 +9,8 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// TestChannelsOnContentKit: a channel is a ContentKit group governed by its
-// AuthKit group, and its posts are ContentKit content it owns. Its membership
+// TestChannelsOnContentKit: a creator's channel is a ContentKit group whose
+// AuthKit group ContentKit provisions, and its posts are content it owns. Its membership
 // is a group offer ContentKit syncs to OpenRails; a free one is joined through
 // ContentKit and opens the channel's members-only posts and their media; a
 // post sells through its own offer; uploads follow AuthKit's channel roles.
@@ -21,11 +21,6 @@ func TestChannelsOnContentKit(t *testing.T) {
 	fan := h.register("fanatic", "127.0.0.3")
 	editor := h.register("editor", "127.0.0.4")
 	anon := h.anonymous("127.0.0.5")
-	// ContentKit admits only staff to group and content writes until creators
-	// hold channel:* permissions there (ContentKit lane 120-user-groups).
-	if err := h.srv.auth.grantAdmin(ctx, owner.id); err != nil {
-		t.Fatal(err)
-	}
 
 	model := fan.call("GET", contentkitPrefix+"/v1/kinds", nil, "", 200)
 	if post := model["kinds"].(map[string]any)[kindPost].(map[string]any); post["presentation"] != "post" {
@@ -35,22 +30,17 @@ func TestChannelsOnContentKit(t *testing.T) {
 		t.Fatalf("channel group kind: %v", ch)
 	}
 
-	created := owner.call("POST", "/api/v1/channels", map[string]any{"slug": "Studio", "name": "Studio"}, "", 201)
-	id, _ := created["id"].(string)
-	if created["kind"] != kindChannel || created["slug"] != "studio" || created["owner_user_id"] != owner.id || created["auth_scope"] != id {
-		t.Fatalf("channel group: %v", created)
+	id := owner.channel("studio", "Studio")
+	g := fan.call("GET", contentkitPrefix+"/v1/groups/"+id, nil, "", 200)
+	if g["name"] != "Studio" || g["owner_user_id"] != owner.id || g["auth_scope"] != id {
+		t.Fatalf("channel group: %v", g)
 	}
-	if g := fan.call("GET", contentkitPrefix+"/v1/groups/"+id, nil, "", 200); g["name"] != "Studio" {
-		t.Fatalf("ContentKit serves %v", g)
-	}
-	if roles, err := h.srv.auth.client.GroupRoles(ctx, iam.GroupByID(id), []iam.Subject{iam.UserSubject(owner.id)}); err != nil || roles[iam.UserSubject(owner.id)] != channelOwnerRole {
-		t.Fatalf("AuthKit owner role: %v %v", roles, err)
-	}
-	// A taken handle refuses the channel and takes its AuthKit group back.
-	owner.call("POST", "/api/v1/channels", map[string]any{"slug": "studio", "name": "Again"}, "", 409)
-	if groups, err := h.srv.auth.client.ListGroups(ctx, iam.GroupQuery{Persona: channelPersona.Persona}); err != nil || len(groups.Items) != 1 {
-		t.Fatalf("AuthKit channel groups after a refused one: %v %v", groups, err)
-	}
+	eventually(t, "the channel's AuthKit group", func() bool {
+		roles, err := h.srv.auth.client.GroupRoles(ctx, iam.GroupByID(id), []iam.Subject{iam.UserSubject(owner.id)})
+		return err == nil && roles[iam.UserSubject(owner.id)] == channelOwnerRole
+	})
+	fan.call("POST", contentkitPrefix+"/v1/groups", []map[string]any{{"kind": kindChannel, "slug": "studio",
+		"names": []map[string]string{{"language": "en", "kind": "name", "name": "Again"}}}}, "", 409)
 	if _, err := h.srv.auth.client.SetGroupRole(ctx, iam.UserIdentity(owner.id), iam.GroupByID(id), iam.UserSubject(editor.id), channelEditorRole); err != nil {
 		t.Fatal(err)
 	}
@@ -58,11 +48,21 @@ func TestChannelsOnContentKit(t *testing.T) {
 	public, _ := owner.post(id, "Hello", "Everyone reads this", nil)
 	members, membersVersion := owner.post(id, "Members", "Members read this", map[string]any{"level": "group", "group_id": id})
 	paid, _ := owner.post(id, "Paid", "Buyers read this", map[string]any{"level": "ppv"})
+	editor.post(id, "By the editor", "Hi", nil)
 	fan.call("POST", contentkitPrefix+"/v1/contents", map[string]any{"kind": kindPost, "owner_group_id": id,
 		"text": map[string]any{"en": map[string]string{"title": "Not mine"}}}, "", 403)
-	if !anon.opens(public) || anon.opens(members) || fan.opens(members) || !owner.opens(members) || fan.opens(paid) {
-		t.Fatal("posts opened to the wrong people")
+	for _, c := range []struct {
+		who  peer
+		post string
+		want bool
+	}{{anon, public, true}, {anon, members, false}, {fan, members, false}, {owner, members, true}, {fan, paid, false}} {
+		if got := c.who.opens(c.post); got != c.want {
+			t.Fatalf("%s opens %s: %v, want %v", c.who.name, c.post, got, c.want)
+		}
 	}
+	// Pending ContentKit: a channel editor reading another's visible post is
+	// neither its editor nor opens it (catalog asks editorship only of hidden
+	// items).
 	if c := fan.call("GET", contentkitPrefix+"/v1/contents/"+members, nil, "", 200); c["owner_group_id"] != id || c["title"] != "Members" {
 		t.Fatalf("members-only post: %v", c)
 	}
@@ -72,7 +72,7 @@ func TestChannelsOnContentKit(t *testing.T) {
 		card := card.(map[string]any)
 		locked[card["id"].(string)] = card["access"].(map[string]any)["allowed"] != true
 	}
-	if len(locked) != 3 || locked[public] || !locked[members] || !locked[paid] {
+	if len(locked) != 4 || locked[public] || !locked[members] || !locked[paid] {
 		t.Fatalf("feed: %v", locked)
 	}
 
@@ -103,6 +103,8 @@ func TestChannelsOnContentKit(t *testing.T) {
 	}
 
 	// A paid membership and a paid post: ContentKit sells their keys.
+	groupKey, _ := access.GroupKey(tenant, id)
+	contentKey, _ := access.ContentKey(tenant, paid)
 	product := func(key access.Key) billing.Product {
 		page, err := h.srv.billing.client.ListProducts(ctx, billing.ProductListParams{Keys: []string{key.String()}})
 		if err != nil || len(page.Items) != 1 {
@@ -110,16 +112,18 @@ func TestChannelsOnContentKit(t *testing.T) {
 		}
 		return page.Items[0]
 	}
-	groupKey, _ := access.GroupKey(tenant, id)
 	owner.call("PUT", offer, map[string]any{"amount": "4.99", "renew_hours": 720}, "", 200)
-	owner.offerPrice(id)
+	h.offerPrice(groupKey)
+	if a := fan.call("GET", contentkitPrefix+"/v1/groups/"+id, nil, "", 200)["access"].(map[string]any); a["key"] != groupKey.String() ||
+		a["member"] != false || a["offer"].(map[string]any)["amount"] != "4.99" {
+		t.Fatalf("group access: %v", a)
+	}
 	if p := product(groupKey); p.Archived || len(p.Entitlements) != 1 || p.Entitlements[0] != groupKey.String() {
 		t.Fatalf("membership product: %+v", p)
 	}
 	fan.call("POST", join, nil, "", 409)
-	contentKey, _ := access.ContentKey(tenant, paid)
 	owner.call("PUT", contentkitPrefix+"/v1/contents/"+paid+"/offer", map[string]any{"amount": "2.50"}, "", 200)
-	owner.offerPrice(paid)
+	h.offerPrice(contentKey)
 	if p := product(contentKey); p.DisplayName != "Paid" || len(p.Prices) != 1 || p.Prices[0].UnitAmount != 2_500_000 {
 		t.Fatalf("post product: %+v", p)
 	}
@@ -143,10 +147,11 @@ func TestChannelsOnContentKit(t *testing.T) {
 	anon.call("GET", contentkitPrefix+"/v1/contents/"+public, nil, "", 404)
 
 	// Deleting the channel deletes its group and retires its AuthKit group.
-	fan.call("DELETE", "/api/v1/channels/"+id, nil, "", 403)
-	owner.call("DELETE", "/api/v1/channels/"+id, nil, "", 200)
+	fan.call("DELETE", contentkitPrefix+"/v1/groups/"+id, nil, "", 403)
+	owner.call("DELETE", contentkitPrefix+"/v1/groups/"+id, nil, "", 200)
 	fan.call("GET", contentkitPrefix+"/v1/groups/"+id, nil, "", 404)
-	if g, err := h.srv.auth.client.Group(ctx, iam.GroupByID(id)); err == nil && g.DeletedAt == nil {
-		t.Fatalf("AuthKit group still live: %+v", g)
-	}
+	eventually(t, "the channel's AuthKit group retired", func() bool {
+		g, err := h.srv.auth.client.Group(ctx, iam.GroupByID(id))
+		return err != nil || g.DeletedAt != nil
+	})
 }

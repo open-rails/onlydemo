@@ -28,18 +28,15 @@ var (
 	// ContentKit's staff permissions, declared in the root scope.
 	contentkitPerms = rbac.Root.Declare(access.Names(access.Permissions()...)...)
 
-	// A channel is a ContentKit group whose AuthKit group (its auth_scope)
-	// holds what ContentKit checks there: content:write edits the channel's
-	// posts, settings:manage the channel, offers:write its prices,
-	// media:write its images. Owners hold all; editors write posts.
-	channelPersona        = rbac.Persona("channel")
-	channelContentWrite   = channelPersona.Permission("content", "write")
-	channelOffersWrite    = channelPersona.Permission("offers", "write")
-	channelMediaWrite     = channelPersona.Permission("media", "write")
-	channelSettingsRead   = channelPersona.Permission("settings", "read")
-	channelSettingsManage = channelPersona.Permission("settings", "manage")
-	channelOwnerRole      = channelPersona.Owner
-	channelEditorRole     = channelPersona.Role("editor", channelContentWrite, channelSettingsRead, channelPersona.Members.Read)
+	// A channel's AuthKit group (ContentKit provisions it, keyed by the
+	// channel's id) holds what ContentKit checks there: content:write edits
+	// the channel's posts, settings:manage the channel, offers:write its
+	// prices, media:write its images. Owners hold all; editors write posts.
+	channelPersona      = rbac.Persona(kindChannel)
+	channelPerms        = channelPersona.Declare(access.GroupPermissions(kindChannel)...)
+	channelSettingsRead = channelPersona.Permission("settings", "read")
+	channelOwnerRole    = channelPersona.Owner
+	channelEditorRole   = channelPersona.Role("editor", channelPerm(access.GroupContentWrite(kindChannel)), channelSettingsRead, channelPersona.Members.Read)
 
 	// Site admins are ContentKit staff and run billing for customers.
 	customersRead   = rbac.Root.Permission(billing.RootCustomerRead.Resource(), billing.RootCustomerRead.Action())
@@ -48,6 +45,11 @@ var (
 		staffGrants(access.ContentWrite, access.ContentViewRestricted, access.GroupsWrite, access.OffersWrite,
 			access.CommentsModerate, access.CommentsBan, access.ModerationReview)...)...)
 )
+
+func channelPerm(name string) iam.Perm {
+	i := slices.IndexFunc(channelPerms, func(p iam.Perm) bool { return p.String() == name })
+	return channelPerms[i]
+}
 
 // staffGrants are the declared ContentKit permissions among ps.
 func staffGrants(ps ...access.Permission) []iam.Grant {

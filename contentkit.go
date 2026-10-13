@@ -4,18 +4,15 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"maps"
-	"net/http"
-	"net/http/httptest"
 	"slices"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/contentkit"
+	ckauthkit "github.com/open-rails/contentkit/adapters/authkit"
 	ckopenrails "github.com/open-rails/contentkit/adapters/openrails"
 	"github.com/open-rails/contentkit/contentref"
 	"github.com/open-rails/contentkit/media"
@@ -150,82 +147,7 @@ func newContentKit(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *ap
 		return nil, err
 	}
 	return contentkit.New(ctx, ck, contentkit.Deps{Postgres: pool, Auth: auth.client.Authenticator(), Users: auth.client.UserInfo(),
-		Billing: ckopenrails.Billing(billing.client), Store: store})
-}
-
-// ckAPI calls ContentKit's HTTP API in-process: open routes anonymously, the
-// rest with the caller's own credential.
-type ckAPI struct {
-	hc *http.Client
-}
-
-func newCKAPI(h http.Handler) *ckAPI {
-	return &ckAPI{hc: &http.Client{Transport: handlerTransport{h}}}
-}
-
-type handlerTransport struct{ h http.Handler }
-
-func (t handlerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	w := httptest.NewRecorder()
-	t.h.ServeHTTP(w, r)
-	return w.Result(), nil
-}
-
-// ckError is a refused ContentKit call.
-type ckError struct {
-	Status int
-	Code   string `json:"code"`
-	Msg    string `json:"error"`
-}
-
-func (e *ckError) Error() string {
-	return fmt.Sprintf("contentkit: %d %s: %s", e.Status, e.Code, e.Msg)
-}
-
-func ckStatus(err error) int {
-	var e *ckError
-	if errors.As(err, &e) {
-		return e.Status
-	}
-	return 0
-}
-
-// call sends in as JSON to path under the API (/v1/...) with credential (an
-// Authorization header value, or "") and decodes the reply into out.
-func (a *ckAPI) call(ctx context.Context, method, path, credential string, in, out any) error {
-	var body io.Reader
-	if in != nil {
-		b, err := json.Marshal(in)
-		if err != nil {
-			return err
-		}
-		body = bytes.NewReader(b)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, "http://contentkit"+contentkitPrefix+path, body)
-	if err != nil {
-		return err
-	}
-	req.RemoteAddr = "127.0.0.1:0"
-	if in != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if credential != "" {
-		req.Header.Set("Authorization", credential)
-	}
-	res, err := a.hc.Do(req)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-	if res.StatusCode >= 300 {
-		e := &ckError{Status: res.StatusCode}
-		_ = json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(e)
-		return e
-	}
-	if out == nil || res.StatusCode == http.StatusNoContent {
-		return nil
-	}
-	return json.NewDecoder(res.Body).Decode(out)
+		Scopes: ckauthkit.Scopes(auth.client), Billing: ckopenrails.Billing(billing.client), Store: store})
 }
 
 func unique(ids []string) []string {

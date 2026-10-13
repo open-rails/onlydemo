@@ -105,9 +105,10 @@ A channel is a ContentKit group (`kind=channel` in
 [contentkit.yaml](contentkit.yaml)): its handle, name, cover and avatar, and its
 membership offer. Its AuthKit group, with the same id, is the group's
 `auth_scope`: owners manage the channel and share owner/editor roles; editors
-publish. Readers, members and buyers are never added to it.
-`POST /api/v1/channels` creates both halves and `DELETE /api/v1/channels/:id`
-retires both; ContentKit serves the rest (`/contentkit/v1/groups...`).
+publish. Readers, members and buyers are never added to it. A creator makes a
+channel with `POST /contentkit/v1/groups`; ContentKit provisions its AuthKit
+group (`adapters/authkit`) with the creator as owner and retires it with the
+channel.
 
 A post is ContentKit content of the `post` kind, owned by its channel
 (`owner_group_id`), at `/p/<CODE>/<slug>`: its text, its one hidden version's
@@ -200,9 +201,10 @@ Grant the role with `task admin:grant USER_ID=<id>`.
 
 ## Deletion and identity
 
-Deleting a channel withdraws its membership offer, deletes its ContentKit group
-(hiding its posts) and retires its AuthKit group, removing authorization and
-unblocking the owner's account deletion.
+Deleting a channel (`DELETE /contentkit/v1/groups/{id}`) withdraws its
+membership offer, deletes its posts for everyone but their buyers and retires
+its AuthKit group, removing authorization and unblocking the owner's account
+deletion.
 
 Native account deletion is recoverable for 30 days. A correct password login during
 that period returns a recovery proof; explicit confirmation restores the account.

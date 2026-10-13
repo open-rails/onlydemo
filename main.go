@@ -122,9 +122,7 @@ type server struct {
 	auth     *appAuth
 	billing  *billingService
 	content  *contentkit.Engine
-	ck       *ckAPI
 	ckRoutes http.Handler
-	channels *channelAPI
 	jobs     *river.Client[pgx.Tx]
 	notices  *notifications
 	app      *fiber.App
@@ -165,8 +163,6 @@ func compose(ctx context.Context, config Config, pool *pgxpool.Pool, opts billin
 		return nil, err
 	}
 	s.ckRoutes = routes[0].Handler
-	s.ck = newCKAPI(s.ckRoutes)
-	s.channels = &channelAPI{auth: s.auth, ck: s.ck}
 	return s, nil
 }
 
@@ -239,8 +235,6 @@ func newApp(pool *pgxpool.Pool, s *server, cfg Config) (*fiber.App, error) {
 		return c.JSON(fiber.Map{"status": "ok", "database": "ok"})
 	})
 
-	required := authkitfiber.Required(s.auth.client)
-	s.channels.mount(app, required)
 	app.Get("/api/v1/config", publicConfiguration(cfg.TrustedCountryHeader))
 	// ContentKit authenticates its own requests through AuthKit.
 	app.All(contentkitPrefix+"/v1/*", adaptor.HTTPHandler(s.ckRoutes))

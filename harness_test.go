@@ -38,9 +38,11 @@ import (
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/authkit/iam"
+	"github.com/open-rails/contentkit/access"
 	"github.com/open-rails/contentkit/media"
 	mediaS3 "github.com/open-rails/contentkit/media/s3"
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/openrailstest/nmimock"
 )
 
@@ -401,17 +403,31 @@ func (p peer) opens(id string) bool {
 	return d["allowed"] == true
 }
 
-// offerPrice waits for target's offer to sell on OpenRails and returns its
-// price (staff read).
-func (p peer) offerPrice(target string) string {
+// channel creates p's channel through ContentKit, which provisions its
+// AuthKit group with p as owner.
+func (p peer) channel(slug, name string) string {
 	p.h.t.Helper()
+	res, raw := p.do("POST", contentkitPrefix+"/v1/groups", []map[string]any{{"kind": kindChannel, "slug": slug,
+		"names": []map[string]string{{"language": "en", "kind": "name", "name": name}}}}, "")
+	var created []struct{ ID string }
+	if res.StatusCode != 201 || json.Unmarshal(raw, &created) != nil || len(created) != 1 {
+		p.h.t.Fatalf("%s: create channel %s = %d: %s", p.name, slug, res.StatusCode, raw)
+	}
+	return created[0].ID
+}
+
+// offerPrice waits for OpenRails to sell key and returns its live price.
+func (h *harness) offerPrice(key access.Key) string {
+	h.t.Helper()
 	var price string
-	eventually(p.h.t, "the price of "+target, func() bool {
-		page := p.call("GET", contentkitPrefix+"/v1/offers?state=active", nil, "", 200)
-		for _, o := range page["offers"].([]any) {
-			o := o.(map[string]any)
-			if o["target"].(map[string]any)["id"] == target && o["synced"] == true && o["price_id"] != nil {
-				price = o["price_id"].(string)
+	eventually(h.t, "the price of "+key.String(), func() bool {
+		page, err := h.srv.billing.client.ListProducts(h.ctx, billing.ProductListParams{Keys: []string{key.String()}})
+		if err != nil || len(page.Items) != 1 || page.Items[0].Archived {
+			return false
+		}
+		for _, p := range page.Items[0].Prices {
+			if !p.Archived {
+				price = p.ID.String()
 			}
 		}
 		return price != ""

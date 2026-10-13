@@ -217,12 +217,14 @@ func (c *apiClient) signIn(ctx context.Context, username string) error {
 	return nil
 }
 
-// channel creates the viewer's channel, or reuses the one they own.
+// channel creates the viewer's channel (ContentKit provisions its AuthKit
+// group with the viewer as owner), or reuses the one they own.
 func (c *apiClient) channel(ctx context.Context, handle, name string) (string, error) {
-	var created struct{ ID string }
-	err := c.call(ctx, "POST", "/api/v1/channels", map[string]any{"slug": handle, "name": name}, &created)
-	if err == nil {
-		return created.ID, nil
+	var created []struct{ ID string }
+	err := c.call(ctx, "POST", contentkitPrefix+"/v1/groups", []map[string]any{{"kind": kindChannel, "slug": handle,
+		"names": []map[string]string{{"language": "en", "kind": "name", "name": name}}}}, &created)
+	if err == nil && len(created) == 1 {
+		return created[0].ID, nil
 	}
 	var page struct {
 		Groups []struct{ ID string } `json:"groups"`

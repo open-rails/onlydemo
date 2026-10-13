@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/open-rails/contentkit"
+	"github.com/open-rails/contentkit/notification"
 	"github.com/open-rails/helpers/notify"
 	riverkit "github.com/open-rails/helpers/river"
 	"github.com/open-rails/openrails"
@@ -72,7 +73,7 @@ func (n *notifications) importEvents(ctx context.Context) error {
 		})
 	}
 	if len(inputs) > 0 {
-		if _, err := n.content.Client().PublishNotifications(ctx, inputs); err != nil {
+		if _, err := n.content.Client().PostNotificationsPublish(ctx, notification.Publication{Notifications: inputs}); err != nil {
 			return fmt.Errorf("publish billing notices: %w", err)
 		}
 	}

@@ -135,5 +135,5 @@ func smoke(ctx context.Context, base string, out io.Writer) error {
 	if err := step("a deleted post is gone for readers who never bought it", err); err != nil {
 		return err
 	}
-	return step("creator deletes the channel", creator.call(ctx, "DELETE", "/api/v1/channels/"+channel, nil, nil))
+	return step("creator deletes the channel", creator.call(ctx, "DELETE", contentkitPrefix+"/v1/groups/"+channel, nil, nil))
 }

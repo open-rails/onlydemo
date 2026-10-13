@@ -14,7 +14,7 @@ import { sessionIdentity, useSession } from "@openrails/auth-ui/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Tick02Icon } from "@hugeicons/core-free-icons";
 import { request, sessionKey } from "../api";
-import { memberships } from "../content";
+import { memberships, offers } from "../content";
 import { AccountBillingScope } from "../billing";
 import { useAuth } from "../session";
 import type { Offer } from "../models";
@@ -72,7 +72,7 @@ export function PayHost({ children }: { children: ReactNode }) {
       {target && (
         <AccountBillingScope>
           <PayModal
-            key={`${sessionKey()}:${target.kind}:${target.id}:${target.offer.price_id}`}
+            key={`${sessionKey()}:${target.kind}:${target.id}:${target.offer.product_key}:${target.offer.price_id}`}
             target={target}
             onClose={() => setTarget(null)}
             onPaid={() => paid(target)}
@@ -103,16 +103,19 @@ function PayModal({
   const session = useSession();
   const viewer = session.status === "authenticated" ? session.userId : null;
   const order = useQuery({
-    queryKey: ["purchase-order", sessionIdentity(session), target.offer.price_id],
+    queryKey: ["purchase-order", sessionIdentity(session), target.offer.product_key, target.offer.price_id],
     queryFn: async () => {
-      const idempotencyKey = purchaseKey(viewer!, target.offer.price_id);
+      // A membership's terms come from ContentKit; its price id from the storefront.
+      const price = target.offer.price_id || (await offers([target.offer.product_key])).get(target.offer.product_key)?.[0]?.price_id;
+      if (!price) throw new Error("This price is not on sale right now.");
+      const idempotencyKey = purchaseKey(viewer!, price);
       const value = await request<Order>("/billing/v1/me/orders", {
         method: "POST",
         headers: { "Idempotency-Key": idempotencyKey },
-        body: JSON.stringify({ lines: [{ price_id: target.offer.price_id }] }),
+        body: JSON.stringify({ lines: [{ price_id: price }] }),
       });
-      observePurchase(viewer!, target.offer.price_id, idempotencyKey, value.status);
-      return { value, idempotencyKey };
+      observePurchase(viewer!, price, idempotencyKey, value.status);
+      return { value, idempotencyKey, price };
     },
     enabled: viewer !== null,
     // Refreshing content after payment must not issue another create-order POST.
@@ -143,7 +146,7 @@ function PayModal({
           orderId={order.data.value.id}
           returnUrl={window.location.href}
           onSettled={(paid) => {
-            observePurchase(viewer!, target.offer.price_id, order.data.idempotencyKey, paid.status);
+            observePurchase(viewer!, order.data.price, order.data.idempotencyKey, paid.status);
             if (paid.status === "complete") onPaid();
           }}
         />)}

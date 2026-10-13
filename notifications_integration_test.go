@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	"github.com/open-rails/contentkit/notification"
 	"github.com/open-rails/contentkit/signal"
 	"github.com/open-rails/helpers/notify"
 	"github.com/open-rails/openrails"
@@ -52,8 +53,8 @@ func (h *harness) assertBillingNotices(t *testing.T, buyer, other peer, observer
 	buyer.call("PUT", path+"/read", nil, "", 200)
 	var archived notify.Item
 	decode(t, buyer.call("PUT", path+"/dismiss", nil, "", 200), &archived)
-	replayed, err := h.srv.content.Client().PublishNotifications(h.ctx, []notify.Input{actionable.Input})
-	if err != nil || len(replayed) != 1 || replayed[0].Revision != archived.Revision || replayed[0].ReadAt == nil || replayed[0].DismissedAt == nil {
+	replayed, err := h.srv.content.Client().PostNotificationsPublish(h.ctx, notification.Publication{Notifications: []notify.Input{actionable.Input}})
+	if err != nil || len(replayed.Items) != 1 || replayed.Items[0].Revision != archived.Revision || replayed.Items[0].ReadAt == nil || replayed.Items[0].DismissedAt == nil {
 		t.Fatalf("replay changed local receipt: %+v %v", replayed, err)
 	}
 	var restoredPage notify.Page
@@ -66,7 +67,7 @@ func (h *harness) assertBillingNotices(t *testing.T, buyer, other peer, observer
 	if report, err := h.srv.content.EraseSubjects(h.ctx, []signal.Subject{{UserID: buyer.id}}); err != nil || !report.Complete() {
 		t.Fatalf("erasure: %+v %v", report, err)
 	}
-	if again, err := h.srv.content.Client().PublishNotifications(h.ctx, []notify.Input{actionable.Input}); err != nil || len(again) != 0 {
+	if again, err := h.srv.content.Client().PostNotificationsPublish(h.ctx, notification.Publication{Notifications: []notify.Input{actionable.Input}}); err != nil || len(again.Items) != 0 {
 		t.Fatalf("erased receipt recreated: %+v %v", again, err)
 	}
 }

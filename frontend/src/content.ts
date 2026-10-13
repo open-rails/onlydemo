@@ -4,16 +4,14 @@ import { APIError, request } from "./api";
 import { useAuth } from "./session";
 import type { AccessPolicy, Channel, Offer, Page, Post } from "./models";
 
-// Channels, posts and their offers come from ContentKit's routes; prices from
-// OpenRails' storefront; editorial roles from AuthKit.
+// Channels, posts and their offers come from ContentKit's routes; the price
+// ids a checkout orders from OpenRails' storefront, by the keys ContentKit
+// sells; editorial roles from AuthKit.
 export const ck = (path: string) => `/contentkit/v1${path}`;
-const tenant = "onlydemo";
+const merchant = "onlydemo";
 
-// Access keys a paywall sells. Group payloads carry their offer and the
-// viewer's decision once ContentKit lane 120-user-groups lands; until then
-// the channel's key is built here.
-export const groupKey = (id: string) => `${tenant}:group:${id}`;
-export const contentKey = (id: string) => `${tenant}:content:${id}`;
+// What an access key ContentKit sells opens: a content item or a group.
+const keyKind = (key: string) => (key.includes(":content:") ? "content" : key.includes(":group:") ? "group" : "tier");
 
 interface Rendition {
   url: string;
@@ -28,7 +26,9 @@ interface GroupCard {
   path?: string;
   count: number;
   cover?: { image?: string; renditions?: Rendition[] };
-  avatar?: Rendition[];
+  avatar?: { image?: string; renditions?: Rendition[] };
+  // A sellable group's key, active offer terms and the viewer's standing.
+  access?: { key: string; member: boolean; offer?: { amount: string; currency: string; renew_hours?: number } };
 }
 interface GroupDetail extends GroupCard {
   owner_user_id?: string;
@@ -103,11 +103,11 @@ export const ruleOf = (policy: AccessPolicy, channel: string) =>
       : { level: policy };
 
 // A card carries its decision, not its rule: what it sells says which.
-const cardPolicy = (card: Card, channel: string): AccessPolicy => {
+const cardPolicy = (card: Card): AccessPolicy => {
   const sell = card.access.sell ?? [];
   if (card.access.requires) return "members_ppv";
-  if (sell.includes(contentKey(card.id))) return "ppv";
-  if (channel && sell.includes(groupKey(channel))) return "membership";
+  if (sell.some((key) => keyKind(key) === "content")) return "ppv";
+  if (sell.some((key) => keyKind(key) === "group")) return "membership";
   return "public";
 };
 
@@ -116,7 +116,7 @@ export async function offers(keys: string[]): Promise<Map<string, Offer[]>> {
   const out = new Map<string, Offer[]>();
   const wanted = [...new Set(keys)];
   if (!wanted.length) return out;
-  const query = new URLSearchParams({ merchant: tenant });
+  const query = new URLSearchParams({ merchant });
   for (const key of wanted) query.append("keys", key);
   const page = await request<{ data: Product[] }>(`/billing/v1/products?${query}`, {}, false);
   for (const product of page.data ?? []) {
@@ -142,21 +142,6 @@ export async function offers(keys: string[]): Promise<Map<string, Offer[]>> {
   return out;
 }
 
-/** The channel keys the viewer holds (memberships, free or bought). */
-async function heldGroups(signedIn: boolean): Promise<Set<string>> {
-  const out = new Set<string>();
-  if (!signedIn) return out;
-  let cursor = "";
-  do {
-    const query = new URLSearchParams({ prefix: `${tenant}:group:`, limit: "100" });
-    if (cursor) query.set("cursor", cursor);
-    const page = await request<{ data: { entitlement: string }[]; next_cursor?: string }>(`/billing/v1/me/entitlements?${query}`);
-    for (const item of page.data ?? []) out.add(item.entitlement);
-    cursor = page.next_cursor ?? "";
-  } while (cursor);
-  return out;
-}
-
 /** The viewer's roles in channels, from AuthKit. */
 export async function channelRoles(signedIn: boolean): Promise<Map<string, "owner" | "editor">> {
   const out = new Map<string, "owner" | "editor">();
@@ -176,15 +161,32 @@ export async function channelRoles(signedIn: boolean): Promise<Map<string, "owne
   return out;
 }
 
+// A membership's offer from its terms; checkout finds the price by its key.
+const membershipOffer = (access: NonNullable<GroupCard["access"]>, name: string): Offer | null =>
+  access.offer && access.offer.amount !== "0"
+    ? {
+        product_id: "",
+        product_key: access.key,
+        product_display_name: name,
+        price_id: "",
+        price_key: "",
+        unit_amount: String(Math.round(Number(access.offer.amount) * 1_000_000)),
+        currency: access.offer.currency,
+        kind: access.offer.renew_hours ? "recurring" : "permanent",
+        access_duration_hours: null,
+        billing_interval_hours: access.offer.renew_hours ?? null,
+      }
+    : null;
+
 /** Channels with their membership offer, the viewer's membership and role. */
 async function channels(groups: GroupDetail[], signedIn: boolean): Promise<Channel[]> {
-  const [prices, held, roles] = await Promise.all([offers(groups.map((g) => groupKey(g.id))), heldGroups(signedIn), channelRoles(signedIn)]);
+  const roles = await channelRoles(signedIn);
   return groups.map((g) => {
-    const sold = prices.get(groupKey(g.id));
     const role = roles.get(g.id);
-    const offer = sold?.find((o) => o.kind === "recurring") ?? null;
-    const free = !!sold && sold.length === 0;
-    const member = held.has(groupKey(g.id));
+    const sale = g.access;
+    const offer = sale ? membershipOffer(sale, g.name) : null;
+    const free = sale?.offer?.amount === "0";
+    const member = !!sale?.member;
     return {
       id: g.id,
       slug: g.slug,
@@ -194,9 +196,9 @@ async function channels(groups: GroupDetail[], signedIn: boolean): Promise<Chann
       role,
       can_manage: role === "owner",
       can_edit: !!role,
-      avatar: preset("avatar", g.avatar),
+      avatar: preset("avatar", g.avatar?.renditions),
       cover: preset("cover", g.cover?.renditions),
-      membership: { status: sold ? "open" : "none", free, offer, member, free_member: member && free },
+      membership: { status: sale?.offer ? "open" : "none", free, offer, member, free_member: member && free },
     };
   });
 }
@@ -268,7 +270,7 @@ async function postsOf(cards: Card[], channel?: Channel): Promise<Post[]> {
       path: card.path,
       title: card.title,
       can_read: card.access.allowed,
-      access_policy: cardPolicy(card, owner?.id ?? ""),
+      access_policy: cardPolicy(card),
       state: "published",
       offers: sold,
       created_at: card.published_at ?? "",

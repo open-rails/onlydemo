@@ -74,11 +74,11 @@ export function ChannelPage() {
   const [tab, setTab] = useState("posts");
   const channel = useChannel(slug);
   const posts = usePostFeed(channel.data, !!channel.data);
-  // A newly uploaded cover becomes the channel's cover.
-  const selectCover = (file: FileInfo | null) => {
-    const name = file?.path.replace(/^cover\//, "").replace(/\.[^.]+$/, "");
+  // A newly uploaded cover or avatar becomes the channel's.
+  const select = (slot: "cover" | "avatar") => (file: FileInfo | null) => {
+    const name = file?.path.replace(/^[a-z]+\//, "").replace(/\.[^.]+$/, "");
     if (channel.data && name)
-      void request(ck(`/groups/${channel.data.id}`), { method: "PATCH", body: JSON.stringify({ cover: { image: name } }) }).then(() =>
+      void request(ck(`/groups/${channel.data.id}`), { method: "PATCH", body: JSON.stringify({ [slot]: { image: name } }) }).then(() =>
         client.invalidateQueries(),
       );
   };
@@ -119,7 +119,7 @@ export function ChannelPage() {
             </small>
           </div>
           {current.can_manage && (
-            <SlotEditor item={channelRef(current.id)} path="cover/{name}" image={current.cover} minWidth={600} onChange={selectCover}>
+            <SlotEditor item={channelRef(current.id)} path="cover/{name}" image={current.cover} minWidth={600} onChange={select("cover")}>
               <SlotEditMenu
                 label="Edit cover"
                 render={
@@ -147,7 +147,7 @@ export function ChannelPage() {
                 className="avatar-xl"
               />
               {current.can_manage && (
-                <SlotEditor item={channelRef(current.id)} path="avatar/{name}" image={current.avatar} minWidth={128} round>
+                <SlotEditor item={channelRef(current.id)} path="avatar/{name}" image={current.avatar} minWidth={128} round onChange={select("avatar")}>
                   <SlotEditMenu
                     label="Change avatar"
                     iconOnly
@@ -512,7 +512,7 @@ function ChannelSettings({
   const [confirmation, setConfirmation] = useState("");
   const remove = useMutation({
     mutationFn: () =>
-      request(`/api/v1/channels/${channel.id}`, { method: "DELETE" }),
+      request(ck(`/groups/${channel.id}`), { method: "DELETE" }),
     onSuccess: () => navigate("/me?tab=channels"),
   });
   return (
@@ -593,12 +593,16 @@ export function NewChannelPage() {
     setError("");
     const data = new FormData(event.currentTarget);
     try {
-      const channel = await request<Channel>("/api/v1/channels", {
+      // ContentKit makes the channel and its AuthKit group, the viewer its owner.
+      const [channel] = await request<{ id: string; slug: string }[]>(ck("/groups"), {
         method: "POST",
-        body: JSON.stringify({
-          slug: String(data.get("slug")).trim(),
-          name: String(data.get("name")).trim(),
-        }),
+        body: JSON.stringify([
+          {
+            kind: "channel",
+            slug: String(data.get("slug")).trim().toLowerCase(),
+            names: [{ language: "en", kind: "name", name: String(data.get("name")).trim() }],
+          },
+        ]),
       });
       await client.invalidateQueries({ queryKey: myChannelsKey(auth.user?.id) });
       navigate(thenPost ? newPostPath(channel.slug) : channelPath(channel.slug), {
