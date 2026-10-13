@@ -1,7 +1,7 @@
 # ContentKit cutover (#117, OnlyDemo #125)
 
 OnlyDemo is configuration and glue around ContentKit, AuthKit and OpenRails.
-ContentKit `v0.81.0` runs embedded (`contentkit.go`):
+ContentKit `v0.82.0` runs embedded (`contentkit.go`):
 its own schema (`CONTENT_SCHEMA`, default `contentkit`), its jobs on the host
 River fleet (`RiverJobs`, `WithRiverClient`), billing through
 `adapters/openrails.Billing`, the channels' AuthKit groups through
@@ -20,7 +20,7 @@ no tables and no content routes.
 | Deleted | Replacement |
 | --- | --- |
 | `demo.channels`, `POST`/`DELETE /api/v1/channels` | ContentKit group `kind=channel` (`POST`/`DELETE /contentkit/v1/groups`): slug, names, `owner_user_id`; ContentKit provisions and retires its AuthKit group (`auth_scope` = its id) |
-| `demo.posts`, the app schema and migrations | ContentKit content `kind=post`, `owner_group_id` = channel; rule per policy: `public`, `group` (membership), `group_ppv` (members' purchase), `ppv`; members-only rules need the channel to sell a membership (`no_membership`) |
+| `demo.posts`, the app schema and migrations | ContentKit content `kind=post`, `owner_group_id` = channel; rule per policy: `public`, `group` (membership), `group_ppv` (members' purchase), `ppv`; a members-only post stays locked while its channel sells no membership |
 | `GET /api/v1/channels`, `/channels/:id-or-slug` | `GET /contentkit/v1/groups?kind=channel[&slug=]`, `GET /contentkit/v1/groups/{id}`: with `avatar` and `access` (key, offer terms, the viewer's membership) |
 | `PUT /api/v1/channels/:id/membership` | `PUT` / `DELETE /contentkit/v1/groups/{id}/offer` (`amount: "0"` free; `renew_hours` paid) |
 | `POST /api/v1/channels/:id/join`, `/leave` | `POST` / `DELETE /contentkit/v1/groups/{id}/join` |
@@ -60,7 +60,7 @@ comment and moderation staff permissions and OpenRails customer staff ones.
 
 ## Frontend
 
-On `@openrails/contentkit-ui` `0.81.0`; the app keeps page composition:
+On `@openrails/contentkit-ui` `0.82.0`; the app keeps page composition:
 
 | Page | contentkit-ui |
 | --- | --- |
@@ -78,7 +78,7 @@ The app's own: `components/pay.tsx` orders the price a `Paywall` or
 
 ## Gaps
 
-Status as of `v0.81.0`. Fixed since phase A: creator group and
+Status as of `v0.82.0`. Fixed since phase A: creator group and
 content writes with `channel:*` permissions (#217), `adapters/authkit`
 scopes, group `avatar` and `access`, the generated `Engine.Client()`,
 `/v1/me/groups`, the `owner_group` filter and owner chips, locked bodies,

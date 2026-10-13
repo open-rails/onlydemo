@@ -45,12 +45,20 @@ func TestChannelsOnContentKit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Members-only posts need the channel to sell a membership; this one is free.
+	// A members-only post needs no offer on its channel: it stays locked,
+	// selling nothing, until the channel sells a membership (here a free one).
+	members, membersVersion := owner.post(id, "Members", "Members read this", map[string]any{"level": "group", "group_id": id})
+	if fan.opens(members) || anon.opens(members) || fan.body(members) != "" {
+		t.Fatal("a members-only post in a channel selling no membership is open to non-members")
+	}
+	decision := fan.call("GET", contentkitPrefix+"/v1/contents/"+members, nil, "", 200)["versions"].([]any)[0].(map[string]any)["decision"].(map[string]any)
+	if offers, _ := decision["offers"].([]any); len(offers) != 0 {
+		t.Fatalf("a channel selling no membership offers %v", offers)
+	}
 	offer := contentkitPrefix + "/v1/groups/" + id + "/offer"
 	join := contentkitPrefix + "/v1/groups/" + id + "/join"
 	owner.call("PUT", offer, map[string]any{"amount": "0"}, "", 200)
 	public, _ := owner.post(id, "Hello", "Everyone reads this", nil)
-	members, membersVersion := owner.post(id, "Members", "Members read this", map[string]any{"level": "group", "group_id": id})
 	paid, _ := owner.post(id, "Paid", "Buyers read this", map[string]any{"level": "ppv"})
 	editor.post(id, "By the editor", "Hi", nil)
 	fan.call("POST", contentkitPrefix+"/v1/contents", map[string]any{"kind": kindPost, "owner_group_id": id,
@@ -73,12 +81,6 @@ func TestChannelsOnContentKit(t *testing.T) {
 	}
 	if c := fan.call("GET", contentkitPrefix+"/v1/contents/"+members, nil, "", 200); c["owner_group_id"] != id || c["title"] != "Members" {
 		t.Fatalf("members-only post: %v", c)
-	}
-	other := fan.channel("other", "Other")
-	fan.post(other, "Elsewhere", "Not in the studio", nil)
-	if e := fan.call("POST", contentkitPrefix+"/v1/contents", map[string]any{"kind": kindPost, "owner_group_id": other,
-		"text": map[string]any{"en": map[string]string{"title": "Members"}}, "access": map[string]any{"level": "group", "group_id": other}}, "", 409); e["code"] != "no_membership" {
-		t.Fatalf("a members-only post in a channel selling no membership: %v", e)
 	}
 	feed := anon.call("GET", contentkitPrefix+"/v1/contents?kind=post&mode=lock&owner_group="+id, nil, "", 200)
 	locked := map[string]bool{}
