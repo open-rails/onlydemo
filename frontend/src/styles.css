@@ -1251,3 +1251,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
+/* The gradient stands in for a missing cover; ContentKit's initial would sit under the name. */
+.suggested-item .cover[data-ckui="group-cover"] {
+  color: transparent;
+}
