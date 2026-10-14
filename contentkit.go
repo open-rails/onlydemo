@@ -69,16 +69,17 @@ func contentKitConfig(cfg Config) (contentkit.Config, error) {
 		return ck, err
 	}
 	ck.Media = &contentkit.MediaConfig{
-		Config:       media.Config{BaseURL: mc.URL, Kinds: kinds, Avatars: media.Avatars{Kind: kindUser, Preset: media.AvatarPreset}},
+		Config:       media.Config{BaseURL: mc.URL, Kinds: kinds},
 		WorkerSchema: mediaWorkerSchema(cfg), ProcessOnUpload: true,
 		Delivery: contentkit.DeliveryConfig{Mode: string(mc.Delivery), CookieDomain: mc.CookieDomain, SigningKey: mc.TokenKey, PreviousKey: mc.TokenKeyPrevious},
 	}
+	user := avatar.User()
+	user.Namespace = ""
+	ck.Avatars = &contentkit.AvatarsConfig{Kind: &user}
 	return ck, nil
 }
 
-// mediaKinds are the app's media kinds: a post's mixed images and videos
-// (its version's media), a channel's cover banner and avatar, and people's
-// avatars.
+// mediaKinds are posts' mixed media and channels' image slots.
 func mediaKinds(ck contentkit.Config) ([]media.Kind, error) {
 	gk, ok := ck.Content.GroupKinds[kindChannel]
 	if !ok {
@@ -91,8 +92,6 @@ func mediaKinds(ck contentkit.Config) ([]media.Kind, error) {
 			channel.Public[i].Image.Aspect, channel.Public[i].Image.MinWidth = media.Ratio("3:1"), 600
 		}
 	}
-	user := avatar.User()
-	user.Namespace = ""
 	return []media.Kind{
 		{Name: kindPost, KeepOriginals: true,
 			Uploads: []media.Upload{
@@ -107,7 +106,6 @@ func mediaKinds(ck contentkit.Config) ([]media.Kind, error) {
 			Public: []media.Public{{Name: "preview", From: postImages, To: "preview-{n}.webp", First: 1,
 				Image: media.Image{Width: 960, Height: 960, Quality: 70, Blur: 24}}}},
 		channel,
-		user,
 	}, nil
 }
 
@@ -117,7 +115,7 @@ func workerRegistry(cfg Config) (*media.Registry, error) {
 	if err != nil {
 		return nil, err
 	}
-	mc, err := media.ForContent(ck.Media.Config, ck.Content)
+	mc, err := ck.MediaKinds()
 	if err != nil {
 		return nil, err
 	}

@@ -16,7 +16,7 @@ import { contentkit } from "../media";
 import { dateTime } from "../format";
 import { channelPath, editPostPath, parseCode, postLink, postPath } from "../paths";
 
-// A post's content id, from its code (/p/{CODE}/{slug}) or its id (/post/{id}).
+// A post's content id, from its language page or the editor's id route.
 function usePostID() {
   const params = useParams();
   const code = params.id ? null : parseCode(params.code ?? "");

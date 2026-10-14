@@ -5,9 +5,9 @@ import { contentURLs, parseCode, postLink, postPath } from "./paths";
 const post = { code: "G4VRQ3ZQ5", slug: "night-before-the-counteroffensive" };
 
 describe("post links", () => {
-  it("are /p/{CODE}/{slug} from the API's code and slug", () => {
-    expect(postPath(post)).toBe("/p/G4VRQ3ZQ5/night-before-the-counteroffensive");
-    expect(postPath({ code: "G4VRQ3ZQ5", slug: "" })).toBe("/p/G4VRQ3ZQ5");
+  it("are /en/p/{CODE}/{slug} from the API's code and slug", () => {
+    expect(postPath(post)).toBe("/en/p/G4VRQ3ZQ5/night-before-the-counteroffensive");
+    expect(postPath({ code: "G4VRQ3ZQ5", slug: "" })).toBe("/en/p/G4VRQ3ZQ5");
   });
 
   it("read any spelling of the code from the route", () => {
@@ -18,8 +18,8 @@ describe("post links", () => {
 
   it("replace a stale address with the canonical one, keeping the query", () => {
     expect(contentURLs.canonical("/p/g4vrq3zq5/old-title?ref=feed", postLink(post))).toEqual({
-      path: "/p/G4VRQ3ZQ5/night-before-the-counteroffensive",
-      location: "/p/G4VRQ3ZQ5/night-before-the-counteroffensive?ref=feed",
+      path: "/en/p/G4VRQ3ZQ5/night-before-the-counteroffensive",
+      location: "/en/p/G4VRQ3ZQ5/night-before-the-counteroffensive?ref=feed",
       redirect: true,
     });
     expect(contentURLs.canonical(postPath(post), postLink(post))?.redirect).toBe(false);
