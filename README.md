@@ -112,7 +112,7 @@ group (`adapters/authkit`) with the creator as owner and retires it with the
 channel.
 
 A post is ContentKit content of the `post` kind, owned by its channel
-(`owner_group_id`), at `/p/<CODE>/<slug>`: its text, its one hidden version's
+(`owner_group_id`), at `/en/p/<CODE>/<slug>`: its text, its one hidden version's
 media, its access rule and its offer. Each has one of four policies:
 
 - **Public** (`public`): free to read.

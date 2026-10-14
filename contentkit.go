@@ -33,7 +33,6 @@ func mediaWorkerSchema(cfg Config) string { return contentSchema(cfg) + "_media_
 const (
 	kindPost    = "post"
 	kindChannel = "channel"
-	kindUser    = "user"
 )
 
 //go:embed contentkit.yaml
