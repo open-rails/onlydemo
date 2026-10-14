@@ -104,7 +104,8 @@ never rewrites them.
 
 A channel is a ContentKit group (`kind=channel` in
 [contentkit.yaml](contentkit.yaml)): its handle, name, cover and avatar, and its
-membership offer. Its AuthKit group, with the same id, is the group's
+membership offer, at `/en/c/<CODE>/<name-slug>`. The API owns its canonical path;
+the handle stays its display and lookup name. Its AuthKit group, with the same id, is the group's
 `auth_scope`: owners manage the channel and share owner/editor roles; editors
 publish. Readers, members and buyers are never added to it. A creator makes a
 channel with `POST /contentkit/v1/groups`; ContentKit provisions its AuthKit
@@ -112,7 +113,7 @@ group (`adapters/authkit`) with the creator as owner and retires it with the
 channel.
 
 A post is ContentKit content of the `post` kind, owned by its channel
-(`owner_group_id`), at `/p/<CODE>/<slug>`: its text, its one hidden version's
+(`owner_group_id`), at `/en/p/<CODE>/<slug>`: its text, its one hidden version's
 media, its access rule and its offer. Each has one of four policies:
 
 - **Public** (`public`): free to read.
@@ -198,7 +199,7 @@ Return URLs name `PUBLIC_URL` or the request's `Origin`; OpenRails refuses any
 origin outside `PUBLIC_URL` + `RETURN_ORIGINS`.
 
 Site admins (the root `admin` role) are ContentKit staff (groups, offers,
-comment moderation) and work on customers' billing through the OpenRails
+comment moderation and avatars) and work on customers' billing through the OpenRails
 merchant API at `/billing/v1/merchant/*`
 ([route table](https://github.com/open-rails/openrails/blob/master/docs/api/routes.md)).
 Grant the role with `task admin:grant USER_ID=<id>`.

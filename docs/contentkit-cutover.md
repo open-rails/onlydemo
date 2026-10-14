@@ -1,7 +1,7 @@
 # ContentKit cutover (#117, OnlyDemo #125)
 
 OnlyDemo is configuration and glue around ContentKit, AuthKit and OpenRails.
-ContentKit `v0.82.0` runs embedded (`contentkit.go`):
+ContentKit runs embedded (`contentkit.go`):
 its own schema (`CONTENT_SCHEMA`, default `contentkit`), its jobs on the host
 River fleet (`RiverJobs`, `WithRiverClient`), billing through
 `adapters/openrails.Billing`, the channels' AuthKit groups through
@@ -30,7 +30,7 @@ no tables and no content routes.
 | `GET /api/v1/me/channels` | AuthKit `GET /auth/v1/me/groups` (gap 1) |
 | `GET /api/v1/posts[?channel_id]` | `GET /contentkit/v1/contents?kind=post&mode=lock[&owner_group=]` (cards) |
 | `GET`/`POST`/`PATCH`/`DELETE /api/v1/posts[/:code]` | `/contentkit/v1/contents[/{id}]`, `.../text/en`, `.../publish`, `.../offer`; codes `GET /contentkit/v1/codes/{code}` |
-| SPA `/p/{CODE}/{slug}` router, OG head | ContentKit codes route; the SPA resolves the code |
+| SPA post and channel addresses | `/en/p/{CODE}/{slug}` and `/en/c/{CODE}/{slug}`; the API owns paths, the shared canonical hook redirects unprefixed requests |
 | `ALL /api/v1/contentkit/*` (Runtime) | `/contentkit/v1/*` (Engine routes) |
 | River `demo_sync_membership`, `demo_delete_channel`, offer sync and archive, draft sweep; advisory locks | ContentKit offer sync (`contentkit_offers`) and group delete cascades; gap 8 |
 | host access gate, media `Resolver`/`CanUpload`, `ItemReady` publishing | ContentKit's catalog visibility and version media |
@@ -56,11 +56,11 @@ provisioned by ContentKit with the creator as owner; the persona declares
 
 Site admins (root `admin`) hold `root:content:write`,
 `root:content:view-restricted`, `root:groups:write`, `root:offers:write`, the
-comment and moderation staff permissions and OpenRails customer staff ones.
+comment, moderation and avatar staff permissions and OpenRails customer staff ones.
 
 ## Frontend
 
-On `@openrails/contentkit-ui` `0.82.0`; the app keeps page composition:
+The app keeps page composition around `@openrails/contentkit-ui`:
 
 | Page | contentkit-ui |
 | --- | --- |

@@ -139,7 +139,7 @@ function MyChannels() {
       ) : channels.data?.length ? (
         <div className="suggested-list">
           {channels.data.map(({ group, role }) => (
-            <Link to={channelPath(group.slug)} key={group.id} className="suggested-item">
+            <Link to={channelPath(group)} key={group.id} className="suggested-item">
               <GroupCover group={group} className="cover" />
               <span className="suggested-info">
                 <GroupAvatar group={group} className="avatar" />

@@ -11,8 +11,8 @@ require (
 	github.com/open-rails/authkit v1.24.0
 	github.com/open-rails/migratekit v1.11.1 // indirect
 	github.com/open-rails/openrails v0.252.1
-	github.com/riverqueue/river v0.47.0
-	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.47.0 // indirect
+	github.com/riverqueue/river v0.49.0
+	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.49.0 // indirect
 )
 
 require (
@@ -20,11 +20,11 @@ require (
 	github.com/johannesboyne/gofakes3 v1.2.0
 	github.com/joho/godotenv v1.5.1
 	github.com/jonboulle/clockwork v0.5.0
-	github.com/open-rails/contentkit v0.85.1
+	github.com/open-rails/contentkit v0.86.0
 	github.com/open-rails/contentkit/adapters/authkit v0.6.0
 	github.com/open-rails/contentkit/adapters/openrails v0.4.0
 	github.com/open-rails/helpers v1.12.0
-	github.com/riverqueue/river/rivertype v0.47.0
+	github.com/riverqueue/river/rivertype v0.49.0
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -118,8 +118,8 @@ require (
 	github.com/prometheus/common v0.70.1 // indirect
 	github.com/prometheus/procfs v0.21.1 // indirect
 	github.com/redis/go-redis/v9 v9.22.0 // indirect
-	github.com/riverqueue/river/riverdriver v0.47.0 // indirect
-	github.com/riverqueue/river/rivershared v0.47.0 // indirect
+	github.com/riverqueue/river/riverdriver v0.49.0 // indirect
+	github.com/riverqueue/river/rivershared v0.49.0 // indirect
 	github.com/ryanuber/go-glob v1.0.0 // indirect
 	github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect

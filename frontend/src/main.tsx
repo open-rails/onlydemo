@@ -38,8 +38,10 @@ const router = createBrowserRouter([
       { path: "/", element: <HomePage /> },
       { path: "/c", element: <ChannelsPage /> },
       { path: "/c/new", element: <NewChannelPage /> },
-      { path: "/c/:channel", element: <ChannelPage /> },
+      { path: "/c/:code/:slug?", element: <ChannelPage /> },
+      { path: "/:language/c/:code/:slug?", element: <ChannelPage /> },
       { path: "/p/:code/:slug?", element: <PostPage /> },
+      { path: "/:language/p/:code/:slug?", element: <PostPage /> },
       { path: "/search", element: <SearchPage /> },
       { path: "/post/:id", element: <PostPage /> },
       {

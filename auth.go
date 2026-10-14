@@ -43,7 +43,7 @@ var (
 	customersUpdate = rbac.Root.Permission(billing.RootCustomerManage.Resource(), billing.RootCustomerManage.Action())
 	adminRole       = rbac.Root.Role("admin", append([]iam.Grant{customersRead, customersUpdate},
 		staffGrants(access.ContentWrite, access.ContentViewRestricted, access.GroupsWrite, access.OffersWrite,
-			access.CommentsModerate, access.CommentsBan, access.ModerationReview)...)...)
+			access.CommentsModerate, access.CommentsBan, access.ModerationReview, access.AvatarsWrite)...)...)
 )
 
 func channelPerm(name string) iam.Perm {

@@ -241,7 +241,7 @@ func openMediaStore(ctx context.Context, mc mediaConfig) (*mediaS3.Store, error)
 	if err != nil {
 		return nil, err
 	}
-	if err := store.Check(ctx, "_probe/"); err != nil {
+	if err := store.Check(ctx); err != nil {
 		return nil, fmt.Errorf("media bucket %s: %w", mc.S3Bucket, err)
 	}
 	return store, nil

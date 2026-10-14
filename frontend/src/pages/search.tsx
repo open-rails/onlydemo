@@ -7,7 +7,7 @@ import { Post } from "./explore";
 import { channelPath, postPath, searchPath } from "../paths";
 
 // Channels link by handle; ContentKit's group paths carry a name slug instead.
-const href = (item: Card | GroupCard) => ("title" in item ? postPath({ code: item.code, slug: "", path: item.path }) : channelPath(item.slug));
+const href = (item: Card | GroupCard) => ("title" in item ? postPath({ code: item.code, slug: "", path: item.path }) : channelPath(item));
 
 /** Posts and channels as the reader types, recent searches while empty; Enter opens the results. */
 export function SiteSearch({ className }: { className?: string }) {

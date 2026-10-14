@@ -1,10 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import type { GroupDetail } from "@openrails/contentkit-ui/client";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { ContentKitError, type GroupDetail } from "@openrails/contentkit-ui/client";
 import { ContentGrid, GroupBanner, GroupImageEditor } from "@openrails/contentkit-ui";
-import { useGroup, useGroups } from "@openrails/contentkit-ui/react";
+import { useCanonicalContent, useGroup } from "@openrails/contentkit-ui/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Add01Icon, ArrowRight02Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
@@ -25,28 +25,40 @@ import { contentkit } from "../media";
 import { useAuth } from "../session";
 import { rememberPostChannel, useChannelRoles } from "../roles";
 import { amount as price, money, duration } from "../format";
-import { channelPath, channelsPath, newPostPath } from "../paths";
+import { channelPath, channelsPath, contentURLs, newPostPath, parseCode } from "../paths";
 
 // A channel's page: ContentKit's banner and membership box, its posts
 // (owner_group), and for its team the AuthKit roster and its settings.
 export function ChannelPage() {
-  const { channel: slug = "" } = useParams();
+  const { code: rawCode = "", language } = useParams();
+  const code = parseCode(rawCode);
+  const supported = !language || contentURLs.languages.includes(language);
+  const found = useQuery({
+    queryKey: ["channel-code", code, language],
+    queryFn: () => contentkit.codes.resolve(code!, { lang: language }),
+    enabled: !!code && supported,
+  });
   const auth = useAuth();
   const [tab, setTab] = useState("posts");
-  const found = useGroups({ kind: "channel", slug });
-  const id = found.items[0]?.id ?? null;
+  const id = found.data?.content_kind === "channel" ? found.data.content_id : null;
   const read = useGroup(id);
   const roles = useChannelRoles();
   const group = read.group;
   const role = id ? roles.data?.get(id) : undefined;
   const checkout = useCheckout(group?.name ?? "Creator");
   const userID = auth.user?.id;
+  const location = useLocation();
+  useCanonicalContent(id ? found.data : undefined, {
+    title: group?.name,
+    location: location.pathname + location.search + location.hash,
+  });
   useEffect(() => {
     if (userID && id && role) rememberPostChannel(userID, id);
   }, [userID, id, role]);
   // Lists reload on every change; show Loading only before the first read.
-  if ((found.loading && !id) || (id && !group && !read.error)) return <Loading />;
-  if (!id) return found.error ? <ErrorState error={found.error} retry={found.reload} /> : <NotFoundPage />;
+  if (!code || !supported) return <NotFoundPage />;
+  if ((found.isPending && !id) || (id && !group && !read.error)) return <Loading />;
+  if (!id) return found.error && !(found.error instanceof ContentKitError && found.error.status === 404) ? <ErrorState error={found.error} retry={() => void found.refetch()} /> : <NotFoundPage />;
   if (read.error || !group) return <ErrorState error={read.error ?? new Error("Channel not found.")} retry={read.reload} />;
   const manage = role === "owner";
   return (
@@ -290,7 +302,8 @@ export function NewChannelPage() {
         },
       ]);
       await client.invalidateQueries();
-      navigate(thenPost ? newPostPath(channel.slug) : channelPath(channel.slug), { replace: thenPost });
+      const target = thenPost ? newPostPath(channel.slug) : channelPath(await contentkit.groups.get(channel.id));
+      navigate(target, { replace: thenPost });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Channel could not be created.");
     } finally {

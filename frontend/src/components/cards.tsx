@@ -44,7 +44,7 @@ export function SuggestedCreators({ strip = false }: { strip?: boolean }) {
       </div>
       <div className="suggested-list">
         {channels.items.map((channel) => (
-          <Link to={channelPath(channel.slug)} key={channel.id} className="suggested-item">
+          <Link to={channelPath(channel)} key={channel.id} className="suggested-item">
             <GroupCover group={channel} className="cover" />
             <span className="suggested-info">
               <GroupAvatar group={channel} className="avatar" />

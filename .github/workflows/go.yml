@@ -10,6 +10,8 @@ on:
       - 'go.sum'
       - 'migrations/**'
       - 'homepage.html'
+      - 'frontend/**'
+      - '!frontend/dist/**'
       - '.github/workflows/go.yml'
   workflow_dispatch: {}
 
@@ -27,6 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
+      GOWORK: 'off'
       GOFLAGS: -mod=readonly
       DEMO_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
       DEMO_TEST_S3_ENDPOINT: http://127.0.0.1:9000
@@ -44,6 +47,19 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '11.15.1'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Build the embedded frontend
+        run: |
+          pnpm --dir frontend install --frozen-lockfile
+          pnpm --dir frontend build
       - name: Install libvips (the media worker links it)
         run: |
           sudo rm -f /var/lib/man-db/auto-update
@@ -63,3 +79,16 @@ jobs:
       - run: |
           timeout 60 sh -c 'until curl -fs http://127.0.0.1:9000/minio/health/live; do sleep 1; done'
           go test -run "TestChannelsOnContentKit|TestSmoke" -count=1 -v -p 2 .
+      - name: Build the browser QA binary
+        run: |
+          go build -p 2 -o onlydemo .
+          git rev-parse HEAD > build-head.txt
+          go version -m onlydemo > build-metadata.txt
+          ldd onlydemo > runtime-libs.txt
+          tar -czf onlydemo-linux-amd64.tar.gz onlydemo build-head.txt build-metadata.txt runtime-libs.txt
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: onlydemo-linux-amd64
+          path: onlydemo-linux-amd64.tar.gz
+          retention-days: 7
+          if-no-files-found: error
