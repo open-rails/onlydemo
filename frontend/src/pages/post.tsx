@@ -14,18 +14,19 @@ import { ErrorState, FormError, Loading } from "../components/states";
 import { useCheckout } from "../components/pay";
 import { contentkit } from "../media";
 import { dateTime } from "../format";
-import { channelPath, editPostPath, parseCode, postLink, postPath } from "../paths";
+import { channelPath, contentURLs, editPostPath, parseCode, postLink, postPath } from "../paths";
 
 // A post's content id, from its language page or the editor's id route.
 function usePostID() {
   const params = useParams();
+  const supported = !params.language || contentURLs.languages.includes(params.language);
   const code = params.id ? null : parseCode(params.code ?? "");
   const resolved = useQuery({
-    queryKey: ["code", code],
-    queryFn: () => contentkit.codes.resolve(code!),
-    enabled: !!code,
+    queryKey: ["code", code, params.language],
+    queryFn: () => contentkit.codes.resolve(code!, { lang: params.language }),
+    enabled: !!code && supported,
   });
-  return { id: params.id ?? resolved.data?.content_id ?? null, missing: !params.id && (!code || !!resolved.error), loading: resolved.isPending && !!code };
+  return { id: params.id ?? (resolved.data?.content_kind === "post" ? resolved.data.content_id : null), missing: !params.id && (!code || !supported || !!resolved.error || (resolved.data && resolved.data.content_kind !== "post")), loading: resolved.isPending && !!code && supported };
 }
 
 export function PostPage() {
@@ -63,7 +64,7 @@ export function PostPage() {
     try {
       await contentkit.contents.remove(content.id);
       await client.invalidateQueries();
-      navigate(owner ? channelPath(owner.slug) : "/");
+      navigate(owner ? channelPath(owner) : "/");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not delete the post.");
     } finally {
@@ -74,7 +75,7 @@ export function PostPage() {
   return (
     <>
       <div className="page-title">
-        <Button variant="ghost" size="icon" aria-label="Back to creator" nativeButton={false} render={<Link to={owner ? channelPath(owner.slug) : "/"} />}>
+        <Button variant="ghost" size="icon" aria-label="Back to creator" nativeButton={false} render={<Link to={owner ? channelPath(owner) : "/"} />}>
           <HugeiconsIcon icon={ArrowLeft02Icon} />
         </Button>
         <h1>Post</h1>
@@ -83,7 +84,7 @@ export function PostPage() {
         <article className="feed-card reader-main" data-variant="full">
           <header className="feed-head">
             {owner && (
-              <Link to={channelPath(owner.slug)} className="feed-author">
+              <Link to={channelPath(owner)} className="feed-author">
                 <GroupAvatar group={owner} className="avatar" />
                 <span>
                   <strong>{owner.name}</strong>

@@ -32,7 +32,7 @@ export function NewPostPage() {
         <h1>New post</h1>
         <p>
           Publishing to{" "}
-          <Link to={channelPath(current.group.slug)} className="text-primary">
+          <Link to={channelPath(current.group)} className="text-primary">
             {current.group.name}
           </Link>
           . Readers never become members of your editorial team.

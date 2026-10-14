@@ -19,7 +19,7 @@ export function Post({ card, owner: showOwner = true }: { card: Card; owner?: bo
       owner={showOwner}
       byline={
         owner && (
-          <Link to={channelPath(owner.slug)} className="feed-author">
+          <Link to={channelPath(owner)} className="feed-author">
             <GroupAvatar group={owner} className="avatar" />
             <span>
               <strong>{owner.name}</strong>
@@ -98,7 +98,7 @@ export function ChannelsPage() {
         )}
       </div>
       <SiteSearch className="mb-4" />
-      <GroupDirectory kind="channel" layout="grid" sort="newest" letters={false} href={(g) => channelPath(g.slug)} />
+      <GroupDirectory kind="channel" layout="grid" sort="newest" letters={false} href={(g) => channelPath(g)} />
     </>
   );
 }
