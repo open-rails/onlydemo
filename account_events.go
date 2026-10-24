@@ -64,7 +64,7 @@ func accountEvents(auth *appAuth, pool *pgxpool.Pool, cfg Config) riverkit.Contr
 		}
 		c.Queues["onlydemo_account_events"] = river.QueueConfig{MaxWorkers: 1}
 		river.AddWorker(c.Workers, &accountEventWorker{auth: auth, pool: pool, schema: riverSchema(cfg)})
-		c.PeriodicJobs = append(c.PeriodicJobs, river.NewPeriodicJob(river.PeriodicInterval(10*time.Second), func() (river.JobArgs, *river.InsertOpts) { return accountEventArgs{}, nil }, &river.PeriodicJobOpts{ID: "onlydemo-account-events", RunOnStart: true}))
+		c.PeriodicJobs = append(c.PeriodicJobs, riverkit.NewPeriodicJob(c, 10*time.Second, func() (river.JobArgs, *river.InsertOpts) { return accountEventArgs{}, nil }, &river.PeriodicJobOpts{ID: "onlydemo-account-events", RunOnStart: true}))
 		return nil
 	}, nil, nil)
 }
