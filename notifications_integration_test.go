@@ -6,28 +6,33 @@ import (
 	"github.com/open-rails/contentkit/notification"
 	"github.com/open-rails/contentkit/signal"
 	"github.com/open-rails/helpers/notify"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // assertBillingNotices follows real sandbox billing facts into ContentKit's
 // authenticated inbox, then proves the local receipt survives replay and
 // reload, and that erasure fences the inbox.
-func (h *harness) assertBillingNotices(t *testing.T, buyer, other peer, observer *openrails.NotificationConsumer) {
+func (h *harness) assertBillingNotices(t *testing.T, buyer, other peer) {
 	t.Helper()
-	if err := h.srv.notices.importEvents(h.ctx); err != nil {
-		t.Fatal(err)
-	}
-	source, err := observer.Pending(h.ctx, 100)
-	if err != nil || len(source) == 0 {
-		t.Fatalf("independent consumer lost its facts: %v %v", source, err)
-	}
-	pending, err := h.srv.notices.source.Pending(h.ctx, 100)
-	if err != nil || len(pending) != 0 {
-		t.Fatalf("host source did not acknowledge delivery: %v %v", pending, err)
+	source, err := h.srv.billing.client.ListEvents(h.ctx, billing.EventQuery{Limit: 100})
+	if err != nil || len(source.Events) == 0 {
+		t.Fatalf("source events: %v %v", source, err)
 	}
 	inboxPath := contentkitPrefix + "/v1/notifications/inbox"
 	var inbox notify.Page
-	decode(t, buyer.call("GET", inboxPath, nil, "", 200), &inbox)
+	eventually(t, "billing inbox import", func() bool {
+		decode(t, buyer.call("GET", inboxPath, nil, "", 200), &inbox)
+		for _, item := range inbox.Items {
+			if item.ActionRequested {
+				return true
+			}
+		}
+		return false
+	})
+	after, err := h.srv.billing.client.ListEvents(h.ctx, billing.EventQuery{Limit: 100})
+	if err != nil || len(after.Events) < len(source.Events) {
+		t.Fatalf("inbox consumed source history: %v %v", after, err)
+	}
 	var actionable *notify.Item
 	for i := range inbox.Items {
 		item := &inbox.Items[i]

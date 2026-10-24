@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
-	"slices"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/contentkit"
@@ -52,7 +50,7 @@ var (
 	videoTypes = []string{"video/mp4", "video/webm", "video/quicktime", "video/x-matroska"}
 )
 
-// contentKitConfig is contentkit.yaml plus the schemas, offer PSPs and media.
+// contentKitConfig is contentkit.yaml plus the schemas and media.
 func contentKitConfig(cfg Config) (contentkit.Config, error) {
 	var ck contentkit.Config
 	dec := yaml.NewDecoder(bytes.NewReader(contentModel))
@@ -61,7 +59,6 @@ func contentKitConfig(cfg Config) (contentkit.Config, error) {
 		return ck, fmt.Errorf("contentkit.yaml: %w", err)
 	}
 	ck.Database = contentkit.DatabaseConfig{Schema: contentSchema(cfg), RiverSchema: riverSchema(cfg)}
-	ck.Offers.PSPs = slices.Sorted(maps.Keys(cfg.Merchant.PSPs))
 	mc := cfg.Media
 	kinds, err := mediaKinds(ck)
 	if err != nil {
@@ -80,11 +77,11 @@ func contentKitConfig(cfg Config) (contentkit.Config, error) {
 
 // mediaKinds are posts' mixed media and channels' image slots.
 func mediaKinds(ck contentkit.Config) ([]media.Kind, error) {
-	gk, ok := ck.Content.GroupKinds[kindChannel]
+	gk, ok := ck.Content.EntityKinds[kindChannel]
 	if !ok {
-		return nil, errors.New("contentkit.yaml: the channel group kind is required")
+		return nil, errors.New("contentkit.yaml: the channel entity kind is required")
 	}
-	channel := media.GroupKind(kindChannel, gk)
+	channel := media.EntityKind(kindChannel, gk)
 	for i := range channel.Public {
 		if channel.Public[i].Name == media.CoverPreset {
 			channel.Public[i].Widths = []int{640, 1280, 1920}
@@ -145,16 +142,4 @@ func newContentKit(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *ap
 	}
 	return contentkit.New(ctx, ck, contentkit.Deps{Postgres: pool, Auth: auth.client.Authenticator(), Users: auth.client.UserInfo(),
 		Scopes: ckauthkit.Scopes(auth.client), Billing: ckopenrails.Billing(billing.client), Store: store})
-}
-
-func unique(ids []string) []string {
-	seen := make(map[string]bool, len(ids))
-	out := make([]string, 0, len(ids))
-	for _, id := range ids {
-		if !seen[id] {
-			seen[id] = true
-			out = append(out, id)
-		}
-	}
-	return out
 }

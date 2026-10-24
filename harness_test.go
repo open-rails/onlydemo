@@ -88,9 +88,9 @@ func newHarness(t *testing.T, o harnessOptions) *harness {
 	t.Cleanup(h.nmi.Close)
 
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
-	h.cfg = Config{AuthSchema: "od_auth_" + suffix, BillingSchema: "od_bill_" + suffix,
+	h.cfg = Config{AuthTenantID: iam.NewTenantID(), AuthSchema: "od_auth_" + suffix, BillingSchema: "od_bill_" + suffix,
 		RiverSchema: "od_river_" + suffix, ContentSchema: "od_ck_" + suffix, AuthKeysPath: "", AuthAudience: "demo-test",
-		Merchant: testMerchant(openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, AccountID: nmiTestAccount, SecurityKey: "nmimock-security-key",
+		Merchant: testMerchant(openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: nmiTestAccount, SecurityKey: "nmimock-security-key",
 			WebhookSigningSecret: "nmimock-webhook-secret", TokenizationKey: "nmimock-tokenization"}.PSPConfig())}
 	h.pool = testPool(t, ctx, dbURL, h.cfg)
 
@@ -405,7 +405,7 @@ func (p peer) opens(id string) bool {
 // AuthKit group with p as owner.
 func (p peer) channel(slug, name string) string {
 	p.h.t.Helper()
-	res, raw := p.do("POST", contentkitPrefix+"/v1/groups", []map[string]any{{"kind": kindChannel, "slug": slug,
+	res, raw := p.do("POST", contentkitPrefix+"/v1/entities", []map[string]any{{"kind": kindChannel, "slug": slug,
 		"names": []map[string]string{{"language": "en", "kind": "name", "name": name}}}}, "")
 	var created []struct{ ID string }
 	if res.StatusCode != 201 || json.Unmarshal(raw, &created) != nil || len(created) != 1 {
@@ -416,36 +416,23 @@ func (p peer) channel(slug, name string) string {
 
 // contentPrice waits for content id's paywall to offer key on sale and
 // returns the offer's OpenRails price, as the browser's Paywall reads it.
-func (p peer) contentPrice(id string) string {
+func (p peer) contentPrice(id string) string { return p.productPrice("onlydemo:content:" + id) }
+func (p peer) groupPrice(id string) string   { return p.productPrice("onlydemo:group:" + id) }
+func (p peer) productPrice(key string) string {
 	p.h.t.Helper()
-	var price string
-	eventually(p.h.t, "the price of "+id, func() bool {
-		c := p.call("GET", contentkitPrefix+"/v1/contents/"+id, nil, "", 200)
-		d := c["versions"].([]any)[0].(map[string]any)["decision"].(map[string]any)
-		offers, _ := d["offers"].([]any)
-		for _, o := range offers {
-			if pid, _ := o.(map[string]any)["price_id"].(string); pid != "" {
-				price = pid
-			}
-		}
-		return price != ""
-	})
-	return price
+	product := p.call("GET", "/api/v1/products?key="+key, nil, "", 200)
+	prices, _ := product["prices"].([]any)
+	if len(prices) != 1 {
+		p.h.t.Fatalf("product has no single current price: %v", product)
+	}
+	return prices[0].(map[string]any)["id"].(string)
 }
-
-// groupPrice waits for channel id's membership to sell and returns its
-// OpenRails price, as the browser's MembershipBox reads it.
-func (p peer) groupPrice(id string) string {
+func (p peer) removePost(id string) {
 	p.h.t.Helper()
-	var price string
-	eventually(p.h.t, "the membership price of "+id, func() bool {
-		a, _ := p.call("GET", contentkitPrefix+"/v1/groups/"+id, nil, "", 200)["access"].(map[string]any)
-		if o, ok := a["offer"].(map[string]any); ok {
-			price, _ = o["price_id"].(string)
-		}
-		return price != ""
-	})
-	return price
+	post := p.call("GET", contentkitPrefix+"/v1/contents/"+id, nil, "", 200)
+	for _, version := range post["versions"].([]any) {
+		p.call("DELETE", contentkitPrefix+"/v1/contents/"+id+"/versions/"+version.(map[string]any)["id"].(string), nil, "", 204)
+	}
 }
 
 // body is content id's text body as p reads it; "" when withheld.

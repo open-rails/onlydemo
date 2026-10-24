@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import type { Card } from "@openrails/contentkit-ui/client";
-import { ContentGrid, GroupAvatar, GroupDirectory, PostCard } from "@openrails/contentkit-ui";
+import { ContentGrid, EntityAvatar, EntityDirectory, PostCard } from "@openrails/contentkit-ui";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Add01Icon, Image01Icon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,7 @@ export function Post({ card, owner: showOwner = true }: { card: Card; owner?: bo
       byline={
         owner && (
           <Link to={channelPath(owner)} className="feed-author">
-            <GroupAvatar group={owner} className="avatar" />
+            <EntityAvatar entity={owner} className="avatar" />
             <span>
               <strong>{owner.name}</strong>
               <small>@{owner.slug}</small>
@@ -98,7 +98,7 @@ export function ChannelsPage() {
         )}
       </div>
       <SiteSearch className="mb-4" />
-      <GroupDirectory kind="channel" layout="grid" sort="newest" letters={false} href={(g) => channelPath(g)} />
+      <EntityDirectory kind="channel" layout="grid" sort="newest" letters={false} href={(g) => channelPath(g)} />
     </>
   );
 }

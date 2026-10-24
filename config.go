@@ -11,6 +11,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/knadh/koanf/providers/env/v2"
 	"github.com/knadh/koanf/v2"
+	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/contentkit/media"
 	mediaS3 "github.com/open-rails/contentkit/media/s3"
 	"github.com/open-rails/openrails"
@@ -19,6 +20,7 @@ import (
 type Config struct {
 	Port         int
 	DatabaseURL  string
+	AuthTenantID iam.TenantID
 	AuthIssuer   string
 	AuthAudience string
 	AuthKeysPath string
@@ -36,8 +38,6 @@ type Config struct {
 	TrustedCountryHeader string
 	ContentSchema        string
 	Media                mediaConfig
-	// NotificationReceipts opts in to future optional successful-charge notices.
-	NotificationReceipts bool
 }
 
 func loadConfig() (Config, error) {
@@ -55,10 +55,10 @@ func loadConfig() (Config, error) {
 				return strings.ToLower(key), value
 			case "DATABASE_URL":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
-			case "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_KEYS_PATH", "AUTH_SCHEMA", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA":
+			case "AUTH_TENANT_ID", "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_KEYS_PATH", "AUTH_SCHEMA", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
 			default:
-				if key == "NOTIFICATION_RECEIPTS" || key == "CONTENT_SCHEMA" || key == "MERCHANT_FILE" || key == "TRUSTED_COUNTRY_HEADER" || key == "RETURN_ORIGINS" || strings.HasPrefix(key, "MEDIA_") {
+				if key == "CONTENT_SCHEMA" || key == "MERCHANT_FILE" || key == "TRUSTED_COUNTRY_HEADER" || key == "RETURN_ORIGINS" || strings.HasPrefix(key, "MEDIA_") {
 					return strings.ToLower(key), value
 				}
 				return "", nil
@@ -78,6 +78,10 @@ func loadConfig() (Config, error) {
 		databaseURL = "postgres://postgres:postgres@localhost:55433/onlydemo?sslmode=disable"
 	}
 
+	tenantID, err := iam.ParseTenantID(k.String("auth.tenant.id"))
+	if err != nil {
+		return Config{}, fmt.Errorf("AUTH_TENANT_ID must be the persisted account tenant UUID: %w", err)
+	}
 	authIssuer := k.String("auth.issuer")
 	if authIssuer == "" {
 		authIssuer = "http://localhost:3000"
@@ -122,19 +126,19 @@ func loadConfig() (Config, error) {
 	}
 
 	cfg := Config{
-		NotificationReceipts: k.Bool("notification_receipts"),
-		Port:                 port,
-		DatabaseURL:          databaseURL,
-		AuthIssuer:           authIssuer,
-		AuthAudience:         authAudience,
-		AuthKeysPath:         authKeysPath,
-		PublicURL:            publicURL,
-		ReturnOrigins:        returnOrigins,
-		AuthSchema:           strings.TrimSpace(k.String("auth.schema")),
-		BillingSchema:        strings.TrimSpace(k.String("billing.schema")),
-		RiverSchema:          strings.TrimSpace(k.String("river.schema")),
-		Merchant:             merchant,
-		ContentSchema:        strings.TrimSpace(k.String("content_schema")),
+		AuthTenantID:  tenantID,
+		Port:          port,
+		DatabaseURL:   databaseURL,
+		AuthIssuer:    authIssuer,
+		AuthAudience:  authAudience,
+		AuthKeysPath:  authKeysPath,
+		PublicURL:     publicURL,
+		ReturnOrigins: returnOrigins,
+		AuthSchema:    strings.TrimSpace(k.String("auth.schema")),
+		BillingSchema: strings.TrimSpace(k.String("billing.schema")),
+		RiverSchema:   strings.TrimSpace(k.String("river.schema")),
+		Merchant:      merchant,
+		ContentSchema: strings.TrimSpace(k.String("content_schema")),
 
 		TrustedCountryHeader: strings.TrimSpace(k.String("trusted_country_header")),
 	}

@@ -30,19 +30,19 @@ var (
 
 	// A channel's AuthKit group (ContentKit provisions it, keyed by the
 	// channel's id) holds what ContentKit checks there: content:write edits
-	// the channel's posts, settings:manage the channel, offers:write its
-	// prices, media:write its images. Owners hold all; editors write posts.
+	// the channel's posts, settings:manage the channel and host catalog,
+	// media:write its images. Owners hold all; editors write posts.
 	channelPersona      = rbac.Persona(kindChannel)
-	channelPerms        = channelPersona.Declare(access.GroupPermissions(kindChannel)...)
+	channelPerms        = channelPersona.Declare(access.EntityPermissions(kindChannel)...)
 	channelSettingsRead = channelPersona.Permission("settings", "read")
 	channelOwnerRole    = channelPersona.Owner
-	channelEditorRole   = channelPersona.Role("editor", channelPerm(access.GroupContentWrite(kindChannel)), channelSettingsRead, channelPersona.Members.Read)
+	channelEditorRole   = channelPersona.Role("editor", channelPerm(access.EntityContentWrite(kindChannel)), channelSettingsRead, channelPersona.Members.Read)
 
 	// Site admins are ContentKit staff and run billing for customers.
 	customersRead   = rbac.Root.Permission(billing.RootCustomerRead.Resource(), billing.RootCustomerRead.Action())
 	customersUpdate = rbac.Root.Permission(billing.RootCustomerManage.Resource(), billing.RootCustomerManage.Action())
 	adminRole       = rbac.Root.Role("admin", append([]iam.Grant{customersRead, customersUpdate},
-		staffGrants(access.ContentWrite, access.ContentViewRestricted, access.GroupsWrite, access.OffersWrite,
+		staffGrants(access.ContentWrite, access.ContentViewRestricted, access.EntitiesWrite,
 			access.CommentsModerate, access.CommentsBan, access.ModerationReview, access.AvatarsWrite)...)...)
 )
 
@@ -84,9 +84,10 @@ func newAuth(ctx context.Context, config Config, pool *pgxpool.Pool) (*appAuth, 
 		return nil, err
 	}
 	client, err := authkit.New(ctx, authkit.Config{
-		Database: authkit.DatabaseConfig{Schema: strings.TrimSpace(config.AuthSchema), RiverSchema: riverSchema(config)},
-		HTTP:     &authkit.HTTPConfig{DirectPeerIP: true, APIPath: "/auth", RefreshCookie: true},
-		Roles:    rbac,
+		DefaultTenantID: config.AuthTenantID,
+		Database:        authkit.DatabaseConfig{Schema: strings.TrimSpace(config.AuthSchema), RiverSchema: riverSchema(config)},
+		HTTP:            &authkit.HTTPConfig{DirectPeerIP: true, APIPath: "/auth", RefreshCookie: true},
+		Roles:           rbac,
 		Token: authkit.TokenConfig{
 			Issuer:              config.AuthIssuer,
 			IssuedAudiences:     []string{config.AuthAudience},
@@ -103,8 +104,12 @@ func newAuth(ctx context.Context, config Config, pool *pgxpool.Pool) (*appAuth, 
 			Methods:       []iam.TwoFactorMethod{iam.TwoFactorTOTP, iam.TwoFactorEmail},
 			TOTPSecretKey: totpKey,
 		},
-	}, authkit.Deps{Postgres: pool, Email: logEmail{}, OnEvent: a.onEvent, OnPurge: a.purgeDeletedAccount})
+	}, authkit.Deps{Postgres: pool, Email: logEmail{}, OnPurge: a.purgeDeletedAccount})
 	if err != nil {
+		return nil, err
+	}
+	if err := client.CreateTenant(ctx, iam.Tenant{ID: config.AuthTenantID}); err != nil {
+		_ = client.Close(ctx)
 		return nil, err
 	}
 	a.client = client
@@ -158,7 +163,7 @@ func (logEmail) Send(_ context.Context, msg iam.EmailMessage) error {
 func (logEmail) CheckHealth(context.Context) error { return nil }
 
 // Billing reads current contacts through AuthKit's directory. Account deletion
-// still stops renewals; AuthKit retries a failure before acknowledging its event.
+// stops renewals through the host event reader, whose cursor advances only on success.
 func (a *appAuth) onEvent(ctx context.Context, event iam.Event) error {
 	if event.Kind == iam.EventUserDeleted {
 		return a.cancelDeletedAccountBilling(ctx, event.UserID)

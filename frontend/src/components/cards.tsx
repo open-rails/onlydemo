@@ -1,8 +1,8 @@
 import { Link } from "react-router-dom";
 import type { CSSProperties } from "react";
 import { RenditionImg } from "@openrails/contentkit-ui";
-import { GroupAvatar, GroupCover } from "@openrails/contentkit-ui";
-import { usePublicImage, useGroups } from "@openrails/contentkit-ui/react";
+import { EntityAvatar, EntityCover } from "@openrails/contentkit-ui";
+import { usePublicImage, useEntities } from "@openrails/contentkit-ui/react";
 import { cn } from "cn";
 import { Button } from "@/components/ui/button";
 import { channelsPath, channelPath } from "../paths";
@@ -32,7 +32,7 @@ export function UserAvatar({ user, className }: { user: { id: string; username: 
 
 // Newest channels, from ContentKit.
 export function SuggestedCreators({ strip = false }: { strip?: boolean }) {
-  const channels = useGroups({ kind: "channel", sort: "newest", pageSize: strip ? 10 : 5 });
+  const channels = useEntities({ kind: "channel", sort: "newest", pageSize: strip ? 10 : 5 });
   if (!channels.items.length) return null;
   return (
     <section className={cn("suggested", strip && "suggested-strip")}>
@@ -45,9 +45,9 @@ export function SuggestedCreators({ strip = false }: { strip?: boolean }) {
       <div className="suggested-list">
         {channels.items.map((channel) => (
           <Link to={channelPath(channel)} key={channel.id} className="suggested-item">
-            <GroupCover group={channel} className="cover" />
+            <EntityCover entity={channel} className="cover" />
             <span className="suggested-info">
-              <GroupAvatar group={channel} className="avatar" />
+              <EntityAvatar entity={channel} className="avatar" />
               <span>
                 <strong>{channel.name}</strong>
                 <small>@{channel.slug}</small>

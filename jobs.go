@@ -20,6 +20,7 @@ func newJobs(ctx context.Context, pool *pgxpool.Pool, cfg Config, auth *appAuth,
 		billing.RiverJobs(),
 		content.RiverJobs(),
 		notices.RiverJobs(),
+		accountEvents(auth, pool, cfg),
 	}
 	queues := map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 4}}
 	return riverkit.New(ctx, pool, &river.Config{Schema: riverSchema(cfg), Queues: queues}, contributions...)

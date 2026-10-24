@@ -11,11 +11,8 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// TestChannelsOnContentKit: a creator's channel is a ContentKit group whose
-// AuthKit group ContentKit provisions, and its posts are content it owns. Its membership
-// is a group offer ContentKit syncs to OpenRails; a free one is joined through
-// ContentKit and opens the channel's members-only posts and their media; a
-// post sells through its own offer; uploads follow AuthKit's channel roles.
+// TestChannelsOnContentKit covers entity ownership and editorial permissions,
+// native OpenRails catalog edits/free grants, protected media, and deletion.
 func TestChannelsOnContentKit(t *testing.T) {
 	h := newHarness(t, harnessOptions{minio: true})
 	ctx := h.ctx
@@ -28,12 +25,12 @@ func TestChannelsOnContentKit(t *testing.T) {
 	if post := model["kinds"].(map[string]any)[kindPost].(map[string]any); post["presentation"] != "post" {
 		t.Fatalf("post kind: %v", post)
 	}
-	if ch := model["group_kinds"].(map[string]any)[kindChannel].(map[string]any); ch["owner"] != "user" || ch["sellable"] != true || ch["auth_scope"] != true {
+	if ch := model["entity_kinds"].(map[string]any)[kindChannel].(map[string]any); ch["owner"] != "user" || ch["auth_scope"] != true {
 		t.Fatalf("channel group kind: %v", ch)
 	}
 
 	id := owner.channel("studio", "Studio")
-	g := fan.call("GET", contentkitPrefix+"/v1/groups/"+id, nil, "", 200)
+	g := fan.call("GET", contentkitPrefix+"/v1/entities/"+id, nil, "", 200)
 	if g["name"] != "Studio" || g["owner_user_id"] != owner.id || g["auth_scope"] != id {
 		t.Fatalf("channel group: %v", g)
 	}
@@ -41,7 +38,7 @@ func TestChannelsOnContentKit(t *testing.T) {
 		roles, err := h.srv.auth.client.GroupRoles(ctx, iam.GroupByID(id), []iam.Subject{iam.UserSubject(owner.id)})
 		return err == nil && roles[iam.UserSubject(owner.id)] == channelOwnerRole
 	})
-	fan.call("POST", contentkitPrefix+"/v1/groups", []map[string]any{{"kind": kindChannel, "slug": "studio",
+	fan.call("POST", contentkitPrefix+"/v1/entities", []map[string]any{{"kind": kindChannel, "slug": "studio",
 		"names": []map[string]string{{"language": "en", "kind": "name", "name": "Again"}}}}, "", 409)
 	if _, err := h.srv.auth.client.SetGroupRole(ctx, iam.UserIdentity(owner.id), iam.GroupByID(id), iam.UserSubject(editor.id), channelEditorRole); err != nil {
 		t.Fatal(err)
@@ -53,19 +50,11 @@ func TestChannelsOnContentKit(t *testing.T) {
 	if fan.opens(members) || anon.opens(members) || fan.body(members) != "" {
 		t.Fatal("a members-only post in a channel selling no membership is open to non-members")
 	}
-	decision := fan.call("GET", contentkitPrefix+"/v1/contents/"+members, nil, "", 200)["versions"].([]any)[0].(map[string]any)["decision"].(map[string]any)
-	if offers, _ := decision["offers"].([]any); len(offers) != 0 {
-		t.Fatalf("a channel selling no membership offers %v", offers)
-	}
-	group := contentkitPrefix + "/v1/groups/" + id
-	offer := group + "/offer"
-	join := group + "/join"
-	if r := fan.call("POST", join, nil, "", 409); r["code"] != "not_joinable" {
-		t.Fatalf("joining a channel that sells nothing: %v", r)
-	}
-	if g := owner.call("GET", group, nil, "", 200); g["offer"] != nil {
-		t.Fatalf("an unsold channel's offer: %v", g["offer"])
-	}
+	offer := "/api/v1/products/entities/" + id
+	join := "/api/v1/memberships/" + id
+	fan.call("POST", join, nil, "", 404)
+	fan.call("PUT", offer, map[string]any{"amount": "0"}, "", 403)
+	editor.call("PUT", offer, map[string]any{"amount": "0"}, "", 403)
 
 	// Comments follow the post's access: the owner writes, non-members read
 	// none and are refused.
@@ -86,12 +75,6 @@ func TestChannelsOnContentKit(t *testing.T) {
 	// The owner manages the offer from the channel; the paywall offers it to
 	// everyone else.
 	owner.call("PUT", offer, map[string]any{"amount": "0"}, "", 200)
-	if g := owner.call("GET", group, nil, "", 200); g["offer"] == nil || g["access"].(map[string]any)["offer"] != nil {
-		t.Fatalf("the owner's channel: offer %v access %v", g["offer"], g["access"])
-	}
-	if g := fan.call("GET", group, nil, "", 200); g["offer"] != nil || g["access"].(map[string]any)["offer"] == nil {
-		t.Fatalf("a fan's channel: offer %v access %v", g["offer"], g["access"])
-	}
 	public, _ := owner.post(id, "Hello", "Everyone reads this", nil)
 	paid, _ := owner.post(id, "Paid", "Buyers read this", map[string]any{"level": "ppv"})
 	editor.post(id, "By the editor", "Hi", nil)
@@ -129,10 +112,8 @@ func TestChannelsOnContentKit(t *testing.T) {
 		t.Fatalf("feed: %v", locked)
 	}
 
-	// A free membership: ContentKit grants the group's key on join.
-	if j := fan.call("POST", join, nil, "", 200); j["member"] != true {
-		t.Fatalf("join: %v", j)
-	}
+	// A free membership: the host grants the native OpenRails product.
+	fan.call("POST", join, nil, "", 204)
 	if !fan.opens(members) || fan.opens(paid) || fan.body(members) != "Members read this" {
 		t.Fatal("joining did not open the members-only post alone")
 	}
@@ -151,13 +132,13 @@ func TestChannelsOnContentKit(t *testing.T) {
 		t.Fatalf("an anonymous reader reads the post's media with access %v", got["access"])
 	}
 	fan.presignVersion(members, membersVersion, "images/two.png", image, "image/png", 403)
-	fan.call("DELETE", join, nil, "", 200)
+	fan.call("DELETE", join, nil, "", 204)
 	if fan.opens(members) {
 		t.Fatal("leaving kept the members-only post open")
 	}
 
-	// A paid membership and a paid post: ContentKit sells their keys.
-	groupKey, _ := access.GroupKey(tenant, id)
+	// Native OpenRails products grant the stable ContentKit access keys.
+	groupKey, _ := access.EntityKey(tenant, id)
 	contentKey, _ := access.ContentKey(tenant, paid)
 	product := func(key access.Key) billing.Product {
 		page, err := h.srv.billing.client.ListProducts(ctx, billing.ProductListParams{Keys: []string{key.String()}})
@@ -168,15 +149,15 @@ func TestChannelsOnContentKit(t *testing.T) {
 	}
 	owner.call("PUT", offer, map[string]any{"amount": "4.99", "renew_hours": 720}, "", 200)
 	fan.groupPrice(id)
-	if a := fan.call("GET", contentkitPrefix+"/v1/groups/"+id, nil, "", 200)["access"].(map[string]any); a["key"] != groupKey.String() ||
-		a["member"] != false || a["offer"].(map[string]any)["terms"].(map[string]any)["amount"] != "4.99" {
+	if a := fan.call("GET", contentkitPrefix+"/v1/entities/"+id, nil, "", 200)["access"].(map[string]any); a["key"] != groupKey.String() ||
+		a["member"] != false {
 		t.Fatalf("group access: %v", a)
 	}
 	if p := product(groupKey); p.Archived || len(p.Entitlements) != 1 || p.Entitlements[0] != groupKey.String() {
 		t.Fatalf("membership product: %+v", p)
 	}
 	fan.call("POST", join, nil, "", 409)
-	owner.call("PUT", contentkitPrefix+"/v1/contents/"+paid+"/offer", map[string]any{"amount": "2.50"}, "", 200)
+	owner.call("PUT", "/api/v1/products/contents/"+paid, map[string]any{"amount": "2.50"}, "", 200)
 	fan.contentPrice(paid)
 	if p := product(contentKey); p.DisplayName != "Paid" || len(p.Prices) != 1 || p.Prices[0].UnitAmount != 2_500_000 {
 		t.Fatalf("post product: %+v", p)
@@ -197,13 +178,13 @@ func TestChannelsOnContentKit(t *testing.T) {
 	editor.presign(kindChannel, id, "cover/banner.png", cover, "image/png", 200)
 
 	// A deleted post is gone for those who never bought it.
-	owner.call("DELETE", contentkitPrefix+"/v1/contents/"+public, nil, "", 204)
+	owner.removePost(public)
 	anon.call("GET", contentkitPrefix+"/v1/contents/"+public, nil, "", 404)
 
 	// Deleting the channel deletes its group and retires its AuthKit group.
-	fan.call("DELETE", contentkitPrefix+"/v1/groups/"+id, nil, "", 403)
-	owner.call("DELETE", contentkitPrefix+"/v1/groups/"+id, nil, "", 200)
-	fan.call("GET", contentkitPrefix+"/v1/groups/"+id, nil, "", 404)
+	fan.call("DELETE", contentkitPrefix+"/v1/entities/"+id, nil, "", 403)
+	owner.call("DELETE", contentkitPrefix+"/v1/entities/"+id, nil, "", 200)
+	fan.call("GET", contentkitPrefix+"/v1/entities/"+id, nil, "", 404)
 	eventually(t, "the channel's AuthKit group retired", func() bool {
 		g, err := h.srv.auth.client.Group(ctx, iam.GroupByID(id))
 		return err != nil || g.DeletedAt != nil

@@ -2,113 +2,24 @@ package main
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"time"
-
 	"github.com/open-rails/contentkit"
-	"github.com/open-rails/contentkit/notification"
-	"github.com/open-rails/helpers/notify"
+	ckopenrails "github.com/open-rails/contentkit/adapters/openrails"
 	riverkit "github.com/open-rails/helpers/river"
-	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/billing"
-	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/rivertype"
 )
 
-// OnlyDemo uses the same verified AuthKit subject as its billing customer ID.
-// Its independent consumer publishes into ContentKit's inbox before
-// acknowledging facts.
-type notifications struct {
-	source          *openrails.NotificationConsumer
-	content         *contentkit.Engine
-	auth            *appAuth
-	merchant        billing.MerchantID
-	includeOptional bool
-}
+// ContentKit owns the inbox receipt and cursor in one transaction. OpenRails
+// retains source events independently; the host registers no consumer or ACK.
+type notifications struct{ contribution riverkit.Contribution }
 
 func newNotifications(ctx context.Context, cfg Config, billing *billingService, auth *appAuth, content *contentkit.Engine) (*notifications, error) {
-	source, err := billing.client.NotificationEvents("onlydemo-inbox")
+	source, err := ckopenrails.NewNotificationSource(billing.client, "openrails:onlydemo")
 	if err != nil {
 		return nil, err
 	}
-	if err = source.Register(ctx); err != nil {
+	jobs, err := content.OpenRailsNotificationsContext(ctx, source, ckopenrails.SameAccounts(auth.client.UserInfo(), cfg.AuthIssuer))
+	if err != nil {
 		return nil, err
 	}
-	return &notifications{source: source, content: content, auth: auth, merchant: billing.client.MerchantID(), includeOptional: cfg.NotificationReceipts}, nil
+	return &notifications{contribution: jobs}, nil
 }
-
-// importEvents publishes one pending page in one ContentKit transaction and
-// acknowledges it; skipped events are acknowledged too.
-func (n *notifications) importEvents(ctx context.Context) error {
-	events, err := n.source.Pending(ctx, 100)
-	if err != nil {
-		return err
-	}
-	ids := make([]string, 0, len(events))
-	for _, event := range events {
-		if !event.Optional || n.includeOptional {
-			ids = append(ids, event.CustomerID.String())
-		}
-	}
-	users, err := n.auth.client.Users(ctx, unique(ids))
-	if err != nil {
-		return err
-	}
-	var ack []billing.NotificationEventRef
-	var inputs []notify.Input
-	for _, event := range events {
-		if event.MerchantID != n.merchant {
-			return errors.New("notification source returned another merchant")
-		}
-		ack = append(ack, billing.NotificationEventRef{MerchantID: event.MerchantID, ID: event.ID})
-		user, exists := users[event.CustomerID.String()]
-		if (event.Optional && !n.includeOptional) || !exists || user.DeletedAt != nil {
-			continue
-		}
-		inputs = append(inputs, notify.Input{
-			Recipient: notify.Recipient{Audience: notify.AudienceUser, ID: event.CustomerID.String()},
-			Origin:    notify.Origin{System: "openrails:onlydemo", Scope: event.MerchantID.String(), ID: event.ID.String(), Subject: event.CustomerID.String()},
-			Kind:      event.EventType, Data: event.Data, CreatedAt: event.CreatedAt, ActionRequested: event.ActionRequested,
-		})
-	}
-	if len(inputs) > 0 {
-		if _, err := n.content.Client().PostNotificationsPublish(ctx, notification.Publication{Notifications: inputs}); err != nil {
-			return fmt.Errorf("publish billing notices: %w", err)
-		}
-	}
-	if len(ack) == 0 {
-		return nil
-	}
-	return n.source.Acknowledge(ctx, ack)
-}
-
-type notificationPollArgs struct{}
-
-func (notificationPollArgs) Kind() string { return "onlydemo_notification_poll" }
-func (notificationPollArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{MaxAttempts: 1, UniqueOpts: river.UniqueOpts{ByState: []rivertype.JobState{
-		rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled,
-	}}}
-}
-
-type notificationWorker struct {
-	river.WorkerDefaults[notificationPollArgs]
-	notices *notifications
-}
-
-func (w *notificationWorker) Work(ctx context.Context, _ *river.Job[notificationPollArgs]) error {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	return w.notices.importEvents(ctx)
-}
-func (n *notifications) RiverJobs() riverkit.Contribution {
-	return riverkit.NewContribution("onlydemo-notifications", func(_ context.Context, cfg *river.Config) error {
-		if cfg.Workers == nil {
-			cfg.Workers = river.NewWorkers()
-		}
-		river.AddWorker(cfg.Workers, &notificationWorker{notices: n})
-		cfg.PeriodicJobs = append(cfg.PeriodicJobs, river.NewPeriodicJob(river.PeriodicInterval(10*time.Second), func() (river.JobArgs, *river.InsertOpts) { return notificationPollArgs{}, nil }, &river.PeriodicJobOpts{RunOnStart: true}))
-		return nil
-	}, nil, nil)
-}
+func (n *notifications) RiverJobs() riverkit.Contribution { return n.contribution }

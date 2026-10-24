@@ -62,7 +62,7 @@ export function NewPostPage() {
         key={current.group.id}
         id={null}
         kind="post"
-        ownerGroup={current.group.id}
+        ownerEntity={current.group.id}
         onCreated={(created) => {
           rememberPostChannel(user, current.group.id);
           navigate(editPostPath(created.id), { replace: true });

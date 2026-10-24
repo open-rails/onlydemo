@@ -1,8 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { OrderPayment } from "@openrails/billing-ui";
-import type { Order } from "@openrails/billing-ui/client";
-import type { Sale } from "@openrails/contentkit-ui/client";
+import type { Order, Product } from "@openrails/billing-ui/client";
 import { SignInPanel } from "@openrails/auth-ui";
 import { sessionIdentity, useSession } from "@openrails/auth-ui/react";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -11,14 +10,14 @@ import { request, sessionKey } from "../api";
 import { AccountBillingScope } from "../billing";
 import { accessChanged } from "../purchases";
 import { observePurchase, purchaseKey } from "../purchase-key";
+import { Button } from "./ui/button";
 import { ErrorState, Loading } from "./states";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 
-// What the buyer pays for: a sale a ContentKit paywall or membership box
-// offers (its key and its OpenRails price), and whose it is.
+// ContentKit supplies the access key; the modal resolves its current
+// product and price through OpenRails.
 export interface PayTarget {
   key: string;
-  offer: Sale;
   merchant: string;
 }
 
@@ -30,8 +29,8 @@ export const usePay = () => useContext(PayContext);
 export function useCheckout(merchant: string) {
   const pay = usePay();
   return useCallback(
-    ({ key, offer }: { key: string; offer?: Sale }) => {
-      if (offer) pay({ key, offer, merchant });
+    ({ key }: { key: string }) => {
+      pay({ key, merchant });
     },
     [pay, merchant],
   );
@@ -49,7 +48,7 @@ export function PayHost({ children }: { children: ReactNode }) {
   const paid = useCallback(
     (done: PayTarget) => {
       setTarget(null);
-      setNotice(done.offer.target.kind === "group" ? `Welcome to ${done.merchant}.` : "Unlocked.");
+      setNotice(done.key.startsWith("onlydemo:group:") ? `Welcome to ${done.merchant}.` : "Unlocked.");
       accessChanged();
       void client.invalidateQueries();
     },
@@ -60,7 +59,7 @@ export function PayHost({ children }: { children: ReactNode }) {
       {children}
       {target && (
         <AccountBillingScope>
-          <PayModal key={`${sessionKey()}:${target.key}:${target.offer.price_id}`} target={target} onClose={() => setTarget(null)} onPaid={() => paid(target)} />
+          <PayModal key={`${sessionKey()}:${target.key}`} target={target} onClose={() => setTarget(null)} onPaid={() => paid(target)} />
         </AccountBillingScope>
       )}
       {notice && (
@@ -78,7 +77,11 @@ export function PayHost({ children }: { children: ReactNode }) {
 function PayModal({ target, onClose, onPaid }: { target: PayTarget; onClose: () => void; onPaid: () => void }) {
   const session = useSession();
   const viewer = session.status === "authenticated" ? session.userId : null;
-  const price = target.offer.price_id ?? "";
+  const product = useQuery({queryKey: ["product", target.key], queryFn: () => request<Product | null>(`/api/v1/products?key=${encodeURIComponent(target.key)}`)});
+  const price = product.data?.prices[0]?.id ?? "";
+  const free = product.data && !product.data.archived && product.data.prices.length === 0 && product.data.description === "OnlyDemo free membership" && target.key.startsWith("onlydemo:group:");
+  const [joining, setJoining] = useState(false);
+  const [joinError, setJoinError] = useState<unknown>();
   const order = useQuery({
     queryKey: ["purchase-order", sessionIdentity(session), price],
     queryFn: async () => {
@@ -92,18 +95,26 @@ function PayModal({ target, onClose, onPaid }: { target: PayTarget; onClose: () 
       observePurchase(viewer!, price, idempotencyKey, value.status);
       return { value, idempotencyKey };
     },
-    enabled: viewer !== null,
+    enabled: viewer !== null && !!price,
     // Refreshing content after payment must not issue another create-order POST.
     staleTime: "static",
     gcTime: 0,
     retry: false,
   });
-  const membership = target.offer.target.kind === "group";
+  const membership = target.key.startsWith("onlydemo:group:");
   const gate =
     session.status === "loading" ? (
       <Loading />
     ) : !viewer ? (
       <SignInPanel initialTab="login" title="Sign in to continue" description="Then pay without leaving this page." onSignedIn={() => undefined} />
+    ) : product.isPending ? (
+      <Loading />
+    ) : product.error ? (
+      <ErrorState error={product.error} retry={() => void product.refetch()} />
+    ) : free ? (
+      <><Button disabled={joining} onClick={() => {setJoining(true); void request(`/api/v1/memberships/${target.key.split(":")[2]}`, {method:"POST"}).then(onPaid).catch(setJoinError).finally(() => setJoining(false));}}>Join free</Button>{joinError ? <ErrorState error={joinError} /> : null}</>
+    ) : !price || product.data?.archived ? (
+      <p>This access is not currently for sale.</p>
     ) : order.error ? (
       <ErrorState error={order.error} retry={() => void order.refetch()} />
     ) : !order.data ? (

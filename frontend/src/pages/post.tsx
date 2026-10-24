@@ -1,7 +1,8 @@
+import { toast } from "sonner";
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
-import { Comments, ContentEditor, GroupAvatar, MediaGallery, Paywall } from "@openrails/contentkit-ui";
+import { Comments, ContentEditor, EntityAvatar, MediaGallery, Paywall } from "@openrails/contentkit-ui";
 import { useCanonicalContent, useContentDetail } from "@openrails/contentkit-ui/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowLeft02Icon, Delete02Icon, PencilEdit02Icon } from "@hugeicons/core-free-icons";
@@ -13,6 +14,9 @@ import { NotFoundPage } from "../App";
 import { ErrorState, FormError, Loading } from "../components/states";
 import { useCheckout } from "../components/pay";
 import { contentkit } from "../media";
+import { request } from "../api";
+import { useChannelRoles } from "../roles";
+import { ProductSettings } from "../components/product-settings";
 import { dateTime } from "../format";
 import { channelPath, contentURLs, editPostPath, parseCode, postLink, postPath } from "../paths";
 
@@ -62,7 +66,8 @@ export function PostPage() {
     setRemoving(true);
     setError("");
     try {
-      await contentkit.contents.remove(content.id);
+      await request(`/api/v1/products/contents/${content.id}`, {method: "DELETE"});
+      for (const version of content.versions) await contentkit.contents.removeVersion(content.id, version.id);
       await client.invalidateQueries();
       navigate(owner ? channelPath(owner) : "/");
     } catch (cause) {
@@ -85,7 +90,7 @@ export function PostPage() {
           <header className="feed-head">
             {owner && (
               <Link to={channelPath(owner)} className="feed-author">
-                <GroupAvatar group={owner} className="avatar" />
+                <EntityAvatar entity={owner} className="avatar" />
                 <span>
                   <strong>{owner.name}</strong>
                   <small>@{owner.slug}</small>
@@ -120,7 +125,7 @@ export function PostPage() {
         </article>
         {detail.decision && !detail.decision.allowed && (
           <aside className="panel purchase-panel">
-            <Paywall decision={detail.decision} onCheckout={checkout} />
+            <Paywall decision={{...detail.decision, sell: detail.decision.sell?.filter((key) => !key.includes("/") && (content.access.level !== "group" || key.startsWith("onlydemo:group:")))}} onCheckout={checkout} />
           </aside>
         )}
         {content.comments !== "hidden" && (
@@ -133,7 +138,7 @@ export function PostPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete this post?</DialogTitle>
-            <DialogDescription>The post leaves the channel. Its buyers keep it; financial records remain in billing history.</DialogDescription>
+            <DialogDescription>The post leaves the channel. It can be restored for 30 days; financial records remain in billing history.</DialogDescription>
           </DialogHeader>
           <FormError>{error}</FormError>
           <DialogFooter>
@@ -155,6 +160,9 @@ export function PostPage() {
 export function EditPostPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
+  const detail = useContentDetail(id);
+  const roles = useChannelRoles();
+  const owner = detail.content?.owner_group_id;
   return (
     <div className="page-narrow">
       <div className="page-heading">
@@ -164,8 +172,13 @@ export function EditPostPage() {
         id={id}
         kind="post"
         contentHref={(c) => postPath({ code: c.code, slug: c.slug ?? "", path: c.path })}
-        onDeleted={() => navigate("/")}
+        onDeleted={() => {
+          void request(`/api/v1/products/contents/${id}`, {method: "DELETE"})
+            .then(() => navigate("/"))
+            .catch((cause: unknown) => toast.error("Post deleted; could not retire its price.", {description: cause instanceof Error ? cause.message : "Retry from the pricing section."}));
+        }}
       />
+      {owner && roles.data?.get(owner) === "owner" && <ProductSettings kind="contents" id={id} />}
     </div>
   );
 }

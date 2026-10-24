@@ -78,7 +78,7 @@ func (b *billingService) Start(ctx context.Context, fleet *river.Client[pgx.Tx])
 }
 
 // Mount serves billing at /billing/v1: the storefront, a customer's orders
-// for the prices ContentKit's offers put on sale, billing management and the
+// for native OpenRails prices, billing management and the
 // merchant API for site admins.
 func (b *billingService) Mount(app *fiber.App, authenticator auth.Authenticator) error {
 	return openrailsfiber.Mount(app, b.engine, openrails.Routes{

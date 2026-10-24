@@ -16,7 +16,7 @@ psps:
   # nmi:
   #   rail: nmi
   #   environment: test # a gateway account in test mode; sandbox for sandbox.nmi.com
-  #   account_id: "000000" # the NMI dashboard's "Gateway ID"
+  #   gateway_id: "000000" # the NMI dashboard's "Gateway ID"
   #   settings:
   #     tokenization_key: your-public-tokenization-key # Collect.js
   #   secrets:

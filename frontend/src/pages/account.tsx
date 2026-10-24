@@ -11,14 +11,15 @@ import {
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { request } from "../api";
+import { billing, request } from "../api";
+import { contentkit } from "../media";
+import { ContentKitError } from "@openrails/contentkit-ui/client";
+import { Badge } from "@/components/ui/badge";
 import { AccountBillingScope } from "../billing";
 import type { AppConfig } from "../models";
 import { useMyChannels } from "../roles";
-import { contentkit } from "../media";
-import { Badge } from "@/components/ui/badge";
 import { usePublicImage } from "@openrails/contentkit-ui/react";
-import { GroupAvatar, GroupCover } from "@openrails/contentkit-ui";
+import { EntityAvatar, EntityCover } from "@openrails/contentkit-ui";
 import {
   EmptyState,
   ErrorState,
@@ -77,10 +78,10 @@ function Library() {
   const library = useInfiniteQuery({
     queryKey: ["library", auth.user?.id],
     initialPageParam: "",
-    queryFn: ({ pageParam }) => contentkit.offers.library({ limit: 50, cursor: pageParam || undefined }),
+    queryFn: ({ pageParam }) => billing.getEntitlements({ limit: 50, cursor: pageParam || undefined, prefix: "onlydemo:content:" }),
     getNextPageParam: (last) => last.next_cursor || undefined,
   });
-  const items = library.data?.pages.flatMap((page) => page.items) ?? [];
+  const items = [...new Set((library.data?.pages.flatMap((page) => page.data) ?? []).map((item) => item.entitlement.split(":")[2].split("/")[0]))];
   if (library.isPending) return <Loading />;
   if (library.error) return <ErrorState error={library.error} retry={() => void library.refetch()} />;
   if (!items.length)
@@ -94,18 +95,13 @@ function Library() {
           </Button>
         }
       >
-        Posts you buy appear here, even after their creator deletes them. Payment history is retained separately.
+        Your active purchased access appears here. Deleted content is recoverable for 30 days; payment history is retained separately.
       </EmptyState>
     );
   return (
     <>
       <ul className="library-list">
-        {items.map((item) => (
-          <li key={item.content_id}>
-            <Link to={postByIDPath(item.content_id)}>{item.title || "Untitled post"}</Link>
-            {item.deleted && <Badge variant="outline">Deleted by its creator</Badge>}
-          </li>
-        ))}
+        {items.map((id) => <PurchasedPost key={id} id={id} />)}
       </ul>
       {library.hasNextPage && (
         <div className="pagination">
@@ -118,6 +114,14 @@ function Library() {
     </>
   );
 }
+function PurchasedPost({id}: {id: string}) {
+  const auth = useAuth();
+  const post = useQuery({queryKey: ["purchased-post", auth.user?.id, id], queryFn: () => contentkit.contents.get(id), retry: false});
+  if (post.error instanceof ContentKitError && post.error.status === 404) return <li>This purchased post is no longer available. Its payment remains in Billing.</li>;
+  if (post.error) return <li><ErrorState error={post.error} retry={() => void post.refetch()} /></li>;
+  return <li><Link to={postByIDPath(id)}>{post.data?.title || "Purchased post"}</Link>{post.data?.state === "deleted" && <Badge variant="outline">Deleted by its creator</Badge>}</li>;
+}
+
 function MyChannels() {
   const channels = useMyChannels();
   return (
@@ -140,9 +144,9 @@ function MyChannels() {
         <div className="suggested-list">
           {channels.data.map(({ group, role }) => (
             <Link to={channelPath(group)} key={group.id} className="suggested-item">
-              <GroupCover group={group} className="cover" />
+              <EntityCover entity={group} className="cover" />
               <span className="suggested-info">
-                <GroupAvatar group={group} className="avatar" />
+                <EntityAvatar entity={group} className="avatar" />
                 <span>
                   <strong>{group.name}</strong>
                   <small>

@@ -236,6 +236,7 @@ func newApp(pool *pgxpool.Pool, s *server, cfg Config) (*fiber.App, error) {
 	})
 
 	app.Get("/api/v1/config", publicConfiguration(cfg.TrustedCountryHeader))
+	s.mountCommerce(app)
 	// ContentKit authenticates its own requests through AuthKit.
 	app.All(contentkitPrefix+"/v1/*", adaptor.HTTPHandler(s.ckRoutes))
 	// Site admins work on customers' billing through the merchant API.

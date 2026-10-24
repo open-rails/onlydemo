@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/openrailstest/nmimock"
@@ -16,34 +17,22 @@ import (
 	"github.com/riverqueue/river/rivertype"
 )
 
-// TestNMIBillingEndToEnd is the real-stack purchase proof: a creator sells
-// a post and their channel's membership through ContentKit offers; a fan's
-// saved card buys each with an OpenRails order for the offer's price. The
-// purchase opens the post, which stays in the fan's library and readable
-// after its deletion; the membership opens the channel's members-only posts,
-// renews, and a declined renewal enters dunning.
+// TestNMIBillingEndToEnd covers native catalog purchases and renewals through
+// NMI, ContentKit access/receipts, and account-deletion event consumption.
 func TestNMIBillingEndToEnd(t *testing.T) {
 	h := newHarness(t, harnessOptions{clock: true})
 	ctx := h.ctx
-	observer, err := h.srv.billing.client.NotificationEvents("onlydemo-notice-proof")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = observer.Register(ctx); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = observer.Retire(ctx) })
 	visa := nmimock.Card{Brand: "visa", Last4: "4242"}
 
 	owner := h.register("nmiowner", "127.0.0.2")
 	buyer := h.register("nmibuyer", "127.0.0.3")
 	stranger := h.register("nmistranger", "127.0.0.4")
 	channelID := owner.channel("nmi-studio", "NMI studio")
-	owner.call("PUT", contentkitPrefix+"/v1/groups/"+channelID+"/offer", map[string]any{"amount": "9.99", "renew_hours": 720}, "", 200)
+	owner.call("PUT", "/api/v1/products/entities/"+channelID, map[string]any{"amount": "9.99", "renew_hours": 720}, "", 200)
 	membershipPrice := buyer.groupPrice(channelID)
 	included, _ := owner.post(channelID, "Members", "Members read this", map[string]any{"level": "group", "group_id": channelID})
 	paid, _ := owner.post(channelID, "Paid", "Paid content", map[string]any{"level": "ppv"})
-	owner.call("PUT", contentkitPrefix+"/v1/contents/"+paid+"/offer", map[string]any{"amount": "4.99"}, "", 200)
+	owner.call("PUT", "/api/v1/products/contents/"+paid, map[string]any{"amount": "4.99"}, "", 200)
 	postPrice := buyer.contentPrice(paid)
 	if buyer.opens(included) || buyer.opens(paid) || buyer.body(paid) != "" {
 		t.Fatal("posts open before any purchase")
@@ -69,9 +58,9 @@ func TestNMIBillingEndToEnd(t *testing.T) {
 		t.Fatal("buying a post opened the members-only post, or not its own body")
 	}
 	library := func() []any {
-		return buyer.call("GET", contentkitPrefix+"/v1/me/library", nil, "", 200)["items"].([]any)
+		return buyer.call("GET", "/billing/v1/me/entitlements?prefix=onlydemo:content:", nil, "", 200)["data"].([]any)
 	}
-	if items := library(); len(items) != 1 || items[0].(map[string]any)["content_id"] != paid {
+	if items := library(); len(items) != 1 || items[0].(map[string]any)["entitlement"] != "onlydemo:content:"+paid {
 		t.Fatalf("library: %v", items)
 	}
 
@@ -84,14 +73,14 @@ func TestNMIBillingEndToEnd(t *testing.T) {
 		t.Fatalf("after the post and the membership NMI holds %d sales, want 2", n)
 	}
 
-	// A deleted post stays its buyer's, in the library too, and nobody else's.
-	owner.call("DELETE", contentkitPrefix+"/v1/contents/"+paid, nil, "", 204)
-	if !buyer.opens(paid) {
-		t.Fatal("deleting the post took it from its buyer")
+	// Deleting the final version removes publication; billing access/history stays.
+	owner.removePost(paid)
+	if post := buyer.call("GET", contentkitPrefix+"/v1/contents/"+paid, nil, "", 200); post["state"] != "deleted" {
+		t.Fatal("buyer lost the retained deleted post")
 	}
 	stranger.call("GET", contentkitPrefix+"/v1/contents/"+paid, nil, "", 404)
-	if items := library(); len(items) != 1 || items[0].(map[string]any)["deleted"] != true {
-		t.Fatalf("library after deletion: %v", items)
+	if len(library()) != 1 {
+		t.Fatal("deleting content erased the billing entitlement")
 	}
 
 	// Renewal: step the shared clock past the period; the due pass charges.
@@ -119,14 +108,25 @@ func TestNMIBillingEndToEnd(t *testing.T) {
 	if got := h.nmi.Charged(vault, ""); got != 499+999+999 {
 		t.Fatalf("a declined renewal moved money: %d cents", got)
 	}
-	h.assertBillingNotices(t, buyer, owner, observer)
+	h.assertBillingNotices(t, buyer, owner)
 
-	// A membership made free stops paid renewals: each ends with its period.
-	owner.call("PUT", contentkitPrefix+"/v1/groups/"+channelID+"/offer", map[string]any{"amount": "0"}, "", 200)
-	eventually(t, "the paid membership to stop renewing", func() bool {
+	// A free membership changes new sales; existing subscribers keep their terms.
+	owner.call("PUT", "/api/v1/products/entities/"+channelID, map[string]any{"amount": "0"}, "", 200)
+	if h.subscription(buyer.id).CancelScheduled {
+		t.Fatal("catalog edit silently canceled an existing subscription")
+	}
+	// The host's retained-event reader cancels on account deletion and survives retry.
+	if _, err := h.srv.auth.client.DeleteUsers(ctx, iam.SystemIdentity(), []string{buyer.id}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "account deletion cancellation", func() bool {
 		s := h.subscription(buyer.id)
 		return s.CancelScheduled || s.CanceledAt != nil || s.Status == billing.SubscriptionCanceled
 	})
+	worker := accountEventWorker{auth: h.srv.auth, pool: h.pool, schema: riverSchema(h.cfg)}
+	if err := worker.Work(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
 	if odd := h.nmi.Unexpected(); len(odd) > 0 {
 		t.Fatalf("requests nmimock does not model: %v", odd)
 	}

@@ -36,7 +36,7 @@ func smoke(ctx context.Context, base string, out io.Writer) error {
 	if err := step("creator opens a channel", err); err != nil {
 		return err
 	}
-	if err := step("creator makes membership free", creator.call(ctx, "PUT", contentkitPrefix+"/v1/groups/"+channel+"/offer", map[string]any{"amount": "0"}, nil)); err != nil {
+	if err := step("creator makes membership free", creator.call(ctx, "PUT", "/api/v1/products/entities/"+channel, map[string]any{"amount": "0"}, nil)); err != nil {
 		return err
 	}
 	public, err := creator.post(ctx, channel, seedPost{"Hello", "Everyone reads this.", "public", ""})
@@ -97,7 +97,7 @@ func smoke(ctx context.Context, base string, out io.Writer) error {
 		}
 		return err
 	}
-	join := contentkitPrefix + "/v1/groups/" + channel + "/join"
+	join := "/api/v1/memberships/" + channel
 	if err := step("a fan joins the free membership", fan.call(ctx, "POST", join, nil, nil)); err != nil {
 		return err
 	}
@@ -114,16 +114,16 @@ func smoke(ctx context.Context, base string, out io.Writer) error {
 		return err
 	}
 	var library struct {
-		Items []struct{} `json:"items"`
+		Items []struct{} `json:"data"`
 	}
-	err = fan.call(ctx, "GET", contentkitPrefix+"/v1/me/library", nil, &library)
+	err = fan.call(ctx, "GET", "/billing/v1/me/entitlements?prefix=onlydemo:content:", nil, &library)
 	if err == nil && len(library.Items) != 0 {
 		err = fmt.Errorf("library holds %d items", len(library.Items))
 	}
 	if err := step("the fan's library is empty", err); err != nil {
 		return err
 	}
-	if err := step("creator deletes the public post", creator.call(ctx, "DELETE", contentkitPrefix+"/v1/contents/"+public, nil, nil)); err != nil {
+	if err := step("creator deletes the public post", creator.removePost(ctx, public)); err != nil {
 		return err
 	}
 	err = anon.call(ctx, "GET", contentkitPrefix+"/v1/contents/"+public, nil, nil)
@@ -135,5 +135,5 @@ func smoke(ctx context.Context, base string, out io.Writer) error {
 	if err := step("a deleted post is gone for readers who never bought it", err); err != nil {
 		return err
 	}
-	return step("creator deletes the channel", creator.call(ctx, "DELETE", contentkitPrefix+"/v1/groups/"+channel, nil, nil))
+	return step("creator deletes the channel", creator.call(ctx, "DELETE", contentkitPrefix+"/v1/entities/"+channel, nil, nil))
 }

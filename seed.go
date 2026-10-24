@@ -72,15 +72,15 @@ func seedWith(ctx context.Context, base string, a *appAuth, out io.Writer) error
 		switch creator.membership {
 		case "":
 		case "free":
-			err = c.call(ctx, "PUT", contentkitPrefix+"/v1/groups/"+channel+"/offer", map[string]any{"amount": "0"}, nil)
+			err = c.call(ctx, "PUT", "/api/v1/products/entities/"+channel, map[string]any{"amount": "0"}, nil)
 		default:
-			err = c.call(ctx, "PUT", contentkitPrefix+"/v1/groups/"+channel+"/offer", map[string]any{"amount": creator.membership, "renew_hours": 720}, nil)
+			err = c.call(ctx, "PUT", "/api/v1/products/entities/"+channel, map[string]any{"amount": creator.membership, "renew_hours": 720}, nil)
 		}
 		if err != nil {
 			return fmt.Errorf("%s membership: %w", creator.channel, err)
 		}
 		var existing []struct{ Title string }
-		if err = c.call(ctx, "GET", contentkitPrefix+"/v1/manage/contents?kind=post&limit=100&owner_group="+url.QueryEscape(channel), nil, &existing); err != nil {
+		if err = c.call(ctx, "GET", contentkitPrefix+"/v1/manage/post?limit=100&owner_group="+url.QueryEscape(channel), nil, &existing); err != nil {
 			return fmt.Errorf("%s posts: %w", creator.channel, err)
 		}
 		seeded := map[string]bool{}
@@ -224,21 +224,21 @@ func (c *apiClient) signIn(ctx context.Context, username string) error {
 // group with the viewer as owner), or reuses the one they own.
 func (c *apiClient) channel(ctx context.Context, handle, name string) (string, error) {
 	var created []struct{ ID string }
-	err := c.call(ctx, "POST", contentkitPrefix+"/v1/groups", []map[string]any{{"kind": kindChannel, "slug": handle,
+	err := c.call(ctx, "POST", contentkitPrefix+"/v1/entities", []map[string]any{{"kind": kindChannel, "slug": handle,
 		"names": []map[string]string{{"language": "en", "kind": "name", "name": name}}}}, &created)
 	if err == nil && len(created) == 1 {
 		return created[0].ID, nil
 	}
 	var page struct {
-		Groups []struct{ ID string } `json:"groups"`
+		Groups []struct{ ID string } `json:"entities"`
 	}
-	if lookup := c.call(ctx, "GET", contentkitPrefix+"/v1/groups?kind=channel&slug="+url.QueryEscape(handle), nil, &page); lookup != nil || len(page.Groups) != 1 {
+	if lookup := c.call(ctx, "GET", contentkitPrefix+"/v1/entities?kind=channel&slug="+url.QueryEscape(handle), nil, &page); lookup != nil || len(page.Groups) != 1 {
 		return "", err
 	}
 	var g struct {
 		OwnerUserID string `json:"owner_user_id"`
 	}
-	if lookup := c.call(ctx, "GET", contentkitPrefix+"/v1/groups/"+page.Groups[0].ID, nil, &g); lookup != nil || g.OwnerUserID != c.id {
+	if lookup := c.call(ctx, "GET", contentkitPrefix+"/v1/entities/"+page.Groups[0].ID, nil, &g); lookup != nil || g.OwnerUserID != c.id {
 		return "", err
 	}
 	return page.Groups[0].ID, nil
@@ -252,9 +252,23 @@ func (c *apiClient) post(ctx context.Context, channel string, p seedPost) (strin
 		return "", err
 	}
 	if p.price != "" {
-		if err := c.call(ctx, "PUT", contentkitPrefix+"/v1/contents/"+created.ID+"/offer", map[string]any{"amount": p.price}, nil); err != nil {
+		if err := c.call(ctx, "PUT", "/api/v1/products/contents/"+created.ID, map[string]any{"amount": p.price}, nil); err != nil {
 			return "", err
 		}
 	}
 	return created.ID, c.call(ctx, "POST", contentkitPrefix+"/v1/contents/"+created.ID+"/publish", map[string]any{}, nil)
+}
+
+// removePost deletes editions explicitly; removing the final edition removes publication.
+func (c *apiClient) removePost(ctx context.Context, id string) error {
+	var post struct{ Versions []struct{ ID string } }
+	if err := c.call(ctx, "GET", contentkitPrefix+"/v1/contents/"+id, nil, &post); err != nil {
+		return err
+	}
+	for _, version := range post.Versions {
+		if err := c.call(ctx, "DELETE", contentkitPrefix+"/v1/contents/"+id+"/versions/"+version.ID, nil, nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }

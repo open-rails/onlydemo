@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import type { GroupDetail } from "@openrails/contentkit-ui/client";
+import type { EntityDetail } from "@openrails/contentkit-ui/client";
 import { request } from "./api";
 import { contentkit } from "./media";
 import { useAuth } from "./session";
@@ -40,8 +40,8 @@ export function useMyChannels() {
     enabled: !!roles.data,
     queryFn: async () => {
       const ids = [...roles.data!.keys()];
-      const groups = await Promise.all(ids.map((id) => contentkit.groups.get(id).catch(() => null)));
-      return groups.filter((g): g is GroupDetail => !!g).map((group) => ({ group, role: roles.data!.get(group.id)! }));
+      const groups = await Promise.all(ids.map((id) => contentkit.entities.get(id).catch(() => null)));
+      return groups.filter((g): g is EntityDetail => !!g).map((group) => ({ group, role: roles.data!.get(group.id)! }));
     },
   });
 }

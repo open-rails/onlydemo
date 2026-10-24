@@ -1,18 +1,15 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ContentKitError, type GroupDetail } from "@openrails/contentkit-ui/client";
-import { ContentGrid, GroupBanner, GroupImageEditor } from "@openrails/contentkit-ui";
-import { useCanonicalContent, useGroup } from "@openrails/contentkit-ui/react";
+import { ContentKitError, type EntityDetail } from "@openrails/contentkit-ui/client";
+import { ContentGrid, EntityBanner, EntityImageEditor } from "@openrails/contentkit-ui";
+import { useCanonicalContent, useEntity } from "@openrails/contentkit-ui/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Add01Icon, ArrowRight02Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet, FieldTitle } from "@/components/ui/field";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Switch } from "@/components/ui/switch";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -24,7 +21,10 @@ import { Post } from "./explore";
 import { contentkit } from "../media";
 import { useAuth } from "../session";
 import { rememberPostChannel, useChannelRoles } from "../roles";
-import { amount as price, money, duration } from "../format";
+import { request } from "../api";
+import type { Product } from "@openrails/billing-ui/client";
+import { accessChanged } from "../purchases";
+import { ProductSettings } from "../components/product-settings";
 import { channelPath, channelsPath, contentURLs, newPostPath, parseCode } from "../paths";
 
 // A channel's page: ContentKit's banner and membership box, its posts
@@ -41,9 +41,9 @@ export function ChannelPage() {
   const auth = useAuth();
   const [tab, setTab] = useState("posts");
   const id = found.data?.content_kind === "channel" ? found.data.content_id : null;
-  const read = useGroup(id);
+  const read = useEntity(id);
   const roles = useChannelRoles();
-  const group = read.group;
+  const group = read.entity;
   const role = id ? roles.data?.get(id) : undefined;
   const checkout = useCheckout(group?.name ?? "Creator");
   const userID = auth.user?.id;
@@ -63,14 +63,15 @@ export function ChannelPage() {
   const manage = role === "owner";
   return (
     <>
-      <GroupBanner group={group} onCheckout={checkout}>
+      <EntityBanner entity={group} onCheckout={checkout}>
         {role && (
           <Button nativeButton={false} render={<Link to={newPostPath(group.slug)} />}>
             <HugeiconsIcon icon={Add01Icon} data-icon="inline-start" />
             New post
           </Button>
         )}
-      </GroupBanner>
+        {group.access?.member && <LeaveFreeMembership id={group.id} />}
+      </EntityBanner>
       <Tabs value={tab} onValueChange={(value) => setTab(String(value))} className="my-4">
         <TabsList variant="line" aria-label="Channel sections" className="w-full">
           <TabsTrigger value="posts">Posts</TabsTrigger>
@@ -106,106 +107,16 @@ export function ChannelPage() {
   );
 }
 
-// The membership a channel sells: ContentKit's group offer (free or renewing
-// monthly), or none. Its owner reads it as GroupDetail.offer; keyed by that
-// offer, the form starts over from each saved one.
-function MembershipSettings({ group, onUpdated }: { group: GroupDetail; onUpdated: () => void }) {
-  const terms = group.offer?.state === "active" ? group.offer.terms : undefined;
-  const [enabled, setEnabled] = useState(!!terms);
-  const free0 = !!terms && Number(terms.amount) === 0;
-  const [free, setFree] = useState(free0);
-  const [amount, setAmount] = useState(terms && !free0 ? terms.amount : "");
-  const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
-  const save = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setError("");
-    setSaving(true);
-    try {
-      if (!enabled) await contentkit.offers.withdrawGroup(group.id);
-      else await contentkit.offers.sellGroup(group.id, free ? { amount: "0", currency: "USD" } : { amount: price(amount.trim(), 1), currency: "USD", renew_hours: 720 });
-      toast.success("Membership saved.");
-      onUpdated();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not save the membership.");
-    } finally {
-      setSaving(false);
-    }
-  };
-  const status = !terms
-    ? "This channel sells no membership. Posts can be free or sold individually; existing members keep access."
-    : free0
-      ? "Open: anyone can join free."
-      : `Open: ${money(String(Number(terms.amount) * 1_000_000), terms.currency)} ${duration(terms.renew_hours)}.`;
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Channel membership</CardTitle>
-        <CardDescription>{status}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={(event) => void save(event)}>
-          <FieldGroup>
-            <Field orientation="horizontal">
-              <Switch id="membership-enabled" checked={enabled} onCheckedChange={setEnabled} />
-              <FieldContent>
-                <FieldLabel htmlFor="membership-enabled">Accept new members</FieldLabel>
-                <FieldDescription>Turning this off stops new joins. Existing members keep access and see new membership posts.</FieldDescription>
-              </FieldContent>
-            </Field>
-            {enabled && (
-              <FieldSet>
-                <FieldLegend variant="label">Price</FieldLegend>
-                <RadioGroup className="grid gap-3 sm:grid-cols-2" value={free ? "free" : "paid"} onValueChange={(value) => setFree(value === "free")}>
-                  <FieldLabel htmlFor="membership-free">
-                    <Field orientation="horizontal">
-                      <FieldContent>
-                        <FieldTitle>Free</FieldTitle>
-                        <FieldDescription>Join without a card.</FieldDescription>
-                      </FieldContent>
-                      <RadioGroupItem value="free" id="membership-free" />
-                    </Field>
-                  </FieldLabel>
-                  <FieldLabel htmlFor="membership-paid">
-                    <Field orientation="horizontal">
-                      <FieldContent>
-                        <FieldTitle>Paid</FieldTitle>
-                        <FieldDescription>Renews every 30 days.</FieldDescription>
-                      </FieldContent>
-                      <RadioGroupItem value="paid" id="membership-paid" />
-                    </Field>
-                  </FieldLabel>
-                </RadioGroup>
-              </FieldSet>
-            )}
-            {enabled && !free && (
-              <Field>
-                <FieldLabel htmlFor="membership-amount">Price every 30 days (USD)</FieldLabel>
-                <Input
-                  id="membership-amount"
-                  required
-                  inputMode="decimal"
-                  pattern="[0-9]+(\.[0-9]{1,2})?"
-                  value={amount}
-                  onChange={(event) => setAmount(event.target.value)}
-                  placeholder="5.00"
-                />
-                <FieldDescription>Minimum $1.00. New members pay the new price; existing members keep the price they accepted.</FieldDescription>
-              </Field>
-            )}
-            <FormError>{error}</FormError>
-            <Button type="submit" className="self-start" disabled={saving || (!enabled && !terms)}>
-              {saving && <Spinner data-icon="inline-start" />}
-              {terms ? "Save membership" : "Create membership"}
-            </Button>
-          </FieldGroup>
-        </form>
-      </CardContent>
-    </Card>
-  );
+function LeaveFreeMembership({id}: {id: string}) {
+  const query = useQueryClient();
+  const product = useQuery({queryKey: ["product", `onlydemo:group:${id}`], queryFn: () => request<Product | null>(`/api/v1/products?key=onlydemo:group:${id}`)});
+  const [busy,setBusy] = useState(false);
+  const [error,setError] = useState("");
+  if (product.data?.description !== "OnlyDemo free membership") return null;
+  return <div><Button variant="outline" disabled={busy} onClick={() => {setBusy(true);void request(`/api/v1/memberships/${id}`,{method:"DELETE"}).then(() => {accessChanged();void query.invalidateQueries();}).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Could not leave membership.")).finally(() => setBusy(false));}}>Leave free membership</Button><FormError>{error}</FormError></div>;
 }
 
-function ChannelSettings({ group, onUpdated }: { group: GroupDetail; onUpdated: () => void }) {
+function ChannelSettings({ group, onUpdated }: { group: EntityDetail; onUpdated: () => void }) {
   const navigate = useNavigate();
   const client = useQueryClient();
   const [deleting, setDeleting] = useState(false);
@@ -216,7 +127,8 @@ function ChannelSettings({ group, onUpdated }: { group: GroupDetail; onUpdated: 
     setRemoving(true);
     setError("");
     try {
-      await contentkit.groups.remove(group.id);
+      await request(`/api/v1/products/entities/${group.id}`, {method: "DELETE"});
+      await contentkit.entities.remove(group.id);
       await client.invalidateQueries();
       navigate("/me?tab=channels");
     } catch (cause) {
@@ -233,11 +145,11 @@ function ChannelSettings({ group, onUpdated }: { group: GroupDetail; onUpdated: 
           <CardDescription>The cover across the channel's page and its avatar.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
-          <GroupImageEditor group={group} slot="cover" />
-          <GroupImageEditor group={group} slot="avatar" />
+          <EntityImageEditor entity={group} slot="cover" />
+          <EntityImageEditor entity={group} slot="avatar" />
         </CardContent>
       </Card>
-      <MembershipSettings key={group.offer ? `${group.offer.id}:${group.offer.revision}` : "none"} group={group} onUpdated={onUpdated} />
+      <ProductSettings kind="entities" id={group.id} onUpdated={onUpdated} />
       <Card>
         <CardHeader>
           <CardTitle>Delete channel</CardTitle>
@@ -294,7 +206,7 @@ export function NewChannelPage() {
     setError("");
     const data = new FormData(event.currentTarget);
     try {
-      const [channel] = await contentkit.groups.create([
+      const [channel] = await contentkit.entities.create([
         {
           kind: "channel",
           slug: String(data.get("slug")).trim().toLowerCase(),
@@ -302,7 +214,7 @@ export function NewChannelPage() {
         },
       ]);
       await client.invalidateQueries();
-      const target = thenPost ? newPostPath(channel.slug) : channelPath(await contentkit.groups.get(channel.id));
+      const target = thenPost ? newPostPath(channel.slug) : channelPath(await contentkit.entities.get(channel.id));
       navigate(target, { replace: thenPost });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Channel could not be created.");

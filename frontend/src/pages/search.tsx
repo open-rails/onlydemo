@@ -1,5 +1,5 @@
 import { useNavigate, useSearchParams } from "react-router-dom";
-import type { Card, GroupCard } from "@openrails/contentkit-ui/client";
+import type { Card, EntityCard } from "@openrails/contentkit-ui/client";
 import { SearchBox, SearchResults } from "@openrails/contentkit-ui";
 import { Search01Icon } from "@hugeicons/core-free-icons";
 import { EmptyState } from "../components/states";
@@ -7,7 +7,7 @@ import { Post } from "./explore";
 import { channelPath, postPath, searchPath } from "../paths";
 
 // Channels link by handle; ContentKit's group paths carry a name slug instead.
-const href = (item: Card | GroupCard) => ("title" in item ? postPath({ code: item.code, slug: "", path: item.path }) : channelPath(item));
+const href = (item: Card | EntityCard) => ("title" in item ? postPath({ code: item.code, slug: "", path: item.path }) : channelPath(item));
 
 /** Posts and channels as the reader types, recent searches while empty; Enter opens the results. */
 export function SiteSearch({ className }: { className?: string }) {
@@ -18,7 +18,7 @@ export function SiteSearch({ className }: { className?: string }) {
       key={params.get("q") ?? ""}
       className={className}
       kind="post"
-      groupKinds={["channel"]}
+      entityKinds={["channel"]}
       defaultValue={params.get("q") ?? ""}
       placeholder="Search posts and creators"
       href={href}
