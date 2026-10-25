@@ -45,7 +45,7 @@ tasks:
         go run github.com/open-rails/contentkit/cmd/media-gateway
 
   media:worker:
-    desc: Run the media worker (`onlydemo media-worker`; needs libvips and ffmpeg). It places uploads and renders images and video; readiness goes back to the app's River queue
+    desc: Run durable ingest, image and video processing (`onlydemo media-worker`; needs libvips and ffmpeg); editor progress survives restarts
     cmds:
       - |
         MEDIA_WORKER_THREADS="${MEDIA_WORKER_THREADS:-2}" \
