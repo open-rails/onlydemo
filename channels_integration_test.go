@@ -40,9 +40,7 @@ func TestChannelsOnContentKit(t *testing.T) {
 	})
 	fan.call("POST", contentkitPrefix+"/v1/entities", []map[string]any{{"kind": kindChannel, "slug": "studio",
 		"names": []map[string]string{{"language": "en", "kind": "name", "name": "Again"}}}}, "", 409)
-	if _, err := h.srv.auth.client.SetGroupRole(ctx, iam.UserIdentity(owner.id), iam.GroupByID(id), iam.UserSubject(editor.id), channelEditorRole); err != nil {
-		t.Fatal(err)
-	}
+	owner.call("PUT", "/auth/v1/groups/"+id+"/members/users/"+editor.id, map[string]any{"role": "channel:editor"}, "", 200)
 
 	// A members-only post needs no offer on its channel: it stays locked,
 	// selling nothing, until the channel sells a membership (here a free one).
@@ -76,7 +74,7 @@ func TestChannelsOnContentKit(t *testing.T) {
 	// everyone else.
 	owner.call("PUT", offer, map[string]any{"amount": "0"}, "", 200)
 	public, _ := owner.post(id, "Hello", "Everyone reads this", nil)
-	paid, _ := owner.post(id, "Paid", "Buyers read this", map[string]any{"level": "ppv"})
+	paid, paidVersion := owner.post(id, "Paid", "Buyers read this", map[string]any{"level": "ppv"})
 	editor.post(id, "By the editor", "Hi", nil)
 	fan.call("POST", contentkitPrefix+"/v1/contents", map[string]any{"kind": kindPost, "owner_group_id": id,
 		"text": map[string]any{"en": map[string]string{"title": "Not mine"}}}, "", 403)
@@ -139,7 +137,7 @@ func TestChannelsOnContentKit(t *testing.T) {
 
 	// Native OpenRails products grant the stable ContentKit access keys.
 	groupKey, _ := access.EntityKey(tenant, id)
-	contentKey, _ := access.ContentKey(tenant, paid)
+	contentKey, _ := access.VersionKey(tenant, paid, paidVersion)
 	product := func(key access.Key) billing.Product {
 		page, err := h.srv.billing.client.ListProducts(ctx, billing.ProductListParams{Keys: []string{key.String()}})
 		if err != nil || len(page.Items) != 1 {
@@ -172,9 +170,7 @@ func TestChannelsOnContentKit(t *testing.T) {
 	if path := owner.put(kindChannel, id, "cover/banner.png", cover, "image/png"); path == "" {
 		t.Fatal("no committed cover")
 	}
-	if _, err := h.srv.auth.client.SetGroupRole(ctx, iam.UserIdentity(owner.id), iam.GroupByID(id), iam.UserSubject(editor.id), channelOwnerRole); err != nil {
-		t.Fatal(err)
-	}
+	owner.call("PUT", "/auth/v1/groups/"+id+"/members/users/"+editor.id, map[string]any{"role": "channel:owner"}, "", 200)
 	editor.presign(kindChannel, id, "cover/banner.png", cover, "image/png", 200)
 
 	// A deleted post is gone for those who never bought it.

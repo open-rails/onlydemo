@@ -256,7 +256,27 @@ func (c *apiClient) post(ctx context.Context, channel string, p seedPost) (strin
 			return "", err
 		}
 	}
-	return created.ID, c.call(ctx, "POST", contentkitPrefix+"/v1/contents/"+created.ID+"/publish", map[string]any{}, nil)
+	if err := c.call(ctx, "POST", contentkitPrefix+"/v1/contents/"+created.ID+"/publish", map[string]any{}, nil); err != nil {
+		return created.ID, err
+	}
+	// Publish accepts durable work. Observe the accepted release; retrying the
+	// request would create another intent rather than make this one finish.
+	wait, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	for {
+		var post struct{ Versions []struct{ Live bool } }
+		if err := c.call(wait, "GET", contentkitPrefix+"/v1/contents/"+created.ID, nil, &post); err != nil {
+			return created.ID, err
+		}
+		if len(post.Versions) == 1 && post.Versions[0].Live {
+			return created.ID, nil
+		}
+		select {
+		case <-wait.Done():
+			return created.ID, fmt.Errorf("publication accepted but not completed: %w", wait.Err())
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
 }
 
 // removePost deletes editions explicitly; removing the final edition removes publication.

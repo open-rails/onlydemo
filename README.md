@@ -62,6 +62,11 @@ an inline new card (always saved), one Pay button.
 Declared PSP settings seed a new database; an existing PSP row keeps its stored
 settings.
 
+`PROVIDER_WRITE_MODE` defaults to `full` for sandbox payment demos. Set it to
+`readonly` for content-only development or migration verification: OpenRails
+refuses every provider write, including new cards, charges, and cancellations.
+`limited` permits explicit customer/staff actions but holds automatic billing.
+
 The local sandbox has OpenRails's destructive-action switch armed, so terminal dunning
 cancels, revocations and provider-schedule cancels execute; an operator disables them
 with `UPDATE billing.destructive_action_switch SET enabled=false, updated_by='<you>', reason='<why>', updated_at=now();`.
@@ -116,6 +121,9 @@ The Go and React APIs call these entities.
 Access rules are public, channel membership (`group`), members-only purchase
 (`group_ppv`), or one-time purchase (`ppv`). ContentKit checks the customer's
 current OpenRails keys; it does not create products or prices.
+Post purchases grant `onlydemo:content:<post-id>/<version-id>` for the post's
+single hidden edition. A parent-only key grants no edition access. Channel
+membership keys remain `onlydemo:group:<channel-id>`.
 
 Deleting the final version removes the post. It can be restored for 30 days,
 buyers retain access during that window. ContentKit's existing purge sweep
@@ -145,12 +153,18 @@ Browsers upload straight to the bucket with
   `<CONTENT_SCHEMA>_media_worker`. Processors append progress facts directly;
   the shared editor observes durable state through authenticated SSE and
   recovers it when reopened. Uploading does not publish a post. The host fleet
-  runs metadata work and the existing content-purge sweep; there are no separate
-  readiness, exposure or media-deletion workers. Env: `MEDIA_WORKER_*` and
+  runs metadata work, durable scheduled publication, and the existing content-purge
+  sweep. Env: `MEDIA_WORKER_*` and
   `MEDIA_HOST_RIVER_SCHEMA` (default `RIVER_SCHEMA`).
-- **Access.** `/public` is always public, including previews before publication.
-  `/private` requires a scoped token. Publishing, unpublishing and changing
-  access rules do not move or regenerate media.
+- **Publication and access.** Uploads stage in `tmp`, originals are retained in
+  `originals`, and prepared outputs wait in `future`. The durable publication
+  job copies, verifies, and retires objects in the same operation. Only released
+  output is placed in `public` or `private`. The gateway serves `public`
+  anonymously and `private` with a token for that exact edition; it rejects
+  every internal folder. Publication is asynchronous, and files become readable
+  individually as their copies complete. Page chapter markers schedule page
+  renditions; this demo's standalone mixed-media attachments follow the initial
+  post release.
 - **Delivery.** Production uses cookie mode: the site and `media.` host share a
   registrable domain (`MEDIA_COOKIE_DOMAIN`) over HTTPS. Locally the app
   (`localhost:5173`) and gateway (`localhost:8090`) share no parent domain, so

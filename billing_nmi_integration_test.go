@@ -17,6 +17,25 @@ import (
 	"github.com/riverqueue/river/rivertype"
 )
 
+func TestProviderWritesReadOnly(t *testing.T) {
+	h := newHarness(t, harnessOptions{providerWriteMode: openrails.ProviderWritesReadOnly})
+	buyer := h.register("readonlybuyer", "127.0.0.2")
+	psps, err := h.srv.billing.client.ListPSPs(h.ctx, billing.PSPListParams{})
+	if err != nil || len(psps.Items) != 1 {
+		t.Fatalf("PSPs: %v %v", psps, err)
+	}
+	result := buyer.call("POST", "/billing/v1/me/payment-methods", map[string]any{
+		"psp_id": psps.Items[0].ID, "token": h.nmi.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}),
+		"billing_details": map[string]any{"name": "Readonly Buyer"},
+	}, "readonly-card", 503)
+	if result["code"] != billing.CodeProviderWritesDisabled {
+		t.Fatalf("readonly result: %v", result)
+	}
+	if count := h.nmi.Mutations(); count != 0 {
+		t.Fatalf("readonly mode made %d provider writes", count)
+	}
+}
+
 // TestNMIBillingEndToEnd covers native catalog purchases and renewals through
 // NMI, ContentKit access/receipts, and account-deletion event consumption.
 func TestNMIBillingEndToEnd(t *testing.T) {
@@ -31,7 +50,7 @@ func TestNMIBillingEndToEnd(t *testing.T) {
 	owner.call("PUT", "/api/v1/products/entities/"+channelID, map[string]any{"amount": "9.99", "renew_hours": 720}, "", 200)
 	membershipPrice := buyer.groupPrice(channelID)
 	included, _ := owner.post(channelID, "Members", "Members read this", map[string]any{"level": "group", "group_id": channelID})
-	paid, _ := owner.post(channelID, "Paid", "Paid content", map[string]any{"level": "ppv"})
+	paid, paidVersion := owner.post(channelID, "Paid", "Paid content", map[string]any{"level": "ppv"})
 	owner.call("PUT", "/api/v1/products/contents/"+paid, map[string]any{"amount": "4.99"}, "", 200)
 	postPrice := buyer.contentPrice(paid)
 	if buyer.opens(included) || buyer.opens(paid) || buyer.body(paid) != "" {
@@ -60,7 +79,7 @@ func TestNMIBillingEndToEnd(t *testing.T) {
 	library := func() []any {
 		return buyer.call("GET", "/billing/v1/me/entitlements?prefix=onlydemo:content:", nil, "", 200)["data"].([]any)
 	}
-	if items := library(); len(items) != 1 || items[0].(map[string]any)["entitlement"] != "onlydemo:content:"+paid {
+	if items := library(); len(items) != 1 || items[0].(map[string]any)["entitlement"] != "onlydemo:content:"+paid+"/"+paidVersion {
 		t.Fatalf("library: %v", items)
 	}
 

@@ -66,7 +66,8 @@ type harnessOptions struct {
 	// clock drives OpenRails and the gateway from a fake clock in the past.
 	clock bool
 	// minio needs DEMO_TEST_S3_ENDPOINT: real uploads land in its bucket.
-	minio bool
+	minio             bool
+	providerWriteMode string
 }
 
 func newHarness(t *testing.T, o harnessOptions) *harness {
@@ -92,6 +93,10 @@ func newHarness(t *testing.T, o harnessOptions) *harness {
 		RiverSchema: "od_river_" + suffix, ContentSchema: "od_ck_" + suffix, AuthKeysPath: "", AuthAudience: "demo-test",
 		Merchant: testMerchant(openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: nmiTestAccount, SecurityKey: "nmimock-security-key",
 			WebhookSigningSecret: "nmimock-webhook-secret", TokenizationKey: "nmimock-tokenization"}.PSPConfig())}
+	h.cfg.ProviderWriteMode = o.providerWriteMode
+	if h.cfg.ProviderWriteMode == "" {
+		h.cfg.ProviderWriteMode = openrails.ProviderWritesFull
+	}
 	h.pool = testPool(t, ctx, dbURL, h.cfg)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -386,6 +391,11 @@ func (p peer) post(channel, title, body string, rule map[string]any) (string, st
 		p.h.t.Fatalf("post %s has versions %v", id, versions)
 	}
 	p.call("POST", contentkitPrefix+"/v1/contents/"+id+"/publish", map[string]any{}, "", 200)
+	eventually(p.h.t, "the post's durable publication", func() bool {
+		post := p.call("GET", contentkitPrefix+"/v1/contents/"+id, nil, "", 200)
+		versions, _ := post["versions"].([]any)
+		return len(versions) == 1 && versions[0].(map[string]any)["live"] == true
+	})
 	return id, versions[0].(map[string]any)["id"].(string)
 }
 
@@ -416,8 +426,15 @@ func (p peer) channel(slug, name string) string {
 
 // contentPrice waits for content id's paywall to offer key on sale and
 // returns the offer's OpenRails price, as the browser's Paywall reads it.
-func (p peer) contentPrice(id string) string { return p.productPrice("onlydemo:content:" + id) }
-func (p peer) groupPrice(id string) string   { return p.productPrice("onlydemo:group:" + id) }
+func (p peer) contentPrice(id string) string {
+	post := p.call("GET", contentkitPrefix+"/v1/contents/"+id, nil, "", 200)
+	versions, _ := post["versions"].([]any)
+	if len(versions) != 1 {
+		p.h.t.Fatalf("post has no single edition: %v", post)
+	}
+	return p.productPrice("onlydemo:content:" + id + "/" + versions[0].(map[string]any)["id"].(string))
+}
+func (p peer) groupPrice(id string) string { return p.productPrice("onlydemo:group:" + id) }
 func (p peer) productPrice(key string) string {
 	p.h.t.Helper()
 	product := p.call("GET", "/api/v1/products?key="+key, nil, "", 200)

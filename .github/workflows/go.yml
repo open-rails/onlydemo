@@ -72,7 +72,7 @@ jobs:
         run: go test -run 'TestBillingAccountsFailClosedBeforeBinding|TestNotificationAdoptionKeepsOnlyDemoOrigin|TestNotificationCutoverOnFreshInbox|TestAccountNotificationAdoption' -count=1 -v -p 2 .
       # Needs only PostgreSQL: it runs before the S3-backed channel proof.
       - name: NMI billing end to end (nmimock)
-        run: go test -run TestNMIBillingEndToEnd -count=1 -v -p 2 .
+        run: go test -run 'TestNMIBillingEndToEnd|TestProviderWritesReadOnly' -count=1 -v -p 2 .
       - name: MinIO
         # Upstream MinIO images and dl.min.io binaries are gone; Chainguard still builds it (RELEASE.2026-09-22T19-25-18Z).
         run: >-
@@ -80,7 +80,7 @@ jobs:
           cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 server /data
       - run: |
           timeout 60 sh -c 'until curl -fs http://127.0.0.1:9000/minio/health/live; do sleep 1; done'
-          go test -run "TestChannelsOnContentKit|TestSmoke" -count=1 -v -p 2 .
+          go test -run "TestChannelsOnContentKit|TestSmoke|TestSeed" -count=1 -v -p 2 .
       - name: Build the browser QA binary
         run: |
           go build -p 2 -o onlydemo .

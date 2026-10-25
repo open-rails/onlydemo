@@ -8,8 +8,12 @@ import { Field, FieldLabel } from "./ui/field";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 
-export function ProductSettings({ kind, id, onUpdated }: { kind: "entities" | "contents"; id: string; onUpdated?: () => void }) {
-  const key = `onlydemo:${kind === "entities" ? "group" : "content"}:${id}`;
+type ProductSettingsProps = { id: string; onUpdated?: () => void } & (
+  { kind: "entities"; version?: never } | { kind: "contents"; version: string }
+);
+
+export function ProductSettings({ kind, id, version, onUpdated }: ProductSettingsProps) {
+  const key = kind === "entities" ? `onlydemo:group:${id}` : `onlydemo:content:${id}/${version}`;
   const read = useQuery({ queryKey: ["product", key], queryFn: () => request<Product | null>(`/api/v1/products?key=${encodeURIComponent(key)}`) });
   if (read.isPending) return <Loading />;
   if (read.error) return <ErrorState error={read.error} retry={() => void read.refetch()} />;

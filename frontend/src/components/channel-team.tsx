@@ -174,7 +174,7 @@ export function ChannelTeam({ channel }: { channel: { id: string; can_manage: bo
                       disabled={roleName(member.role) === "owner" || mutate.isPending}
                       onClick={() =>
                         mutate.mutate({
-                          path: `${root}/members/user/${encodeURIComponent(member.subject.id)}`,
+                          path: `${root}/members/users/${encodeURIComponent(member.subject.id)}`,
                           method: "PUT",
                           body: { role: "channel:owner" },
                         })

@@ -33,6 +33,8 @@ type Config struct {
 	RiverSchema   string
 	// Merchant is the seller and its PSPs, from merchant.yaml (MERCHANT_FILE).
 	Merchant openrails.MerchantDeclaration
+	// ProviderWriteMode can hold external payment writes during local content work.
+	ProviderWriteMode string
 	// TrustedCountryHeader names the edge header carrying the buyer's country
 	// (e.g. CF-IPCountry). Unset: the header is never trusted.
 	TrustedCountryHeader string
@@ -58,7 +60,7 @@ func loadConfig() (Config, error) {
 			case "AUTH_TENANT_ID", "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_KEYS_PATH", "AUTH_SCHEMA", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
 			default:
-				if key == "CONTENT_SCHEMA" || key == "MERCHANT_FILE" || key == "TRUSTED_COUNTRY_HEADER" || key == "RETURN_ORIGINS" || strings.HasPrefix(key, "MEDIA_") {
+				if key == "CONTENT_SCHEMA" || key == "MERCHANT_FILE" || key == "PROVIDER_WRITE_MODE" || key == "TRUSTED_COUNTRY_HEADER" || key == "RETURN_ORIGINS" || strings.HasPrefix(key, "MEDIA_") {
 					return strings.ToLower(key), value
 				}
 				return "", nil
@@ -124,21 +126,31 @@ func loadConfig() (Config, error) {
 			return Config{}, fmt.Errorf("%s: PSP %s is live; OnlyDemo takes only test or sandbox PSPs", merchantFile, key)
 		}
 	}
+	writeMode := strings.TrimSpace(k.String("provider_write_mode"))
+	if writeMode == "" {
+		writeMode = openrails.ProviderWritesFull
+	}
+	switch writeMode {
+	case openrails.ProviderWritesFull, openrails.ProviderWritesLimited, openrails.ProviderWritesReadOnly:
+	default:
+		return Config{}, fmt.Errorf("PROVIDER_WRITE_MODE must be full, limited, or readonly")
+	}
 
 	cfg := Config{
-		AuthTenantID:  tenantID,
-		Port:          port,
-		DatabaseURL:   databaseURL,
-		AuthIssuer:    authIssuer,
-		AuthAudience:  authAudience,
-		AuthKeysPath:  authKeysPath,
-		PublicURL:     publicURL,
-		ReturnOrigins: returnOrigins,
-		AuthSchema:    strings.TrimSpace(k.String("auth.schema")),
-		BillingSchema: strings.TrimSpace(k.String("billing.schema")),
-		RiverSchema:   strings.TrimSpace(k.String("river.schema")),
-		Merchant:      merchant,
-		ContentSchema: strings.TrimSpace(k.String("content_schema")),
+		AuthTenantID:      tenantID,
+		Port:              port,
+		DatabaseURL:       databaseURL,
+		AuthIssuer:        authIssuer,
+		AuthAudience:      authAudience,
+		AuthKeysPath:      authKeysPath,
+		PublicURL:         publicURL,
+		ReturnOrigins:     returnOrigins,
+		AuthSchema:        strings.TrimSpace(k.String("auth.schema")),
+		BillingSchema:     strings.TrimSpace(k.String("billing.schema")),
+		RiverSchema:       strings.TrimSpace(k.String("river.schema")),
+		Merchant:          merchant,
+		ProviderWriteMode: writeMode,
+		ContentSchema:     strings.TrimSpace(k.String("content_schema")),
 
 		TrustedCountryHeader: strings.TrimSpace(k.String("trusted_country_header")),
 	}

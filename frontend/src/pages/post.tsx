@@ -125,7 +125,7 @@ export function PostPage() {
         </article>
         {detail.decision && !detail.decision.allowed && (
           <aside className="panel purchase-panel">
-            <Paywall decision={{...detail.decision, sell: detail.decision.sell?.filter((key) => !key.includes("/") && (content.access.level !== "group" || key.startsWith("onlydemo:group:")))}} onCheckout={checkout} />
+            <Paywall decision={detail.decision} onCheckout={checkout} />
           </aside>
         )}
         {content.comments !== "hidden" && (
@@ -178,7 +178,7 @@ export function EditPostPage() {
             .catch((cause: unknown) => toast.error("Post deleted; could not retire its price.", {description: cause instanceof Error ? cause.message : "Retry from the pricing section."}));
         }}
       />
-      {owner && roles.data?.get(owner) === "owner" && <ProductSettings kind="contents" id={id} />}
+      {owner && roles.data?.get(owner) === "owner" && detail.content?.versions.length === 1 && <ProductSettings kind="contents" id={id} version={detail.content.versions[0].id} />}
     </div>
   );
 }

@@ -1,8 +1,7 @@
-# ContentKit 0.126 integration
+# ContentKit publication integration
 
-OnlyDemo pins public ContentKit Go/UI 0.126.1, its AuthKit adapter 0.11.0 and
-read-only OpenRails adapter 0.9.0, AuthKit/auth-ui 1.35.6, OpenRails/billing-ui
-0.263.1, Helpers 1.16.1 and River 0.49.0. No local module replacement is used.
+OnlyDemo pins the public ContentKit Go/UI release and adapters in `go.mod`
+and `frontend/package.json`. No local module replacement is used.
 
 ## Ownership
 
@@ -39,14 +38,28 @@ financial history remains independent of content retention.
 | Free membership | Host `/api/v1/memberships/{id}` grants/revokes the user's own free membership |
 | Orders and payment | OpenRails `/billing/v1/me`, billing-ui `OrderPayment` |
 | Purchased access | OpenRails `/billing/v1/me/entitlements` |
-| Billing notices | ContentKit `OpenRailsNotificationsContext` and `SameAccounts` |
+| Billing notices | AuthKit account inbox with producer-owned OpenRails notices |
 | Account deletion | AuthKit `ListEvents`, host cursor, idempotent subscription cancellation |
 
 Legacy wire identity remains `owner_group_id`, `owner_group`, `group_id`,
 `group`/`group_ppv`, and `onlydemo:group:<id>`. Keep existing product keys.
 The channel kind uses `entity_kinds` and `entitled: true`.
 
-## Upgrade existing data
+Every post has one hidden edition. New purchase products grant
+`onlydemo:content:<post-id>/<version-id>`; the parent-only entitlement cannot
+open it. Product lookup uses the granted entitlement, preserving OpenRails's
+immutable product and price identities if an operator explicitly remaps an old
+grant. The paywall and purchased library retain the edition identifier.
+
+## Publication hardcut
+
+The approved publication rollout starts with fresh ContentKit content and media.
+It does not convert historical upload folders. Keep old content storage isolated
+from the new gateway, and preserve account/billing records independently.
+Create new posts and upload media through the normal UI; prepared bytes stay
+in `future` until their durable publication job moves them into `public` or
+`private`. The host River fleet runs publication jobs, including schedules and
+retries. The media worker retains ingest/image/video processing ownership.
 
 Stop every old application, AuthKit, OpenRails, ContentKit and media worker
 writer before migration. Retain a restorable PostgreSQL backup and media
@@ -57,16 +70,16 @@ ContentKit's removed offers migration guards unsettled sales. Reconcile those
 with OpenRails before retiring old offers. Inspect old data and migration
 history before using `onlydemo migrate`; set `AUTH_TENANT_ID` to the persisted
 canonical account tenant UUID (the explicit legacy adoption owner) and retain it
-with backups; do not reset an existing database as
-an upgrade shortcut. This pinned release reaches catalog migration 46, account
-migration 9 and worker migration 4. Restoring after this cutover requires the
+with backups. Reset only the explicitly selected ContentKit content/media
+scope for this hardcut; never use `docker compose down -v` to upgrade an existing
+account/billing database. Restoring after this cutover requires the
 matching database backup and binary cohort, rather than only changing the
 executable.
 
 AuthKit and billing event readers own independent cursors. Restore procedures
 must invalidate source stream epochs as documented by the libraries; an expired
 cursor requires explicit state reconciliation. The host stores only its account
-reader cursor; ContentKit stores billing inbox receipts and progress atomically.
+reader cursor; AuthKit owns account inbox state.
 
 ## Validation
 

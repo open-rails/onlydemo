@@ -44,7 +44,7 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, accounts *b
 	}
 	engine, err := openrails.New(ctx, openrails.Config{
 		Database:             openrails.DatabaseConfig{Schema: billingSchema(cfg), RiverSchema: riverSchema(cfg)},
-		ProviderWriteMode:    openrails.ProviderWritesFull,
+		ProviderWriteMode:    cfg.ProviderWriteMode,
 		Merchants:            map[string]openrails.MerchantDeclaration{"onlydemo": merchant},
 		PublicBillingBaseURL: cfg.PublicURL + "/billing",
 		ReturnOrigins:        cfg.ReturnOrigins,

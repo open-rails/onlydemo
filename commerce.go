@@ -35,12 +35,18 @@ func (s *server) mountCommerce(app *fiber.App) {
 }
 
 func (s *server) product(ctx context.Context, key string) (*billing.Product, error) {
-	if !strings.HasPrefix(key, tenant+":") {
+	parsed, err := access.ParseKey(key)
+	if err != nil || parsed.Tenant() != tenant || parsed.Kind() != access.KeyVersion && parsed.Kind() != access.KeyEntity {
 		return nil, fiber.ErrBadRequest
 	}
-	page, err := s.billing.client.ListProducts(ctx, billing.ProductListParams{Keys: []string{key}})
+	// Products keep their immutable billing identity across an entitlement
+	// migration. Find the product granting this exact edition, not its old key.
+	page, err := s.billing.client.ListProducts(ctx, billing.ProductListParams{Entitlements: []string{key}})
 	if err != nil || len(page.Items) == 0 {
 		return nil, err
+	}
+	if len(page.Items) != 1 {
+		return nil, fiber.NewError(409, "More than one product grants this item; reconcile its catalog before editing")
 	}
 	return &page.Items[0], nil
 }
@@ -87,9 +93,13 @@ func (s *server) saveProduct(c fiber.Ctx) error {
 			return fiber.ErrNotFound
 		}
 		channel, name = post.OwnerEntityID, post.Title
-		key, err = access.ContentKey(tenant, id)
-		if post.Access.Level == access.EntityPPV {
-			membership, e := access.EntityKey(tenant, post.Access.Entity)
+		if len(post.Versions) != 1 || post.Versions[0].Access == nil {
+			return fiber.NewError(409, "A post purchase requires exactly one edition with an access rule")
+		}
+		version := post.Versions[0]
+		key, err = access.VersionKey(tenant, id, version.ID)
+		if version.Access.Level == access.EntityPPV {
+			membership, e := access.EntityKey(tenant, version.Access.Entity)
 			if e != nil {
 				return e
 			}

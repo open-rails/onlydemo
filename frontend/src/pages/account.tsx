@@ -81,7 +81,7 @@ function Library() {
     queryFn: ({ pageParam }) => billing.getEntitlements({ limit: 50, cursor: pageParam || undefined, prefix: "onlydemo:content:" }),
     getNextPageParam: (last) => last.next_cursor || undefined,
   });
-  const items = [...new Set((library.data?.pages.flatMap((page) => page.data) ?? []).map((item) => item.entitlement.split(":")[2].split("/")[0]))];
+  const items = [...new Set((library.data?.pages.flatMap((page) => page.data) ?? []).map((item) => item.entitlement.split(":")[2]).filter((item) => item?.includes("/")))];
   if (library.isPending) return <Loading />;
   if (library.error) return <ErrorState error={library.error} retry={() => void library.refetch()} />;
   if (!items.length)
@@ -101,7 +101,7 @@ function Library() {
   return (
     <>
       <ul className="library-list">
-        {items.map((id) => <PurchasedPost key={id} id={id} />)}
+        {items.map((item) => <PurchasedPost key={item} id={item.split("/")[0]} version={item.split("/")[1]} />)}
       </ul>
       {library.hasNextPage && (
         <div className="pagination">
@@ -114,12 +114,12 @@ function Library() {
     </>
   );
 }
-function PurchasedPost({id}: {id: string}) {
+function PurchasedPost({id, version}: {id: string; version: string}) {
   const auth = useAuth();
-  const post = useQuery({queryKey: ["purchased-post", auth.user?.id, id], queryFn: () => contentkit.contents.get(id), retry: false});
+  const post = useQuery({queryKey: ["purchased-post", auth.user?.id, id, version], queryFn: () => contentkit.contents.getByVersion(version), retry: false});
   if (post.error instanceof ContentKitError && post.error.status === 404) return <li>This purchased post is no longer available. Its payment remains in Billing.</li>;
   if (post.error) return <li><ErrorState error={post.error} retry={() => void post.refetch()} /></li>;
-  return <li><Link to={postByIDPath(id)}>{post.data?.title || "Purchased post"}</Link>{post.data?.state === "deleted" && <Badge variant="outline">Deleted by its creator</Badge>}</li>;
+  return <li><Link to={`${postByIDPath(id)}?v=${encodeURIComponent(version)}`}>{post.data?.title || "Purchased post"}</Link>{post.data?.state === "deleted" && <Badge variant="outline">Deleted by its creator</Badge>}</li>;
 }
 
 function MyChannels() {
