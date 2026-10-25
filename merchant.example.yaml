@@ -8,8 +8,7 @@ psps:
     rail: stripe
     environment: test
     account_id: acct_... # the Stripe account id
-    settings:
-      publishable_key: pk_test_... # in-page card entry (Stripe Elements)
+    publishable_key: pk_test_... # in-page card entry (Stripe Elements)
     secrets:
       secret_key: sk_test_... # or rk_test_
       webhook_signing_secret: whsec_... # from task stripe:listen
@@ -17,11 +16,9 @@ psps:
   #   rail: nmi
   #   environment: test # a gateway account in test mode; sandbox for sandbox.nmi.com
   #   gateway_id: "000000" # the NMI dashboard's "Gateway ID"
-  #   settings:
-  #     tokenization_key: your-public-tokenization-key # Collect.js
+  #   tokenization_key: your-public-tokenization-key # Collect.js
   #   secrets:
   #     security_key: your-test-mode-security-key
   #     webhook_signing_secret: your-webhook-signing-key
 # With several PSPs, the one new purchases and cards use:
-# settings:
-#   checkout_routing: [{prefer: [stripe]}]
+# psp_routing: [{prefer: [stripe]}]

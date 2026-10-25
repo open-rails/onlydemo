@@ -49,18 +49,19 @@ adding it there. Each PSP declares its `environment` (`test` or `sandbox`;
 startup refuses `live`), and OpenRails verifies it with the provider. The
 browser receives OpenRails's browser-safe PSP config and `@openrails/billing-ui`
 picks each flow (Collect.js, Stripe Elements, hosted redirect); there is no
-provider-specific code here. With several PSPs, `settings.checkout_routing`
+provider-specific code here. With several PSPs, the merchant-level `psp_routing`
 picks the one for new purchases and new cards; the others keep serving their
 existing cards and subscriptions. Buyers see one payment modal: saved cards,
 an inline new card (always saved), one Pay button.
 
 | Provider | `merchant.yaml` |
 | --- | --- |
-| Stripe | `environment: test`, `account_id`; secrets `secret_key` (`sk_test_`/`rk_test_`), `webhook_signing_secret`; setting `publishable_key` (`pk_test_`, for in-page card entry) |
-| NMI | `environment` (`test` for a gateway account in test mode, `sandbox` for sandbox.nmi.com), `gateway_id` (gateway ID); secrets `security_key`, `webhook_signing_secret`; settings `tokenization_key`, optional `tokenization_url` |
+| Stripe | `environment: test`, `account_id`; secrets `secret_key` (`sk_test_`/`rk_test_`), `webhook_signing_secret`; field `publishable_key` (`pk_test_`, for in-page card entry) |
+| NMI | `environment` (`test` for a gateway account in test mode, `sandbox` for sandbox.nmi.com), `gateway_id` (gateway ID); secrets `security_key`, `webhook_signing_secret`; fields `tokenization_key`, optional `tokenization_url` |
 
-Declared PSP settings seed a new database; an existing PSP row keeps its stored
-settings.
+PSP fields sit directly beside `rail`, `environment` and `secrets`; there is no
+`settings` wrapper in the merchant YAML. The example follows OpenRails' native
+merchant declaration schema.
 
 `PROVIDER_WRITE_MODE` defaults to `full` for sandbox payment demos. Set it to
 `readonly` for content-only development or migration verification: OpenRails
