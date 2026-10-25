@@ -24,8 +24,8 @@ importers:
         specifier: 0.263.1
         version: 0.263.1(@date-fns/tz@1.5.0)(@tanstack/react-query@5.103.2(react@19.3.0))(@types/react@19.3.0)(date-fns@4.4.0)(react-dom@19.3.0(react@19.3.0))(react-is@16.13.1)(react@19.3.0)(redux@5.0.1)
       '@openrails/contentkit-ui':
-        specifier: 0.126.0
-        version: 0.126.0(@date-fns/tz@1.5.0)(@types/react@19.3.0)(date-fns@4.4.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+        specifier: 0.126.1
+        version: 0.126.1(@date-fns/tz@1.5.0)(@types/react@19.3.0)(date-fns@4.4.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@tanstack/react-query':
         specifier: ^5.100.11
         version: 5.103.2(react@19.3.0)
@@ -471,8 +471,8 @@ packages:
       '@tanstack/react-query':
         optional: true
 
-  '@openrails/contentkit-ui@0.126.0':
-    resolution: {integrity: sha512-JO9fRkMAGKPu2MP1fiNXW3fByVonVZXy6iElbtS5kHjeKNnuo+z8LtJtP7DqxxYbnkkL0iZgMsEQYwyikyc2wQ==}
+  '@openrails/contentkit-ui@0.126.1':
+    resolution: {integrity: sha512-P3KdxfqBwSBYm7J/Ge9udRzu4bseUlspda5rZJtMMB9hVqQw6qzhrnFLnjdT+/FZjnNmG+1NK3m4dqxz0lg9JQ==}
     engines: {node: '>=22.12.0'}
     peerDependencies:
       '@tiptap/core': '>=3.31.4 <4'
@@ -3235,7 +3235,7 @@ snapshots:
       - react-is
       - redux
 
-  '@openrails/contentkit-ui@0.126.0(@date-fns/tz@1.5.0)(@types/react@19.3.0)(date-fns@4.4.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
+  '@openrails/contentkit-ui@0.126.1(@date-fns/tz@1.5.0)(@types/react@19.3.0)(date-fns@4.4.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:
       '@base-ui/react': 1.8.0(@date-fns/tz@1.5.0)(@types/react@19.3.0)(date-fns@4.4.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@dnd-kit/core': 6.3.1(react-dom@19.3.0(react@19.3.0))(react@19.3.0)

@@ -20,7 +20,7 @@ require (
 	github.com/johannesboyne/gofakes3 v1.2.0
 	github.com/joho/godotenv v1.5.1
 	github.com/jonboulle/clockwork v0.5.0
-	github.com/open-rails/contentkit v0.126.0
+	github.com/open-rails/contentkit v0.126.1
 	github.com/open-rails/contentkit/adapters/authkit v0.11.0
 	github.com/open-rails/contentkit/adapters/openrails v0.9.0
 	github.com/open-rails/helpers v1.16.1
