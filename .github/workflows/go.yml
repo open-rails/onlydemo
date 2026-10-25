@@ -65,9 +65,16 @@ jobs:
         timeout-minutes: 3
         run: |
           sudo rm -f /var/lib/man-db/auto-update
+          # The runner's Azure mirror can throttle native package downloads.
+          # Keep Ubuntu's signed repository, using its canonical HTTPS mirror.
+          for source in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+            if [ -f "$source" ]; then
+              sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' "$source"
+            fi
+          done
           sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
       - name: Install libvips (the media worker links it)
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends libvips-dev
       - uses: actions/setup-go@v7.0.0
         with:
