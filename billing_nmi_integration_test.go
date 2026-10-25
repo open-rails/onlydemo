@@ -27,8 +27,10 @@ func TestProviderWritesReadOnly(t *testing.T) {
 	result := buyer.call("POST", "/billing/v1/me/payment-methods", map[string]any{
 		"psp_id": psps.Items[0].ID, "token": h.nmi.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}),
 		"billing_details": map[string]any{"name": "Readonly Buyer"},
-	}, "readonly-card", 503)
-	if result["code"] != billing.CodeProviderWritesDisabled {
+	}, "readonly-card", 502)
+	// The released NMI adapter returns its provider-boundary refusal here.
+	refusal, ok := result["error"].(map[string]any)
+	if !ok || refusal["code"] != billing.CodePaymentProviderRejected {
 		t.Fatalf("readonly result: %v", result)
 	}
 	if count := h.nmi.Mutations(); count != 0 {
