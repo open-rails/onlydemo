@@ -124,8 +124,9 @@ then removes its media and database rows. Billing history and grants remain in O
 ## Media
 
 Images and videos use ContentKit media through the engine
-(`contentkit.go`): one private bucket, an item per post, channel and user
-(`onlydemo/{kind}/{id}/`). Browsers upload straight to the bucket with
+(`contentkit.go`): one bucket, media owned by each post version, channel and user.
+Post media uses the version's storage ID; its parent post is database metadata.
+Browsers upload straight to the bucket with
 `@openrails/contentkit-ui`, presigning and committing at
 `/contentkit/v1/media/upload/*` and reading at `/contentkit/v1/media/*`.
 
@@ -139,10 +140,17 @@ Images and videos use ContentKit media through the engine
   serves a default: `onlydemo media-defaults` renders it into the bucket and
   prints `MEDIA_GATEWAY_DEFAULTS` (`task media:gateway` runs it).
 - **Worker.** `onlydemo media-worker` (`task media:worker`) is ContentKit's
-  media worker with the engine's registry: it places uploads, renders images
-  and encodes video from `<CONTENT_SCHEMA>_media_worker`; readiness and purges
-  come back through the host River fleet. Env: `MEDIA_WORKER_*` and
+  media worker with the engine's registry. Its three processing jobs ingest
+  committed uploads, render images and encode video from
+  `<CONTENT_SCHEMA>_media_worker`. Processors append progress facts directly;
+  the shared editor observes durable state through authenticated SSE and
+  recovers it when reopened. Uploading does not publish a post. The host fleet
+  runs metadata work and the existing content-purge sweep; there are no separate
+  readiness, exposure or media-deletion workers. Env: `MEDIA_WORKER_*` and
   `MEDIA_HOST_RIVER_SCHEMA` (default `RIVER_SCHEMA`).
+- **Access.** `/public` is always public, including previews before publication.
+  `/private` requires a scoped token. Publishing, unpublishing and changing
+  access rules do not move or regenerate media.
 - **Delivery.** Production uses cookie mode: the site and `media.` host share a
   registrable domain (`MEDIA_COOKIE_DOMAIN`) over HTTPS. Locally the app
   (`localhost:5173`) and gateway (`localhost:8090`) share no parent domain, so
@@ -206,8 +214,9 @@ removing the editions. Direct ContentKit API callers must manage their own
 OpenRails catalog lifecycle as well.
 
 Account deletion is recoverable for 30 days. The host's
-`onlydemo_account_events` worker reads AuthKit's retained log every ten seconds
-and cancels renewable billing agreements after deletion, preserving paid
+`onlydemo_account_events` worker reads AuthKit's retained log every ten seconds;
+startup catches up only when overdue. It cancels renewable billing agreements
+after deletion, preserving paid
 access periods and permanent billing grants. Its cursor lives in the River
 schema's `onlydemo_auth_cursor` table and advances only after processing.
 Cancellation is idempotent across retries. An expired cursor fails explicitly

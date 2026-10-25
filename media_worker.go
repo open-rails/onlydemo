@@ -9,9 +9,9 @@ import (
 )
 
 // runMediaWorker runs ContentKit's media worker with the engine's registry
-// until ctx ends: upload placement, image renditions and video encodes.
-// Readiness and purges go back to the host fleet's River schema, where the
-// engine's media jobs run. MEDIA_WORKER_* tune it (worker.Config.TuningFromEnv).
+// until ctx ends: durable ingest, image renditions and video encodes. Processors
+// append progress facts directly; the host fleet runs metadata work and the
+// content-purge sweep. MEDIA_WORKER_* tune it (worker.Config.TuningFromEnv).
 func runMediaWorker(ctx context.Context) error {
 	cfg, pool, err := openDatabase(ctx)
 	if err != nil {
