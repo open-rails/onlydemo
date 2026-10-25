@@ -17,7 +17,7 @@ func (h *harness) assertBillingNotices(t *testing.T, buyer, other peer) {
 	if err != nil || len(source.Events) == 0 {
 		t.Fatalf("source events: %v %v", source, err)
 	}
-	inboxPath := "/auth/v1/notifications/inbox"
+	inboxPath := "/auth/v1/me/notifications"
 	var inbox notify.Page
 	eventually(t, "transactional billing notice", func() bool {
 		decode(t, buyer.call("GET", inboxPath, nil, "", 200), &inbox)
@@ -51,7 +51,7 @@ func (h *harness) assertBillingNotices(t *testing.T, buyer, other peer) {
 	if actionable.Origin.System != "openrails:onlydemo" || actionable.Origin.Scope != h.srv.billing.client.MerchantID().String() || actionable.Recipient.ID != buyer.id {
 		t.Fatalf("unverified recipient mapping: %+v", actionable)
 	}
-	path := "/auth/v1/notifications/" + actionable.ID
+	path := "/auth/v1/me/notifications/" + actionable.ID
 	other.call("PUT", path+"/read", nil, "", 404)
 	h.anonymous("127.0.0.19").call("GET", inboxPath, nil, "", 401)
 	buyer.call("PUT", path+"/read", nil, "", 200)

@@ -173,7 +173,7 @@ Browsers upload straight to the bucket with
 
 ## Notifications
 
-The bell and Account inbox use AuthKit's `/auth/v1/notifications` routes and
+The bell and Account inbox use AuthKit's `/auth/v1/me/notifications` routes and
 AuthUI components. BillingUI supplies billing messages and the demo's fixed
 billing-action links. ContentKit and OpenRails publish or withdraw exact notices
 in the same database transaction as the underlying change. No billing-inbox

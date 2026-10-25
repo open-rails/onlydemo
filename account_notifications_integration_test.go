@@ -1,7 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -13,6 +17,38 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 )
+
+func TestNotificationCutoverOnFreshInbox(t *testing.T) {
+	h := newHarness(t, harnessOptions{})
+	if err := stopJobs(h.ctx, h.srv.jobs); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "notification-adoption.json")
+	if err := adoptBillingNotifications(h.ctx, h.pool, h.cfg, h.srv, path); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot billing.NotificationAdoption
+	if err := json.Unmarshal(encoded, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.MerchantID != h.srv.billing.client.MerchantID() {
+		t.Fatal("cutover snapshot does not identify the persisted merchant")
+	}
+	if err := adoptBillingNotifications(h.ctx, h.pool, h.cfg, h.srv, path); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("cutover overwrote its retained snapshot: %v", err)
+	}
+	retained, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(retained, encoded) {
+		t.Fatalf("retained snapshot changed: %v", err)
+	}
+	if err := adoptBillingNotifications(h.ctx, h.pool, h.cfg, h.srv, filepath.Join(t.TempDir(), "retry.json")); err != nil {
+		t.Fatalf("repeat cutover failed: %v", err)
+	}
+}
 
 func TestAccountNotificationAdoption(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
@@ -57,9 +93,15 @@ func TestAccountNotificationAdoption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := "/auth/v1/notifications/" + receipt.ID
+	path := "/auth/v1/me/notifications/" + receipt.ID
+	var own notify.Item
+	decode(t, user.call("GET", path, nil, "", 200), &own)
+	if own.ID != receipt.ID || own.Recipient.ID != user.id {
+		t.Fatalf("native route did not return the owner's receipt: %+v", own)
+	}
+	other.call("GET", path, nil, "", 404)
 	other.call("PUT", path+"/read", nil, "", 404)
-	h.anonymous("127.0.0.23").call("GET", "/auth/v1/notifications/inbox", nil, "", 401)
+	h.anonymous("127.0.0.23").call("GET", "/auth/v1/me/notifications", nil, "", 401)
 	user.call("PUT", path+"/read", nil, "", 200)
 	var archived notify.Item
 	decode(t, user.call("PUT", path+"/dismiss", nil, "", 200), &archived)
