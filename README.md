@@ -1,7 +1,7 @@
 # OnlyDemo
 
 A React/Fiber creator app: creators run channels and publish posts on them.
-ContentKit 0.126 owns content, channel entities and media. AuthKit handles
+ContentKit 0.127 owns content, channel entities and media. AuthKit handles
 people and publishing roles; OpenRails owns products, prices, purchases,
 memberships and payment history. [The integration guide](docs/contentkit-cutover.md)
 describes the ownership boundaries and upgrade procedure.

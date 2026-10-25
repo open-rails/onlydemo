@@ -8,9 +8,9 @@ require (
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/knadh/koanf/providers/env/v2 v2.0.1
 	github.com/knadh/koanf/v2 v2.3.6
-	github.com/open-rails/authkit v1.35.6
+	github.com/open-rails/authkit v1.39.0
 	github.com/open-rails/migratekit v1.11.2 // indirect
-	github.com/open-rails/openrails v0.263.1
+	github.com/open-rails/openrails v0.266.0
 	github.com/riverqueue/river v0.49.0
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.49.0 // indirect
 )
@@ -20,10 +20,11 @@ require (
 	github.com/johannesboyne/gofakes3 v1.2.0
 	github.com/joho/godotenv v1.5.1
 	github.com/jonboulle/clockwork v0.5.0
-	github.com/open-rails/contentkit v0.126.1
-	github.com/open-rails/contentkit/adapters/authkit v0.11.0
-	github.com/open-rails/contentkit/adapters/openrails v0.9.0
-	github.com/open-rails/helpers v1.16.1
+	github.com/open-rails/contentkit v0.127.0
+	github.com/open-rails/contentkit/adapters/authkit v0.12.0
+	github.com/open-rails/contentkit/adapters/openrails v0.10.0
+	github.com/open-rails/helpers v1.18.0
+	github.com/open-rails/openrails/adapters/authkit v0.266.0
 	github.com/riverqueue/river/rivertype v0.49.0
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1
