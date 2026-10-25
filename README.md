@@ -173,13 +173,34 @@ Browsers upload straight to the bucket with
 
 ## Notifications
 
-The bell and Account inbox use `/contentkit/v1/notifications`. ContentKit's
-`contentkit_openrails_inbox_sync` worker reads OpenRails's retained event log,
-verifies shared UUIDs and the configured AuthKit issuer, then commits inbox
-receipts and its cursor together. It registers no source consumer and sends
-no ACK. The standard worker imports actionable billing lifecycle notices;
-optional successful-charge receipts are not imported. Local read/archive
-state survives replays and account purge fences delayed deliveries.
+The bell and Account inbox use AuthKit's `/auth/v1/notifications` routes and
+AuthUI components. BillingUI supplies billing messages and the demo's fixed
+billing-action links. ContentKit and OpenRails publish or withdraw exact notices
+in the same database transaction as the underlying change. No billing-inbox
+poller runs. Successful-charge receipts are not enabled by default.
+
+The existing inbox stays in `CONTENT_SCHEMA`, under `contentkit:onlydemo`.
+Its account tenant, merchant UUID, catalog identity, receipt IDs and local
+read/archive state are retained. OpenRails first resolves its declared merchant;
+AuthKit then binds that exact legacy notification origin. The directory and
+notification binding refuse calls until composition finishes, before any worker
+or HTTP handler starts. AuthKit's optional inbox migration precedes ContentKit's
+comment-receipt adoption. Creator channel roles and entitlements are unchanged.
+
+For an existing installation, stop the old API and workers, retain a restorable
+database backup, then run the explicit handoff before starting the new version:
+
+```sh
+onlydemo migrate-notifications --snapshot /durable/path/onlydemo-notifications.json
+```
+
+The snapshot path must be new. The command drains the existing selected billing
+notices once, saves OpenRails's ordering/adoption snapshot, preserves read/archive
+state through AuthKit's native adoption API, and retires only this demo's old
+inbox-sync jobs. Retain the snapshot with billing backups. Terminal job history
+and the general event log remain intact. Normal startup does not run this handoff.
+Full account purge fences delayed delivery; app-only content erasure cannot remove
+account-owned billing notices.
 
 ## Buying and membership
 

@@ -140,6 +140,10 @@ func newContentKit(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *ap
 	if err != nil {
 		return nil, err
 	}
+	notifications, err := auth.client.Notifications("contentkit")
+	if err != nil {
+		return nil, err
+	}
 	return contentkit.New(ctx, ck, contentkit.Deps{Postgres: pool, Auth: auth.client.Authenticator(), Users: auth.client.UserInfo(),
-		Scopes: ckauthkit.Scopes(auth.client), Billing: ckopenrails.Billing(billing.client), Store: store})
+		Scopes: ckauthkit.Scopes(auth.client), Billing: ckopenrails.Billing(billing.client), Store: store, Notifications: notifications})
 }

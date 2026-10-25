@@ -11,7 +11,8 @@ import (
 )
 
 // initializeDatabase applies the host fleet and its destination-owned account
-// event cursor. AuthKit, OpenRails and ContentKit migrate their own in New.
+// event cursor. OpenRails and AuthKit migrate in New; AuthKit's optional inbox
+// is ready before ContentKit migrates and adopts its existing comment receipts.
 func initializeDatabase(ctx context.Context, cfg Config, pool *pgxpool.Pool) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()

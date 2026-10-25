@@ -3,24 +3,23 @@ package main
 import (
 	"testing"
 
-	"github.com/open-rails/contentkit/notification"
+	"github.com/open-rails/authkit/notify"
 	"github.com/open-rails/contentkit/signal"
-	"github.com/open-rails/helpers/notify"
 	"github.com/open-rails/openrails/billing"
 )
 
-// assertBillingNotices follows real sandbox billing facts into ContentKit's
+// assertBillingNotices follows real sandbox billing facts into AuthKit's
 // authenticated inbox, then proves the local receipt survives replay and
-// reload, and that erasure fences the inbox.
+// reload, and that app-only erasure preserves account-owned billing notices.
 func (h *harness) assertBillingNotices(t *testing.T, buyer, other peer) {
 	t.Helper()
 	source, err := h.srv.billing.client.ListEvents(h.ctx, billing.EventQuery{Limit: 100})
 	if err != nil || len(source.Events) == 0 {
 		t.Fatalf("source events: %v %v", source, err)
 	}
-	inboxPath := contentkitPrefix + "/v1/notifications/inbox"
+	inboxPath := "/auth/v1/notifications/inbox"
 	var inbox notify.Page
-	eventually(t, "billing inbox import", func() bool {
+	eventually(t, "transactional billing notice", func() bool {
 		decode(t, buyer.call("GET", inboxPath, nil, "", 200), &inbox)
 		for _, item := range inbox.Items {
 			if item.ActionRequested {
@@ -49,17 +48,26 @@ func (h *harness) assertBillingNotices(t *testing.T, buyer, other peer) {
 	if actionable.Status != notify.StatusNotice {
 		t.Fatalf("historical request became local workflow: %+v", actionable)
 	}
-	if actionable.Origin.Subject != buyer.id || actionable.Recipient.ID != buyer.id {
+	if actionable.Origin.System != "openrails:onlydemo" || actionable.Origin.Scope != h.srv.billing.client.MerchantID().String() || actionable.Recipient.ID != buyer.id {
 		t.Fatalf("unverified recipient mapping: %+v", actionable)
 	}
-	path := contentkitPrefix + "/v1/notifications/" + actionable.ID
+	path := "/auth/v1/notifications/" + actionable.ID
 	other.call("PUT", path+"/read", nil, "", 404)
 	h.anonymous("127.0.0.19").call("GET", inboxPath, nil, "", 401)
 	buyer.call("PUT", path+"/read", nil, "", 200)
 	var archived notify.Item
 	decode(t, buyer.call("PUT", path+"/dismiss", nil, "", 200), &archived)
-	replayed, err := h.srv.content.Client().PostNotificationsPublish(h.ctx, notification.Publication{Notifications: []notify.Input{actionable.Input}})
-	if err != nil || len(replayed.Items) != 1 || replayed.Items[0].Revision != archived.Revision || replayed.Items[0].ReadAt == nil || replayed.Items[0].DismissedAt == nil {
+	sink, err := h.srv.auth.client.Notifications("openrails")
+	if err != nil {
+		t.Fatal(err)
+	}
+	publication := notify.Publication{RecipientID: buyer.id, ID: actionable.Origin.ID, Revision: actionable.ProducerRevision,
+		Kind: actionable.Kind, Data: actionable.Data, CreatedAt: actionable.CreatedAt, ActionRequested: actionable.ActionRequested, Severity: actionable.Severity}
+	if err := sink.Publish(h.ctx, []notify.Publication{publication}); err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := h.srv.auth.client.GetNotification(h.ctx, buyer.id, actionable.ID)
+	if err != nil || replayed.Revision != archived.Revision || replayed.ReadAt == nil || replayed.DismissedAt == nil {
 		t.Fatalf("replay changed local receipt: %+v %v", replayed, err)
 	}
 	var restoredPage notify.Page
@@ -69,10 +77,11 @@ func (h *harness) assertBillingNotices(t *testing.T, buyer, other peer) {
 	}
 	buyer.call("DELETE", path+"/dismiss", nil, "", 200)
 	buyer.call("DELETE", path+"/read", nil, "", 200)
-	if report, err := h.srv.content.EraseSubjects(h.ctx, []signal.Subject{{UserID: buyer.id}}); err != nil || !report.Complete() {
+	if report, err := h.srv.content.EraseAppSubjects(h.ctx, []signal.Subject{{UserID: buyer.id}}); err != nil || !report.Complete() {
 		t.Fatalf("erasure: %+v %v", report, err)
 	}
-	if again, err := h.srv.content.Client().PostNotificationsPublish(h.ctx, notification.Publication{Notifications: []notify.Input{actionable.Input}}); err != nil || len(again.Items) != 0 {
-		t.Fatalf("erased receipt recreated: %+v %v", again, err)
+	// Erasing this app's content cannot erase the account's billing notices.
+	if _, err := h.srv.auth.client.GetNotification(h.ctx, buyer.id, actionable.ID); err != nil {
+		t.Fatalf("content erasure removed an account-owned billing notice: %v", err)
 	}
 }

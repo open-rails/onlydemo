@@ -33,9 +33,6 @@ const titles: Partial<Record<ContentKitOperation, string>> = {
   "slot.decode": "Couldn't open the image",
   "slot.save": "Couldn't save the image",
   "slot.remove": "Couldn't remove the image",
-  "notifications.load": "Couldn't load notifications",
-  "notifications.read": "Couldn't update the notification",
-  "notifications.dismiss": "Couldn't archive the notification",
 };
 
 /** ContentKit's client, URLs and look for the whole app; media failures are toasted. */

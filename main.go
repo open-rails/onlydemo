@@ -15,6 +15,7 @@ import (
 	authkitfiber "github.com/open-rails/authkit/adapters/fiber"
 	"github.com/open-rails/contentkit"
 	"github.com/open-rails/contentkit/access"
+	"github.com/open-rails/openrails/billing"
 	"github.com/riverqueue/river"
 )
 
@@ -68,7 +69,7 @@ func withAuth(ctx context.Context, action func(*appAuth) error) error {
 		return err
 	}
 	defer pool.Close()
-	authService, err := newAuth(ctx, config, pool)
+	authService, err := newAuth(ctx, config, pool, billing.MerchantID{})
 	if err != nil {
 		return fmt.Errorf("initialize authkit: %w", err)
 	}
@@ -124,7 +125,6 @@ type server struct {
 	content  *contentkit.Engine
 	ckRoutes http.Handler
 	jobs     *river.Client[pgx.Tx]
-	notices  *notifications
 	app      *fiber.App
 	closers  []func()
 }
@@ -145,14 +145,21 @@ func compose(ctx context.Context, config Config, pool *pgxpool.Pool, opts billin
 			s.Close()
 		}
 	}()
-	if s.auth, err = newAuth(ctx, config, pool); err != nil {
-		return nil, fmt.Errorf("initialize authkit: %w", err)
-	}
-	s.closers = append(s.closers, s.auth.Close)
-	if s.billing, err = newBilling(ctx, config, pool, s.auth, opts); err != nil {
+	accounts := &billingAccounts{}
+	if s.billing, err = newBilling(ctx, config, pool, accounts, opts); err != nil {
 		return nil, fmt.Errorf("initialize OpenRails: %w", err)
 	}
 	s.closers = append(s.closers, func() { _ = s.billing.Close(context.Background()) })
+	if s.auth, err = newAuth(ctx, config, pool, s.billing.client.MerchantID()); err != nil {
+		return nil, fmt.Errorf("initialize authkit: %w", err)
+	}
+	// Billing closes before the account directory it reads. The earlier closer
+	// already covers an AuthKit construction failure.
+	s.closers = append([]func(){s.auth.Close}, s.closers...)
+	if err = accounts.bind(s.auth.client, s.billing.client.MerchantID(), config.AuthIssuer); err != nil {
+		return nil, fmt.Errorf("bind billing accounts: %w", err)
+	}
+	s.auth.billing = s.billing
 	if s.content, err = newContentKit(ctx, config, pool, s.auth, s.billing); err != nil {
 		return nil, fmt.Errorf("initialize ContentKit: %w", err)
 	}
@@ -176,10 +183,7 @@ func startServer(ctx context.Context, config Config, pool *pgxpool.Pool, opts bi
 			s.Close()
 		}
 	}()
-	if s.notices, err = newNotifications(ctx, config, s.billing, s.auth, s.content); err != nil {
-		return nil, fmt.Errorf("initialize notifications: %w", err)
-	}
-	if s.jobs, err = newJobs(ctx, pool, config, s.auth, s.billing, s.content, s.notices); err != nil {
+	if s.jobs, err = newJobs(ctx, pool, config, s.auth, s.billing, s.content); err != nil {
 		return nil, fmt.Errorf("compose application jobs: %w", err)
 	}
 	s.closers = append(s.closers, func() {

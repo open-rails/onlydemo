@@ -77,7 +77,7 @@ func (a *appAuth) Close() {
 }
 
 // newAuth builds AuthKit; New creates or upgrades its tables.
-func newAuth(ctx context.Context, config Config, pool *pgxpool.Pool) (*appAuth, error) {
+func newAuth(ctx context.Context, config Config, pool *pgxpool.Pool, merchant billing.MerchantID) (*appAuth, error) {
 	a := &appAuth{}
 	keys, totpKey, err := authKeys(config.AuthKeysPath)
 	if err != nil {
@@ -85,6 +85,7 @@ func newAuth(ctx context.Context, config Config, pool *pgxpool.Pool) (*appAuth, 
 	}
 	client, err := authkit.New(ctx, authkit.Config{
 		DefaultTenantID: config.AuthTenantID,
+		Notifications:   notificationConfig(config, merchant),
 		Database:        authkit.DatabaseConfig{Schema: strings.TrimSpace(config.AuthSchema), RiverSchema: riverSchema(config)},
 		HTTP:            &authkit.HTTPConfig{DirectPeerIP: true, APIPath: "/auth", RefreshCookie: true},
 		Roles:           rbac,

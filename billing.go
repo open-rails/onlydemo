@@ -31,11 +31,12 @@ type billingOptions struct {
 
 // newBilling runs OpenRails over the merchant's non-live PSPs (loadConfig
 // refuses a live one). New creates or upgrades OpenRails' tables.
-func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAuth, options billingOptions) (*billingService, error) {
+func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, accounts *billingAccounts, options billingOptions) (*billingService, error) {
 	if pool == nil {
 		return nil, errors.New("billing requires the host PostgreSQL pool")
 	}
-	deps := openrails.Deps{Postgres: pool, UserInfo: auth.client.UserInfo()}
+	deps := openrails.Deps{Postgres: pool, UserInfo: accounts,
+		Notifications: &openrails.NotificationChannel{Sink: accounts, Recipient: accounts.recipient}}
 	merchant := cfg.Merchant
 	merchant.Issuer = cfg.AuthIssuer
 	if options.Test != nil {
@@ -57,10 +58,7 @@ func newBilling(ctx context.Context, cfg Config, pool *pgxpool.Pool, auth *appAu
 		_ = engine.Close(ctx)
 		return nil, err
 	}
-	b := &billingService{engine: engine, client: client}
-	// This assignment precedes shared-fleet startup and HTTP publication.
-	auth.billing = b
-	return b, nil
+	return &billingService{engine: engine, client: client}, nil
 }
 
 func billingSchema(cfg Config) string {
