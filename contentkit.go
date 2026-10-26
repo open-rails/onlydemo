@@ -77,11 +77,10 @@ func contentKitConfig(cfg Config) (contentkit.Config, error) {
 
 // mediaKinds are posts' mixed media and channels' image slots.
 func mediaKinds(ck contentkit.Config) ([]media.Kind, error) {
-	gk, ok := ck.Content.EntityKinds[kindChannel]
-	if !ok {
-		return nil, errors.New("contentkit.yaml: the channel entity kind is required")
+	if ck.Content.Channels == nil {
+		return nil, errors.New("contentkit.yaml: channels must be configured")
 	}
-	channel := media.EntityKind(kindChannel, gk)
+	channel := media.ChannelKind(*ck.Content.Channels)
 	for i := range channel.Public {
 		if channel.Public[i].Name == media.CoverPreset {
 			channel.Public[i].Widths = []int{640, 1280, 1920}

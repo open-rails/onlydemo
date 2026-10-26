@@ -33,16 +33,16 @@ var (
 	// the channel's posts, settings:manage the channel and host catalog,
 	// media:write its images. Owners hold all; editors write posts.
 	channelPersona      = rbac.Persona(kindChannel)
-	channelPerms        = channelPersona.Declare(access.EntityPermissions(kindChannel)...)
+	channelPerms        = channelPersona.Declare(access.ChannelPermissions()...)
 	channelSettingsRead = channelPersona.Permission("settings", "read")
 	channelOwnerRole    = channelPersona.Owner
-	channelEditorRole   = channelPersona.Role("editor", channelPerm(access.EntityContentWrite(kindChannel)), channelSettingsRead, channelPersona.Members.Read)
+	channelEditorRole   = channelPersona.Role("editor", channelPerm(access.ChannelContentWrite), channelSettingsRead, channelPersona.Members.Read)
 
 	// Site admins are ContentKit staff and run billing for customers.
 	customersRead   = rbac.Root.Permission(billing.RootCustomerRead.Resource(), billing.RootCustomerRead.Action())
 	customersUpdate = rbac.Root.Permission(billing.RootCustomerManage.Resource(), billing.RootCustomerManage.Action())
 	adminRole       = rbac.Root.Role("admin", append([]iam.Grant{customersRead, customersUpdate},
-		staffGrants(access.ContentWrite, access.ContentViewRestricted, access.EntitiesWrite,
+		staffGrants(access.ContentWrite, access.ContentViewRestricted, access.EntitiesWrite, access.ChannelsWrite,
 			access.CommentsModerate, access.CommentsBan, access.ModerationReview, access.AvatarsWrite)...)...)
 )
 

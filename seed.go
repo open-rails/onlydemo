@@ -72,15 +72,15 @@ func seedWith(ctx context.Context, base string, a *appAuth, out io.Writer) error
 		switch creator.membership {
 		case "":
 		case "free":
-			err = c.call(ctx, "PUT", "/api/v1/products/entities/"+channel, map[string]any{"amount": "0"}, nil)
+			err = c.call(ctx, "PUT", "/api/v1/products/channels/"+channel, map[string]any{"amount": "0"}, nil)
 		default:
-			err = c.call(ctx, "PUT", "/api/v1/products/entities/"+channel, map[string]any{"amount": creator.membership, "renew_hours": 720}, nil)
+			err = c.call(ctx, "PUT", "/api/v1/products/channels/"+channel, map[string]any{"amount": creator.membership, "renew_hours": 720}, nil)
 		}
 		if err != nil {
 			return fmt.Errorf("%s membership: %w", creator.channel, err)
 		}
 		var existing []struct{ Title string }
-		if err = c.call(ctx, "GET", contentkitPrefix+"/v1/manage/post?limit=100&owner_group="+url.QueryEscape(channel), nil, &existing); err != nil {
+		if err = c.call(ctx, "GET", contentkitPrefix+"/v1/manage/post?limit=100&channel_id="+url.QueryEscape(channel), nil, &existing); err != nil {
 			return fmt.Errorf("%s posts: %w", creator.channel, err)
 		}
 		seeded := map[string]bool{}
@@ -223,31 +223,31 @@ func (c *apiClient) signIn(ctx context.Context, username string) error {
 // channel creates the viewer's channel (ContentKit provisions its AuthKit
 // group with the viewer as owner), or reuses the one they own.
 func (c *apiClient) channel(ctx context.Context, handle, name string) (string, error) {
-	var created []struct{ ID string }
-	err := c.call(ctx, "POST", contentkitPrefix+"/v1/entities", []map[string]any{{"kind": kindChannel, "slug": handle,
-		"names": []map[string]string{{"language": "en", "kind": "name", "name": name}}}}, &created)
-	if err == nil && len(created) == 1 {
-		return created[0].ID, nil
+	var created struct{ ID string }
+	err := c.call(ctx, "POST", contentkitPrefix+"/v1/channels", map[string]any{"slug": handle,
+		"names": []map[string]string{{"language": "en", "kind": "name", "name": name}}}, &created)
+	if err == nil && created.ID != "" {
+		return created.ID, nil
 	}
 	var page struct {
-		Groups []struct{ ID string } `json:"entities"`
+		Channels []struct{ ID string } `json:"channels"`
 	}
-	if lookup := c.call(ctx, "GET", contentkitPrefix+"/v1/entities?kind=channel&slug="+url.QueryEscape(handle), nil, &page); lookup != nil || len(page.Groups) != 1 {
+	if lookup := c.call(ctx, "GET", contentkitPrefix+"/v1/channels?slug="+url.QueryEscape(handle), nil, &page); lookup != nil || len(page.Channels) != 1 {
 		return "", err
 	}
-	var g struct {
+	var channel struct {
 		OwnerUserID string `json:"owner_user_id"`
 	}
-	if lookup := c.call(ctx, "GET", contentkitPrefix+"/v1/entities/"+page.Groups[0].ID, nil, &g); lookup != nil || g.OwnerUserID != c.id {
+	if lookup := c.call(ctx, "GET", contentkitPrefix+"/v1/channels/"+page.Channels[0].ID, nil, &channel); lookup != nil || channel.OwnerUserID != c.id {
 		return "", err
 	}
-	return page.Groups[0].ID, nil
+	return page.Channels[0].ID, nil
 }
 
-// post publishes p in channel, with its offer when it sells.
+// post publishes p in channel, with its OpenRails product when it sells.
 func (c *apiClient) post(ctx context.Context, channel string, p seedPost) (string, error) {
 	var created struct{ ID string }
-	if err := c.call(ctx, "POST", contentkitPrefix+"/v1/contents", map[string]any{"kind": kindPost, "owner_group_id": channel,
+	if err := c.call(ctx, "POST", contentkitPrefix+"/v1/contents", map[string]any{"kind": kindPost, "channel_id": channel,
 		"text": map[string]any{"en": map[string]string{"title": p.title, "body": p.body}}, "access": postRule(p.policy, channel)}, &created); err != nil {
 		return "", err
 	}

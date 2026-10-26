@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import type { Card } from "@openrails/contentkit-ui/client";
-import { ContentGrid, EntityAvatar, EntityDirectory, PostCard } from "@openrails/contentkit-ui";
+import { ContentGrid, ChannelAvatar, ChannelDirectory, PostCard, RepostButton } from "@openrails/contentkit-ui";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Add01Icon, Image01Icon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
@@ -12,15 +12,15 @@ import { channelPath, channelsPath, newChannelPath } from "../paths";
 
 // A post card with its channel above it; owner={false} on that channel's own feed.
 export function Post({ card, owner: showOwner = true }: { card: Card; owner?: boolean }) {
-  const owner = showOwner ? card.owner : undefined;
+  const owner = showOwner ? card.channel : undefined;
   return (
     <PostCard
       card={card}
-      owner={showOwner}
+      showChannel={showOwner}
       byline={
         owner && (
           <Link to={channelPath(owner)} className="feed-author">
-            <EntityAvatar entity={owner} className="avatar" />
+            <ChannelAvatar channel={owner} className="avatar" />
             <span>
               <strong>{owner.name}</strong>
               <small>@{owner.slug}</small>
@@ -28,7 +28,7 @@ export function Post({ card, owner: showOwner = true }: { card: Card; owner?: bo
           </Link>
         )
       }
-    />
+    ><RepostButton contentId={card.id} originalChannelId={card.channel?.id} /></PostCard>
   );
 }
 
@@ -98,7 +98,7 @@ export function ChannelsPage() {
         )}
       </div>
       <SiteSearch className="mb-4" />
-      <EntityDirectory kind="channel" layout="grid" sort="newest" letters={false} href={(g) => channelPath(g)} />
+      <ChannelDirectory query={{ sort: "newest" }} href={(g) => channelPath(g)} />
     </>
   );
 }

@@ -1,9 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ContentKitError, type EntityDetail } from "@openrails/contentkit-ui/client";
-import { ContentGrid, EntityBanner, EntityImageEditor } from "@openrails/contentkit-ui";
-import { useCanonicalContent, useEntity } from "@openrails/contentkit-ui/react";
+import { ContentKitError, type Channel } from "@openrails/contentkit-ui/client";
+import { ChannelFeed, ChannelBanner, ChannelImageEditor } from "@openrails/contentkit-ui";
+import { useCanonicalContent, useChannel } from "@openrails/contentkit-ui/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Add01Icon, ArrowRight02Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
@@ -28,7 +28,7 @@ import { ProductSettings } from "../components/product-settings";
 import { channelPath, channelsPath, contentURLs, newPostPath, parseCode } from "../paths";
 
 // A channel's page: ContentKit's banner and membership box, its posts
-// (owner_group), and for its team the AuthKit roster and its settings.
+// (channel_id), and for its team the AuthKit roster and its settings.
 export function ChannelPage() {
   const { code: rawCode = "", language } = useParams();
   const code = parseCode(rawCode);
@@ -41,9 +41,9 @@ export function ChannelPage() {
   const auth = useAuth();
   const [tab, setTab] = useState("posts");
   const id = found.data?.content_kind === "channel" ? found.data.content_id : null;
-  const read = useEntity(id);
+  const read = useChannel(id);
   const roles = useChannelRoles();
-  const group = read.entity;
+  const group = read.channel;
   const role = id ? roles.data?.get(id) : undefined;
   const checkout = useCheckout(group?.name ?? "Creator");
   const userID = auth.user?.id;
@@ -63,7 +63,7 @@ export function ChannelPage() {
   const manage = role === "owner";
   return (
     <>
-      <EntityBanner entity={group} onCheckout={checkout}>
+      <ChannelBanner channel={group} onCheckout={checkout}>
         {role && (
           <Button nativeButton={false} render={<Link to={newPostPath(group.slug)} />}>
             <HugeiconsIcon icon={Add01Icon} data-icon="inline-start" />
@@ -71,7 +71,7 @@ export function ChannelPage() {
           </Button>
         )}
         {group.access?.member && <LeaveFreeMembership id={group.id} />}
-      </EntityBanner>
+      </ChannelBanner>
       <Tabs value={tab} onValueChange={(value) => setTab(String(value))} className="my-4">
         <TabsList variant="line" aria-label="Channel sections" className="w-full">
           <TabsTrigger value="posts">Posts</TabsTrigger>
@@ -80,11 +80,12 @@ export function ChannelPage() {
         </TabsList>
       </Tabs>
       {tab === "posts" && (
-        <ContentGrid
+        <ChannelFeed
+          channelId={group.id}
           className="feed"
           surface="channel"
-          query={{ kind: "post", owner_group: group.id, sort: "newest", mode: "lock" }}
-          renderCard={(card) => <Post card={card} owner={false} />}
+          query={{ mode: "lock" }}
+          renderCard={(card) => <Post card={card} owner={card.channel?.id !== group.id} />}
           empty={
             <EmptyState
               title="No posts yet."
@@ -116,7 +117,7 @@ function LeaveFreeMembership({id}: {id: string}) {
   return <div><Button variant="outline" disabled={busy} onClick={() => {setBusy(true);void request(`/api/v1/memberships/${id}`,{method:"DELETE"}).then(() => {accessChanged();void query.invalidateQueries();}).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Could not leave membership.")).finally(() => setBusy(false));}}>Leave free membership</Button><FormError>{error}</FormError></div>;
 }
 
-function ChannelSettings({ group, onUpdated }: { group: EntityDetail; onUpdated: () => void }) {
+function ChannelSettings({ group, onUpdated }: { group: Channel; onUpdated: () => void }) {
   const navigate = useNavigate();
   const client = useQueryClient();
   const [deleting, setDeleting] = useState(false);
@@ -127,8 +128,8 @@ function ChannelSettings({ group, onUpdated }: { group: EntityDetail; onUpdated:
     setRemoving(true);
     setError("");
     try {
-      await request(`/api/v1/products/entities/${group.id}`, {method: "DELETE"});
-      await contentkit.entities.remove(group.id);
+      await request(`/api/v1/products/channels/${group.id}`, {method: "DELETE"});
+      await contentkit.channels.remove(group.id);
       await client.invalidateQueries();
       navigate("/me?tab=channels");
     } catch (cause) {
@@ -145,11 +146,11 @@ function ChannelSettings({ group, onUpdated }: { group: EntityDetail; onUpdated:
           <CardDescription>The cover across the channel's page and its avatar.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
-          <EntityImageEditor entity={group} slot="cover" />
-          <EntityImageEditor entity={group} slot="avatar" />
+          <ChannelImageEditor channel={group} slot="cover" />
+          <ChannelImageEditor channel={group} slot="avatar" />
         </CardContent>
       </Card>
-      <ProductSettings kind="entities" id={group.id} onUpdated={onUpdated} />
+      <ProductSettings kind="channels" id={group.id} onUpdated={onUpdated} />
       <Card>
         <CardHeader>
           <CardTitle>Delete channel</CardTitle>
@@ -206,15 +207,12 @@ export function NewChannelPage() {
     setError("");
     const data = new FormData(event.currentTarget);
     try {
-      const [channel] = await contentkit.entities.create([
-        {
-          kind: "channel",
+      const channel = await contentkit.channels.create({
           slug: String(data.get("slug")).trim().toLowerCase(),
           names: [{ language: "en", kind: "name", name: String(data.get("name")).trim() }],
-        },
-      ]);
+      });
       await client.invalidateQueries();
-      const target = thenPost ? newPostPath(channel.slug) : channelPath(await contentkit.entities.get(channel.id));
+      const target = thenPost ? newPostPath(channel.slug) : channelPath(await contentkit.channels.get(channel.id));
       navigate(target, { replace: thenPost });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Channel could not be created.");

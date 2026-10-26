@@ -3,21 +3,18 @@
 tenant: onlydemo
 content:
   languages: [en]
-  kinds:
+  channels:
+    creation: users
+    route: c
+    entitled: true
+    # Per editor: 60 files an hour, 100 GiB a day; 500 GiB stored per channel.
+    uploads: {files_per_hour: 60, bytes_per_day: 107374182400, quota_bytes: 536870912000}
+  content_kinds:
     # A creator post: one hidden version holding mixed images and videos,
-    # owned by its channel (owner_group_id), never a member of it.
+    # owned by one primary channel across all versions.
     post:
+      channel: {required: true}
       route: p
       presentation: post
       versions: {languages: one, hidden: true}
       sort: newest
-  entity_kinds:
-    # A creator channel: owned by a user, governed by its AuthKit group
-    # (auth_scope), sold as a membership; cover and avatar image slots.
-    channel:
-      route: c
-      owner: user
-      entitled: true
-      auth_scope: true
-      # Per editor: 60 files an hour, 100 GiB a day; 500 GiB stored per channel.
-      uploads: {files_per_hour: 60, bytes_per_day: 107374182400, quota_bytes: 536870912000}

@@ -60,7 +60,7 @@ function Provider({ navigate, children }: { navigate: Navigate; children: ReactN
   // A purchase, join or edit changes what the app's queries show.
   const onChange = useCallback(
     (change: ContentKitChange) => {
-      if (change.type === "access.changed" || change.type === "entities.changed" || change.type === "content.changed") void client.invalidateQueries();
+      if (change.type === "access.changed" || change.type === "entities.changed" || change.type === "channels.changed" || change.type === "channel.reposts.changed" || change.type === "content.changed") void client.invalidateQueries();
     },
     [client],
   );

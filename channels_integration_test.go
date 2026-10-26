@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// TestChannelsOnContentKit covers entity ownership and editorial permissions,
+// TestChannelsOnContentKit covers channel ownership and editorial permissions,
 // native OpenRails catalog edits/free grants, protected media, and deletion.
 func TestChannelsOnContentKit(t *testing.T) {
 	h := newHarness(t, harnessOptions{minio: true})
@@ -25,12 +25,18 @@ func TestChannelsOnContentKit(t *testing.T) {
 	if post := model["kinds"].(map[string]any)[kindPost].(map[string]any); post["presentation"] != "post" {
 		t.Fatalf("post kind: %v", post)
 	}
-	if ch := model["entity_kinds"].(map[string]any)[kindChannel].(map[string]any); ch["owner"] != "user" || ch["auth_scope"] != true {
+	if ch := model["channels"].(map[string]any); ch["creation"] != "users" {
 		t.Fatalf("channel group kind: %v", ch)
+	}
+	// No fixed owner is configured: startup must not invent a staff blog or
+	// any other channel before a creator explicitly makes one.
+	initial := fan.call("GET", contentkitPrefix+"/v1/channels", nil, "", 200)
+	if rows, exists := initial["channels"]; !exists || rows != nil && len(rows.([]any)) != 0 {
+		t.Fatalf("unconfigured channels: %v", initial)
 	}
 
 	id := owner.channel("studio", "Studio")
-	g := fan.call("GET", contentkitPrefix+"/v1/entities/"+id, nil, "", 200)
+	g := fan.call("GET", contentkitPrefix+"/v1/channels/"+id, nil, "", 200)
 	if g["name"] != "Studio" || g["owner_user_id"] != owner.id || g["auth_scope"] != id {
 		t.Fatalf("channel group: %v", g)
 	}
@@ -38,8 +44,8 @@ func TestChannelsOnContentKit(t *testing.T) {
 		roles, err := h.srv.auth.client.GroupRoles(ctx, iam.GroupByID(id), []iam.Subject{iam.UserSubject(owner.id)})
 		return err == nil && roles[iam.UserSubject(owner.id)] == channelOwnerRole
 	})
-	fan.call("POST", contentkitPrefix+"/v1/entities", []map[string]any{{"kind": kindChannel, "slug": "studio",
-		"names": []map[string]string{{"language": "en", "kind": "name", "name": "Again"}}}}, "", 409)
+	fan.call("POST", contentkitPrefix+"/v1/channels", map[string]any{"slug": "studio",
+		"names": []map[string]string{{"language": "en", "kind": "name", "name": "Again"}}}, "", 409)
 	owner.call("PUT", "/auth/v1/groups/"+id+"/members/users/"+editor.id, map[string]any{"role": "channel:editor"}, "", 200)
 
 	// A members-only post needs no offer on its channel: it stays locked,
@@ -48,7 +54,7 @@ func TestChannelsOnContentKit(t *testing.T) {
 	if fan.opens(members) || anon.opens(members) || fan.body(members) != "" {
 		t.Fatal("a members-only post in a channel selling no membership is open to non-members")
 	}
-	offer := "/api/v1/products/entities/" + id
+	offer := "/api/v1/products/channels/" + id
 	join := "/api/v1/memberships/" + id
 	fan.call("POST", join, nil, "", 404)
 	fan.call("PUT", offer, map[string]any{"amount": "0"}, "", 403)
@@ -76,7 +82,7 @@ func TestChannelsOnContentKit(t *testing.T) {
 	public, _ := owner.post(id, "Hello", "Everyone reads this", nil)
 	paid, paidVersion := owner.post(id, "Paid", "Buyers read this", map[string]any{"level": "ppv"})
 	editor.post(id, "By the editor", "Hi", nil)
-	fan.call("POST", contentkitPrefix+"/v1/contents", map[string]any{"kind": kindPost, "owner_group_id": id,
+	fan.call("POST", contentkitPrefix+"/v1/contents", map[string]any{"kind": kindPost, "channel_id": id,
 		"text": map[string]any{"en": map[string]string{"title": "Not mine"}}}, "", 403)
 	for _, c := range []struct {
 		who  peer
@@ -94,10 +100,10 @@ func TestChannelsOnContentKit(t *testing.T) {
 	if b := fan.body(members); b != "" {
 		t.Fatalf("a locked post served its body: %q", b)
 	}
-	if c := fan.call("GET", contentkitPrefix+"/v1/contents/"+members, nil, "", 200); c["owner_group_id"] != id || c["title"] != "Members" {
+	if c := fan.call("GET", contentkitPrefix+"/v1/contents/"+members, nil, "", 200); c["channel_id"] != id || c["title"] != "Members" {
 		t.Fatalf("members-only post: %v", c)
 	}
-	feed := anon.call("GET", contentkitPrefix+"/v1/contents?kind=post&mode=lock&owner_group="+id, nil, "", 200)
+	feed := anon.call("GET", contentkitPrefix+"/v1/contents?kind=post&mode=lock&channel_id="+id, nil, "", 200)
 	locked := map[string]bool{}
 	for _, card := range feed["contents"].([]any) {
 		card := card.(map[string]any)
@@ -136,7 +142,7 @@ func TestChannelsOnContentKit(t *testing.T) {
 	}
 
 	// Native OpenRails products grant the stable ContentKit access keys.
-	groupKey, _ := access.EntityKey(tenant, id)
+	groupKey, _ := access.ChannelKey(tenant, id)
 	contentKey, _ := access.VersionKey(tenant, paid, paidVersion)
 	product := func(key access.Key) billing.Product {
 		page, err := h.srv.billing.client.ListProducts(ctx, billing.ProductListParams{Keys: []string{key.String()}})
@@ -147,7 +153,7 @@ func TestChannelsOnContentKit(t *testing.T) {
 	}
 	owner.call("PUT", offer, map[string]any{"amount": "4.99", "renew_hours": 720}, "", 200)
 	fan.groupPrice(id)
-	if a := fan.call("GET", contentkitPrefix+"/v1/entities/"+id, nil, "", 200)["access"].(map[string]any); a["key"] != groupKey.String() ||
+	if a := fan.call("GET", contentkitPrefix+"/v1/channels/"+id, nil, "", 200)["access"].(map[string]any); a["key"] != groupKey.String() ||
 		a["member"] != false {
 		t.Fatalf("group access: %v", a)
 	}
@@ -178,9 +184,9 @@ func TestChannelsOnContentKit(t *testing.T) {
 	anon.call("GET", contentkitPrefix+"/v1/contents/"+public, nil, "", 404)
 
 	// Deleting the channel deletes its group and retires its AuthKit group.
-	fan.call("DELETE", contentkitPrefix+"/v1/entities/"+id, nil, "", 403)
-	owner.call("DELETE", contentkitPrefix+"/v1/entities/"+id, nil, "", 200)
-	fan.call("GET", contentkitPrefix+"/v1/entities/"+id, nil, "", 404)
+	fan.call("DELETE", contentkitPrefix+"/v1/channels/"+id, nil, "", 403)
+	owner.call("DELETE", contentkitPrefix+"/v1/channels/"+id, nil, "", 204)
+	fan.call("GET", contentkitPrefix+"/v1/channels/"+id, nil, "", 404)
 	eventually(t, "the channel's AuthKit group retired", func() bool {
 		g, err := h.srv.auth.client.Group(ctx, iam.GroupByID(id))
 		return err != nil || g.DeletedAt != nil

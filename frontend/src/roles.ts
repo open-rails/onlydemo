@@ -1,49 +1,32 @@
 import { useQuery } from "@tanstack/react-query";
-import type { EntityDetail } from "@openrails/contentkit-ui/client";
-import { request } from "./api";
+import type { MyChannel } from "@openrails/contentkit-ui/client";
 import { contentkit } from "./media";
 import { useAuth } from "./session";
 
 export type ChannelRole = "owner" | "editor";
 
-// The viewer's roles in channels: their AuthKit groups (ContentKit's
-// /me/groups lists only the groups one manages or belongs to).
-export function useChannelRoles() {
+/** ContentKit resolves live AuthKit permissions; channel and group IDs need not match. */
+export function useMyChannels() {
   const { user } = useAuth();
   return useQuery({
-    queryKey: ["channel-roles", user?.id],
+    queryKey: ["my-channels", user?.id],
     enabled: !!user,
     queryFn: async () => {
-      const out = new Map<string, ChannelRole>();
-      let cursor = "";
+      const channels: MyChannel[] = [];
+      let cursor: string | undefined;
       do {
-        const page = await request<{ data: { group: { id: string; persona: string }; role: string }[]; next_cursor?: string }>(
-          `/auth/v1/me/groups?limit=100${cursor ? "&cursor=" + encodeURIComponent(cursor) : ""}`,
-        );
-        for (const m of page.data ?? []) {
-          if (m.group.persona !== "channel") continue;
-          if (m.role === "channel:owner") out.set(m.group.id, "owner");
-          else if (m.role === "channel:editor") out.set(m.group.id, "editor");
-        }
-        cursor = page.next_cursor ?? "";
+        const page = await contentkit.channels.mine({ limit: 100, cursor });
+        channels.push(...page.channels);
+        cursor = page.next_cursor;
       } while (cursor);
-      return out;
+      return channels.filter((channel) => channel.owner || channel.can_post || channel.writer).map((group) => ({ group, role: (group.owner ? "owner" : "editor") as ChannelRole }));
     },
   });
 }
 
-/** The channels the viewer writes in, with their roles. */
-export function useMyChannels() {
-  const roles = useChannelRoles();
-  return useQuery({
-    queryKey: ["my-channels", [...(roles.data?.entries() ?? [])]],
-    enabled: !!roles.data,
-    queryFn: async () => {
-      const ids = [...roles.data!.keys()];
-      const groups = await Promise.all(ids.map((id) => contentkit.entities.get(id).catch(() => null)));
-      return groups.filter((g): g is EntityDetail => !!g).map((group) => ({ group, role: roles.data!.get(group.id)! }));
-    },
-  });
+export function useChannelRoles() {
+  const channels = useMyChannels();
+  return { ...channels, data: channels.data && new Map(channels.data.map(({ group, role }) => [group.id, role])) };
 }
 
 const lastKey = (user: string) => `onlydemo-post-channel:${user}`;

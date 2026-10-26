@@ -36,7 +36,7 @@ func (s *server) mountCommerce(app *fiber.App) {
 
 func (s *server) product(ctx context.Context, key string) (*billing.Product, error) {
 	parsed, err := access.ParseKey(key)
-	if err != nil || parsed.Tenant() != tenant || parsed.Kind() != access.KeyVersion && parsed.Kind() != access.KeyEntity {
+	if err != nil || parsed.Tenant() != tenant || parsed.Kind() != access.KeyVersion && parsed.Kind() != access.KeyChannel {
 		return nil, fiber.ErrBadRequest
 	}
 	// Products keep their immutable billing identity across an entitlement
@@ -80,26 +80,33 @@ func (s *server) saveProduct(c fiber.Ctx) error {
 	required := []string{}
 	var err error
 	switch c.Params("kind") {
-	case "entities":
-		g, e := s.content.Client().GetEntity(c.Context(), id, contentkit.GetEntityQuery{})
+	case "channels":
+		g, e := s.content.Client().GetChannel(c.Context(), id, contentkit.GetChannelQuery{})
 		if e != nil {
 			return fiber.ErrNotFound
 		}
 		channel, name = id, g.Name
-		key, err = access.EntityKey(tenant, id)
+		key, err = access.ChannelKey(tenant, id)
 	case "contents":
 		post, e := s.content.Client().GetContent(c.Context(), id, contentkit.GetContentQuery{})
 		if e != nil {
 			return fiber.ErrNotFound
 		}
-		channel, name = post.OwnerEntityID, post.Title
-		if len(post.Versions) != 1 || post.Versions[0].Access == nil {
+		channel, name = post.ChannelID, post.Title
+		if len(post.Versions) != 1 {
 			return fiber.NewError(409, "A post purchase requires exactly one edition with an access rule")
 		}
 		version := post.Versions[0]
 		key, err = access.VersionKey(tenant, id, version.ID)
-		if version.Access.Level == access.EntityPPV {
-			membership, e := access.EntityKey(tenant, version.Access.Entity)
+		rule := version.Access
+		if post.ChannelID != "" {
+			rule = &post.Access
+		}
+		if rule == nil {
+			return fiber.NewError(409, "The post has no access rule")
+		}
+		if rule.Level == access.ChannelPPV {
+			membership, e := access.ChannelKey(tenant, rule.ChannelID)
 			if e != nil {
 				return e
 			}
@@ -111,9 +118,9 @@ func (s *server) saveProduct(c fiber.Ctx) error {
 	if err != nil {
 		return fiber.ErrBadRequest
 	}
-	permission := access.EntitySettingsManage(kindChannel)
+	permission := access.ChannelSettingsManage
 	if c.Method() == "DELETE" && c.Params("kind") == "contents" {
-		permission = access.EntityContentWrite(kindChannel)
+		permission = access.ChannelContentWrite
 	}
 	allowed, err := s.auth.client.Can(c.Context(), who, iam.GroupByID(channel), channelPerm(permission))
 	if err != nil {
@@ -203,11 +210,11 @@ func (s *server) freeMembership(c fiber.Ctx) error {
 	if !live {
 		return fiber.ErrForbidden
 	}
-	key, err := access.EntityKey(tenant, c.Params("id"))
+	key, err := access.ChannelKey(tenant, c.Params("id"))
 	if err != nil {
 		return fiber.ErrBadRequest
 	}
-	entity, err := s.content.Client().GetEntity(c.Context(), c.Params("id"), contentkit.GetEntityQuery{})
+	entity, err := s.content.Client().GetChannel(c.Context(), c.Params("id"), contentkit.GetChannelQuery{})
 	if err != nil || entity.State != "active" {
 		return fiber.ErrNotFound
 	}
