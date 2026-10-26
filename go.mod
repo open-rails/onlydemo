@@ -20,9 +20,9 @@ require (
 	github.com/johannesboyne/gofakes3 v1.2.0
 	github.com/joho/godotenv v1.5.1
 	github.com/jonboulle/clockwork v0.5.0
-	github.com/open-rails/contentkit v0.129.0
-	github.com/open-rails/contentkit/adapters/authkit v0.12.0
-	github.com/open-rails/contentkit/adapters/openrails v0.10.0
+	github.com/open-rails/contentkit v0.131.0
+	github.com/open-rails/contentkit/adapters/authkit v0.14.0
+	github.com/open-rails/contentkit/adapters/openrails v0.10.2
 	github.com/open-rails/helpers v1.18.0
 	github.com/open-rails/openrails/adapters/authkit v0.268.2
 	github.com/riverqueue/river/rivertype v0.49.0

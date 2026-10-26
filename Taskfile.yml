@@ -45,7 +45,7 @@ tasks:
         go run github.com/open-rails/contentkit/cmd/media-gateway
 
   media:worker:
-    desc: Run durable ingest, image and video processing (`onlydemo media-worker`; needs libvips and ffmpeg); editor progress survives restarts
+    desc: Run durable ingest and image/video derivative processing (`onlydemo media-worker`; needs libvips and ffmpeg); editor progress survives restarts
     cmds:
       - |
         MEDIA_WORKER_THREADS="${MEDIA_WORKER_THREADS:-2}" \

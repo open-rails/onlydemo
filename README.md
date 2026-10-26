@@ -159,8 +159,8 @@ Browsers upload straight to the bucket with
   serves a default: `onlydemo media-defaults` renders it into the bucket and
   prints `MEDIA_GATEWAY_DEFAULTS` (`task media:gateway` runs it).
 - **Worker.** `onlydemo media-worker` (`task media:worker`) is ContentKit's
-  media worker with the engine's registry. Its three processing jobs ingest
-  committed uploads, render images and encode video from
+  media worker with the engine's registry. Its two processing jobs ingest
+  committed uploads and generate required image/video derivatives from
   `<CONTENT_SCHEMA>_media_worker`. Processors append progress facts directly;
   the shared editor observes durable state through authenticated SSE and
   recovers it when reopened. Uploading does not publish a post. The host fleet
@@ -172,8 +172,8 @@ Browsers upload straight to the bucket with
   job copies, verifies, and retires objects in the same operation. Only released
   output is placed in `public` or `private`. The gateway serves `public`
   anonymously and `private` with a token for that exact edition; it rejects
-  every internal folder. Publication is asynchronous, and files become readable
-  individually as their copies complete. Page chapter markers schedule page
+  every internal folder. Publication is asynchronous; the reader snapshot becomes
+  active after all required outputs are copied and verified. Page chapter markers schedule page
   renditions; this demo's standalone mixed-media attachments follow the initial
   post release.
 - **Delivery.** Production uses cookie mode: the site and `media.` host share a
