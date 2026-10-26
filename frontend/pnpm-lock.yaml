@@ -21,8 +21,8 @@ importers:
         specifier: 1.42.0
         version: 1.42.0(@date-fns/tz@1.5.0)(@types/react@19.3.0)(date-fns@4.4.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@openrails/billing-ui':
-        specifier: 0.266.0
-        version: 0.266.0(@date-fns/tz@1.5.0)(@tanstack/react-query@5.103.2(react@19.3.0))(@types/react@19.3.0)(date-fns@4.4.0)(react-dom@19.3.0(react@19.3.0))(react-is@16.13.1)(react@19.3.0)(redux@5.0.1)
+        specifier: 0.268.2
+        version: 0.268.2(@date-fns/tz@1.5.0)(@tanstack/react-query@5.103.2(react@19.3.0))(@types/react@19.3.0)(date-fns@4.4.0)(react-dom@19.3.0(react@19.3.0))(react-is@16.13.1)(react@19.3.0)(redux@5.0.1)
       '@openrails/contentkit-ui':
         specifier: 0.128.1
         version: 0.128.1(@date-fns/tz@1.5.0)(@types/react@19.3.0)(date-fns@4.4.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -460,8 +460,8 @@ packages:
       '@solana/wallet-adapter-react':
         optional: true
 
-  '@openrails/billing-ui@0.266.0':
-    resolution: {integrity: sha512-bzdizg0kHJXEnRMdLZRROzAL/4r/DTQqiq9XVoNG8u3APYPFX2mZJj0n8snmtEcgMaCphWPDOWi21IPtz9bDcw==}
+  '@openrails/billing-ui@0.268.2':
+    resolution: {integrity: sha512-hHLY1cJCfAT/9dSVUpv5WPiF19pWjW5X7LNzcAKpL3ctJu37owBMj0wAqj3K6Wv5TaqOgO6O8jiE84GO9GgIbQ==}
     engines: {node: '>=22.12.0'}
     peerDependencies:
       '@tanstack/react-query': '>=5 <6'
@@ -3205,7 +3205,7 @@ snapshots:
       - '@types/react'
       - date-fns
 
-  '@openrails/billing-ui@0.266.0(@date-fns/tz@1.5.0)(@tanstack/react-query@5.103.2(react@19.3.0))(@types/react@19.3.0)(date-fns@4.4.0)(react-dom@19.3.0(react@19.3.0))(react-is@16.13.1)(react@19.3.0)(redux@5.0.1)':
+  '@openrails/billing-ui@0.268.2(@date-fns/tz@1.5.0)(@tanstack/react-query@5.103.2(react@19.3.0))(@types/react@19.3.0)(date-fns@4.4.0)(react-dom@19.3.0(react@19.3.0))(react-is@16.13.1)(react@19.3.0)(redux@5.0.1)':
     dependencies:
       '@base-ui/react': 1.8.0(@date-fns/tz@1.5.0)(@types/react@19.3.0)(date-fns@4.4.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@basis-theory/web-elements': 3.3.1
