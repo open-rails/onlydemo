@@ -1,7 +1,7 @@
 import { toast } from "sonner";
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Comments, ContentEditor, ChannelAvatar, RepostButton, MediaGallery, Paywall } from "@openrails/contentkit-ui";
 import { useCanonicalContent, useContentDetail } from "@openrails/contentkit-ui/react";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -35,7 +35,9 @@ function usePostID() {
 
 export function PostPage() {
   const post = usePostID();
-  const detail = useContentDetail(post.id);
+  const { language } = useParams();
+  const [params] = useSearchParams();
+  const detail = useContentDetail(post.id, { language, version: params.get("v") });
   const location = useLocation();
   const navigate = useNavigate();
   const client = useQueryClient();
