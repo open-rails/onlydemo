@@ -28,6 +28,12 @@ func TestChannelsOnContentKit(t *testing.T) {
 	if ch := model["entity_kinds"].(map[string]any)[kindChannel].(map[string]any); ch["owner"] != "user" || ch["auth_scope"] != true {
 		t.Fatalf("channel group kind: %v", ch)
 	}
+	// No fixed owner is configured: startup must not invent a staff blog or
+	// any other channel before a creator explicitly makes one.
+	initial := fan.call("GET", contentkitPrefix+"/v1/entities?kind=channel", nil, "", 200)
+	if rows, exists := initial["entities"]; !exists || rows != nil && len(rows.([]any)) != 0 {
+		t.Fatalf("unconfigured channels: %v", initial)
+	}
 
 	id := owner.channel("studio", "Studio")
 	g := fan.call("GET", contentkitPrefix+"/v1/entities/"+id, nil, "", 200)
