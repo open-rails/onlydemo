@@ -8,7 +8,7 @@ require (
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/knadh/koanf/providers/env/v2 v2.0.1
 	github.com/knadh/koanf/v2 v2.3.6
-	github.com/open-rails/authkit v1.41.0
+	github.com/open-rails/authkit v1.42.0
 	github.com/open-rails/migratekit v1.11.2 // indirect
 	github.com/open-rails/openrails v0.266.0
 	github.com/riverqueue/river v0.49.0
