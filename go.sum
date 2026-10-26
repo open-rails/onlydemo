@@ -268,8 +268,12 @@ github.com/open-rails/migratekit v1.11.2 h1:QTtn8i/Yj62SiGv6b7FnQ/mKudSDfLjnlmPS
 github.com/open-rails/migratekit v1.11.2/go.mod h1:ONDMUycRcwAB+eKlPvho6mnNAZf9gf9+yqwCKDRuO9g=
 github.com/open-rails/openrails v0.266.0 h1:jiSflMyYaSw+TSvQ8FdFoPv3AUTUIYZDZdIXSk+09Wk=
 github.com/open-rails/openrails v0.266.0/go.mod h1:RTCLkrEETwfeba36Tpa351XVrLHXemj4shO+Nt/7reM=
+github.com/open-rails/openrails v0.268.2 h1:tCYyyVzbswVZw1qhBa9htub3KlwSnsv/EDx64Ni5yoU=
+github.com/open-rails/openrails v0.268.2/go.mod h1:RTCLkrEETwfeba36Tpa351XVrLHXemj4shO+Nt/7reM=
 github.com/open-rails/openrails/adapters/authkit v0.266.0 h1:k8VhEFNF6xcEHp4832FNYqeLF79fIz3wljwRgYqEraE=
 github.com/open-rails/openrails/adapters/authkit v0.266.0/go.mod h1:lrTE5nYOYP01lCMYG6/jQgk+IQNSDE+iqHFq2kT07ls=
+github.com/open-rails/openrails/adapters/authkit v0.268.2 h1:ejQfILcxcSoJZFBymyFDyu9/+cyhlFrfF9Ae5mMvAb8=
+github.com/open-rails/openrails/adapters/authkit v0.268.2/go.mod h1:sfbAM/ezTPgKBBcLK157bBcRtGgqU4am1twJpJ8xvCU=
 github.com/paulmach/orb v0.12.0 h1:z+zOwjmG3MyEEqzv92UN49Lg1JFYx0L9GpGKNVDKk1s=
 github.com/paulmach/orb v0.12.0/go.mod h1:5mULz1xQfs3bmQm63QEJA6lNGujuRafwA5S/EnuLaLU=
 github.com/paulmach/protoscan v0.2.1/go.mod h1:SpcSwydNLrxUGSDvXvO0P7g7AuhJ7lcKfDlhJCDw2gY=
