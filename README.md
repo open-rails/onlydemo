@@ -1,7 +1,7 @@
 # OnlyDemo
 
 A React/Fiber creator app: creators run channels and publish posts on them.
-ContentKit owns content, channel entities and media. AuthKit handles
+ContentKit owns content, channels and media. AuthKit handles
 people and publishing roles; OpenRails owns products, prices, purchases,
 memberships and payment history. [The integration guide](docs/contentkit-cutover.md)
 describes the ownership boundaries and upgrade procedure.
@@ -107,19 +107,27 @@ never rewrites them.
 
 ## Channels and reading
 
-A channel is a ContentKit entity (`kind=channel`, `entitled: true` in
-[contentkit.yaml](contentkit.yaml)) at `/en/c/<CODE>/<name-slug>`. Its AuthKit
-permission group has the same ID. Owners manage the channel and its catalog;
-editors publish posts. Readers and buyers never join the editorial group.
-`POST /contentkit/v1/entities` creates the channel and provisions its owner.
-This model declares no fixed a fixed `channel`: initialization does not create an
-official blog or any other channel. Creators choose and create their own channels.
+A channel is a first-class ContentKit authoring home, configured in the
+`channels` block of [contentkit.yaml](contentkit.yaml), at
+`/en/c/<CODE>/<name-slug>`. AuthKit holds its editorial group: owners manage
+the channel and its catalog; editors publish posts. Readers and buyers never
+join that group. `POST /contentkit/v1/channels` creates the channel and its
+authorization group synchronously; failures are shown and can be retried.
+
+This model declares no fixed channel, so initialization does not invent an
+official blog. Creators make their own channels. Doujins and Hentai0 instead
+configure `channel: {fixed: blog}` and let the normal migration provision it.
 
 A post is ContentKit content (`kind=post`) with one hidden media version,
-owned by its channel. Canonical URLs are `/en/p/<CODE>/<slug>`.
-The existing wire fields and entitlement keys retain their identity:
-`channel_id`, `channel_id`, `group_id`, and `onlydemo:group:<id>`.
-The Go and React APIs call these entities.
+owned by its primary `channel_id`. Canonical URLs are `/en/p/<CODE>/<slug>`.
+The parent controls editing and read policy across its versions. Channel-free
+content can still use independent edition rules. Metadata tags never grant
+editing authority.
+
+Reposts reference the original post from another channel; no media is copied,
+no new comments or counters are created, and the original access still applies.
+The shared channel feed and repost button use `/channels/{id}/contents` and
+`/channels/{id}/reposts/{content_id}`. Removing a repost leaves the original.
 
 Access rules are public, channel membership (`group`), members-only purchase
 (`group_ppv`), or one-time purchase (`ppv`). ContentKit checks the customer's
@@ -145,7 +153,7 @@ Browsers upload straight to the bucket with
   multipart, 10 per post). Private `large` WebP renditions and an HLS ladder;
   public `preview`, the first image blurred. The channel's editors upload; the
   app decides who opens them through ContentKit's current access decision.
-- **Channels.** ContentKit's entity slots: covers (3:1) and avatars, uploaded
+- **Channels.** ContentKit's channel image slots: covers (3:1) and avatars, uploaded
   by holders of `channel:media:write` (owners).
 - **Users.** Avatars, each uploaded by its person. Until then the gateway
   serves a default: `onlydemo media-defaults` renders it into the bucket and
@@ -221,14 +229,14 @@ account-owned billing notices.
 
 ## Buying and membership
 
-Creators edit prices through `/api/v1/products/{entities|contents}/{id}`.
+Creators edit prices through `/api/v1/products/{channels|contents}/{id}`.
 These routes check their live channel owner permission and call native
 OpenRails products and prices. `GET /api/v1/products?key=<entitlement>` returns
 the product from OpenRails. Channel memberships are free or recur every 720
 hours; posts are one-time purchases. Free joins and leaves at
 `/api/v1/memberships/{id}` create or revoke only the caller's demo free grants.
 
-Paywall and MembershipBox pass the required key to the host payment modal.
+Paywall and ChannelMembershipBox pass the required key to the host payment modal.
 It reads OpenRails's current product and price, creates an order through
 `/billing/v1/me/orders`, and pays with billing-ui's `OrderPayment`. Withdrawing
 a product stops new sales. Changing a channel to free archives paid prices;
@@ -246,7 +254,7 @@ Channel ownership remains separate from site-wide administration.
 ## Deletion and identity
 
 The channel delete UI archives its membership product, then deletes its
-ContentKit entity and retires editorial permissions. This does not cancel
+ContentKit channel and retires editorial permissions. This does not cancel
 subscriptions or refund purchases. Post deletion archives its product before
 removing the editions. Direct ContentKit API callers must manage their own
 OpenRails catalog lifecycle as well.

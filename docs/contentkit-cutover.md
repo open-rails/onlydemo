@@ -5,10 +5,9 @@ and `frontend/package.json`. No local module replacement is used.
 
 ## Ownership
 
-- ContentKit owns content, versions, channel entities, media, access rules,
+- ContentKit owns content, versions, channels, media, access rules,
   discovery, comments and notification receipts.
-- AuthKit owns identities and editorial permission groups. ContentKit entity
-  terminology does not rename AuthKit permission groups.
+- AuthKit owns identities and editorial permission groups. ContentKit channels refer to those groups; metadata entities do not grant authority.
 - OpenRails owns products, prices, purchases, subscriptions and grants.
   `commerce.go` only authorizes the creator's native catalog edits and free
   membership grants; it stores no commerce tables and schedules no offer jobs.
@@ -30,10 +29,10 @@ financial history remains independent of content retention.
 
 | Concern | Interface |
 | --- | --- |
-| Channels | ContentKit `/entities`, React entity components |
+| Channels | ContentKit `/channels`, React channel components |
 | Posts | ContentKit `/contents` and edition delete `/contents/{id}/versions/{vid}` |
 | Editorial groups | AuthKit `/groups` |
-| Creator catalog edits | Host `/api/v1/products/{entities|contents}/{id}` authorizes native OpenRails calls |
+| Creator catalog edits | Host `/api/v1/products/{channels|contents}/{id}` authorizes native OpenRails calls |
 | Product lookup | Host `/api/v1/products?key=<entitlement>` reads OpenRails |
 | Free membership | Host `/api/v1/memberships/{id}` grants/revokes the user's own free membership |
 | Orders and payment | OpenRails `/billing/v1/me`, billing-ui `OrderPayment` |
@@ -45,7 +44,7 @@ Channels have their own `/channels` interface. Parent posts use `channel_id`;
 metadata entities cannot grant editorial authority. Stored access-rule encoding
 remains `group_id` and `group`/`group_ppv`, and immutable product keys remain
 `onlydemo:group:<id>`. Those billing identities must not be renamed.
-The channel kind uses `entity_kinds` and `entitled: true`.
+The `channels` configuration enables creator-owned channels and paid membership.
 
 Every post has one hidden edition. New purchase products grant
 `onlydemo:content:<post-id>/<version-id>`; the parent-only entitlement cannot

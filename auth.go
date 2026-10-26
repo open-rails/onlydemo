@@ -42,7 +42,7 @@ var (
 	customersRead   = rbac.Root.Permission(billing.RootCustomerRead.Resource(), billing.RootCustomerRead.Action())
 	customersUpdate = rbac.Root.Permission(billing.RootCustomerManage.Resource(), billing.RootCustomerManage.Action())
 	adminRole       = rbac.Root.Role("admin", append([]iam.Grant{customersRead, customersUpdate},
-		staffGrants(access.ContentWrite, access.ContentViewRestricted, access.EntitiesWrite,
+		staffGrants(access.ContentWrite, access.ContentViewRestricted, access.EntitiesWrite, access.ChannelsWrite,
 			access.CommentsModerate, access.CommentsBan, access.ModerationReview, access.AvatarsWrite)...)...)
 )
 
