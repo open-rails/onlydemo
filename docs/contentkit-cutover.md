@@ -41,8 +41,10 @@ financial history remains independent of content retention.
 | Billing notices | AuthKit account inbox with producer-owned OpenRails notices |
 | Account deletion | AuthKit `ListEvents`, host cursor, idempotent subscription cancellation |
 
-Legacy wire identity remains `owner_group_id`, `owner_group`, `group_id`,
-`group`/`group_ppv`, and `onlydemo:group:<id>`. Keep existing product keys.
+Channels have their own `/channels` interface. Parent posts use `channel_id`;
+metadata entities cannot grant editorial authority. Stored access-rule encoding
+remains `group_id` and `group`/`group_ppv`, and immutable product keys remain
+`onlydemo:group:<id>`. Those billing identities must not be renamed.
 The channel kind uses `entity_kinds` and `entitled: true`.
 
 Every post has one hidden edition. New purchase products grant

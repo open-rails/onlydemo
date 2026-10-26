@@ -36,7 +36,7 @@ func smoke(ctx context.Context, base string, out io.Writer) error {
 	if err := step("creator opens a channel", err); err != nil {
 		return err
 	}
-	if err := step("creator makes membership free", creator.call(ctx, "PUT", "/api/v1/products/entities/"+channel, map[string]any{"amount": "0"}, nil)); err != nil {
+	if err := step("creator makes membership free", creator.call(ctx, "PUT", "/api/v1/products/channels/"+channel, map[string]any{"amount": "0"}, nil)); err != nil {
 		return err
 	}
 	public, err := creator.post(ctx, channel, seedPost{"Hello", "Everyone reads this.", "public", ""})
@@ -61,7 +61,7 @@ func smoke(ctx context.Context, base string, out io.Writer) error {
 			} `json:"access"`
 		} `json:"contents"`
 	}
-	err = anon.call(ctx, "GET", contentkitPrefix+"/v1/contents?kind=post&owner_group="+url.QueryEscape(channel), nil, &feed)
+	err = anon.call(ctx, "GET", contentkitPrefix+"/v1/contents?kind=post&channel_id="+url.QueryEscape(channel), nil, &feed)
 	if err == nil {
 		open := map[string]bool{}
 		for _, c := range feed.Contents {
@@ -135,5 +135,5 @@ func smoke(ctx context.Context, base string, out io.Writer) error {
 	if err := step("a deleted post is gone for readers who never bought it", err); err != nil {
 		return err
 	}
-	return step("creator deletes the channel", creator.call(ctx, "DELETE", contentkitPrefix+"/v1/entities/"+channel, nil, nil))
+	return step("creator deletes the channel", creator.call(ctx, "DELETE", contentkitPrefix+"/v1/channels/"+channel, nil, nil))
 }

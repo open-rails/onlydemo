@@ -2,7 +2,7 @@ import { toast } from "sonner";
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
-import { Comments, ContentEditor, EntityAvatar, MediaGallery, Paywall } from "@openrails/contentkit-ui";
+import { Comments, ContentEditor, ChannelAvatar, RepostButton, MediaGallery, Paywall } from "@openrails/contentkit-ui";
 import { useCanonicalContent, useContentDetail } from "@openrails/contentkit-ui/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowLeft02Icon, Delete02Icon, PencilEdit02Icon } from "@hugeicons/core-free-icons";
@@ -43,7 +43,7 @@ export function PostPage() {
   const [removing, setRemoving] = useState(false);
   const [error, setError] = useState("");
   const content = detail.content;
-  const owner = content?.owner;
+  const owner = content?.channel;
   const checkout = useCheckout(owner?.name ?? "Creator");
   // The slug is decoration: keep the address bar and head on the canonical URL.
   useCanonicalContent(content && content.code ? postLink({ code: content.code, slug: content.slug ?? "" }) : undefined, {
@@ -90,7 +90,7 @@ export function PostPage() {
           <header className="feed-head">
             {owner && (
               <Link to={channelPath(owner)} className="feed-author">
-                <EntityAvatar entity={owner} className="avatar" />
+                <ChannelAvatar channel={owner} className="avatar" />
                 <span>
                   <strong>{owner.name}</strong>
                   <small>@{owner.slug}</small>
@@ -116,6 +116,7 @@ export function PostPage() {
               )}
             </div>
           </header>
+          <RepostButton contentId={content.id} originalChannelId={content.channel_id} />
           <div className="feed-text">
             {content.title && <h2 className="reader-title">{content.title}</h2>}
             {/* The body is the viewer's once they open the post; the description is its teaser. */}
@@ -162,7 +163,7 @@ export function EditPostPage() {
   const navigate = useNavigate();
   const detail = useContentDetail(id);
   const roles = useChannelRoles();
-  const owner = detail.content?.owner_group_id;
+  const owner = detail.content?.channel_id;
   return (
     <div className="page-narrow">
       <div className="page-heading">

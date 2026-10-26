@@ -380,7 +380,7 @@ func testPNG(t *testing.T, w, h int, c color.Color) []byte {
 // its content id and its one (hidden) version's id.
 func (p peer) post(channel, title, body string, rule map[string]any) (string, string) {
 	p.h.t.Helper()
-	in := map[string]any{"kind": kindPost, "owner_group_id": channel, "text": map[string]any{"en": map[string]string{"title": title, "body": body}}}
+	in := map[string]any{"kind": kindPost, "channel_id": channel, "text": map[string]any{"en": map[string]string{"title": title, "body": body}}}
 	if rule != nil {
 		in["access"] = rule
 	}
@@ -415,13 +415,13 @@ func (p peer) opens(id string) bool {
 // AuthKit group with p as owner.
 func (p peer) channel(slug, name string) string {
 	p.h.t.Helper()
-	res, raw := p.do("POST", contentkitPrefix+"/v1/entities", []map[string]any{{"kind": kindChannel, "slug": slug,
-		"names": []map[string]string{{"language": "en", "kind": "name", "name": name}}}}, "")
-	var created []struct{ ID string }
-	if res.StatusCode != 201 || json.Unmarshal(raw, &created) != nil || len(created) != 1 {
+	res, raw := p.do("POST", contentkitPrefix+"/v1/channels", map[string]any{"slug": slug,
+		"names": []map[string]string{{"language": "en", "kind": "name", "name": name}}}, "")
+	var created struct{ ID string }
+	if res.StatusCode != 201 || json.Unmarshal(raw, &created) != nil || created.ID == "" {
 		p.h.t.Fatalf("%s: create channel %s = %d: %s", p.name, slug, res.StatusCode, raw)
 	}
-	return created[0].ID
+	return created.ID
 }
 
 // contentPrice waits for content id's paywall to offer key on sale and

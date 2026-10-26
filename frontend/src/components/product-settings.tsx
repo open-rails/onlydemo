@@ -9,23 +9,23 @@ import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 
 type ProductSettingsProps = { id: string; onUpdated?: () => void } & (
-  { kind: "entities"; version?: never } | { kind: "contents"; version: string }
+  { kind: "channels"; version?: never } | { kind: "contents"; version: string }
 );
 
 export function ProductSettings({ kind, id, version, onUpdated }: ProductSettingsProps) {
-  const key = kind === "entities" ? `onlydemo:group:${id}` : `onlydemo:content:${id}/${version}`;
+  const key = kind === "channels" ? `onlydemo:group:${id}` : `onlydemo:content:${id}/${version}`;
   const read = useQuery({ queryKey: ["product", key], queryFn: () => request<Product | null>(`/api/v1/products?key=${encodeURIComponent(key)}`) });
   if (read.isPending) return <Loading />;
   if (read.error) return <ErrorState error={read.error} retry={() => void read.refetch()} />;
   return <ProductForm key={`${id}:${read.data?.revision}:${read.data?.prices[0]?.id}`} kind={kind} id={id} product={read.data ?? null} onUpdated={onUpdated} />;
 }
-function ProductForm({ kind, id, product, onUpdated }: { kind: "entities" | "contents"; id: string; product: Product | null; onUpdated?: () => void }) {
+function ProductForm({ kind, id, product, onUpdated }: { kind: "channels" | "contents"; id: string; product: Product | null; onUpdated?: () => void }) {
   const client = useQueryClient();
   const price = product?.prices[0];
   const [amount, setAmount] = useState(price ? String(Number(price.unit_amount) / 1_000_000) : "0");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const membership = kind === "entities";
+  const membership = kind === "channels";
   const save = async (event?: FormEvent) => {
     event?.preventDefault();
     setBusy(true); setError("");

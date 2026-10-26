@@ -19,7 +19,7 @@ import { AccountBillingScope } from "../billing";
 import type { AppConfig } from "../models";
 import { useMyChannels } from "../roles";
 import { usePublicImage } from "@openrails/contentkit-ui/react";
-import { EntityAvatar, EntityCover } from "@openrails/contentkit-ui";
+import { ChannelAvatar, ChannelCover } from "@openrails/contentkit-ui";
 import {
   EmptyState,
   ErrorState,
@@ -144,9 +144,9 @@ function MyChannels() {
         <div className="suggested-list">
           {channels.data.map(({ group, role }) => (
             <Link to={channelPath(group)} key={group.id} className="suggested-item">
-              <EntityCover entity={group} className="cover" />
+              <ChannelCover channel={group} className="cover" />
               <span className="suggested-info">
-                <EntityAvatar entity={group} className="avatar" />
+                <ChannelAvatar channel={group} className="avatar" />
                 <span>
                   <strong>{group.name}</strong>
                   <small>

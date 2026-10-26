@@ -49,7 +49,7 @@ func TestNMIBillingEndToEnd(t *testing.T) {
 	buyer := h.register("nmibuyer", "127.0.0.3")
 	stranger := h.register("nmistranger", "127.0.0.4")
 	channelID := owner.channel("nmi-studio", "NMI studio")
-	owner.call("PUT", "/api/v1/products/entities/"+channelID, map[string]any{"amount": "9.99", "renew_hours": 720}, "", 200)
+	owner.call("PUT", "/api/v1/products/channels/"+channelID, map[string]any{"amount": "9.99", "renew_hours": 720}, "", 200)
 	membershipPrice := buyer.groupPrice(channelID)
 	included, _ := owner.post(channelID, "Members", "Members read this", map[string]any{"level": "group", "group_id": channelID})
 	paid, paidVersion := owner.post(channelID, "Paid", "Paid content", map[string]any{"level": "ppv"})
@@ -132,7 +132,7 @@ func TestNMIBillingEndToEnd(t *testing.T) {
 	h.assertBillingNotices(t, buyer, owner)
 
 	// A free membership changes new sales; existing subscribers keep their terms.
-	owner.call("PUT", "/api/v1/products/entities/"+channelID, map[string]any{"amount": "0"}, "", 200)
+	owner.call("PUT", "/api/v1/products/channels/"+channelID, map[string]any{"amount": "0"}, "", 200)
 	if h.subscription(buyer.id).CancelScheduled {
 		t.Fatal("catalog edit silently canceled an existing subscription")
 	}
