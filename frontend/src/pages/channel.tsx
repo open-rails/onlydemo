@@ -84,7 +84,7 @@ export function ChannelPage() {
           channelId={group.id}
           className="feed"
           surface="channel"
-          query={{ kind: "post", sort: "newest", mode: "lock" }}
+          query={{ mode: "lock" }}
           renderCard={(card) => <Post card={card} owner={card.channel?.id !== group.id} />}
           empty={
             <EmptyState
