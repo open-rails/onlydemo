@@ -1,7 +1,7 @@
 # OnlyDemo
 
 A React/Fiber creator app: creators run channels and publish posts on them.
-ContentKit 0.127 owns content, channel entities and media. AuthKit handles
+ContentKit owns content, channel entities and media. AuthKit handles
 people and publishing roles; OpenRails owns products, prices, purchases,
 memberships and payment history. [The integration guide](docs/contentkit-cutover.md)
 describes the ownership boundaries and upgrade procedure.
@@ -112,6 +112,8 @@ A channel is a ContentKit entity (`kind=channel`, `entitled: true` in
 permission group has the same ID. Owners manage the channel and its catalog;
 editors publish posts. Readers and buyers never join the editorial group.
 `POST /contentkit/v1/entities` creates the channel and provisions its owner.
+This model declares no fixed `owner_entity`: initialization does not create an
+official blog or any other channel. Creators choose and create their own channels.
 
 A post is ContentKit content (`kind=post`) with one hidden media version,
 owned by its channel. Canonical URLs are `/en/p/<CODE>/<slug>`.
