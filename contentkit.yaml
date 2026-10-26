@@ -3,7 +3,7 @@
 tenant: onlydemo
 content:
   languages: [en]
-  kinds:
+  content_kinds:
     # A creator post: one hidden version holding mixed images and videos,
     # owned by its channel (owner_group_id), never a member of it.
     post:
