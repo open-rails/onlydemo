@@ -83,7 +83,7 @@ func TestChannelsOnContentKit(t *testing.T) {
 	paid, paidVersion := owner.post(id, "Paid", "Buyers read this", map[string]any{"level": "ppv"})
 	editor.post(id, "By the editor", "Hi", nil)
 	fan.call("POST", contentkitPrefix+"/v1/contents", map[string]any{"kind": kindPost, "channel_id": id,
-		"text": map[string]any{"en": map[string]string{"title": "Not mine"}}}, "", 403)
+		"versions": []map[string]any{{"languages": []string{"en"}, "text": map[string]any{"en": map[string]string{"title": "Not mine"}}}}}, "", 403)
 	for _, c := range []struct {
 		who  peer
 		post string
