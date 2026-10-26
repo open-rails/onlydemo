@@ -248,7 +248,7 @@ func (c *apiClient) channel(ctx context.Context, handle, name string) (string, e
 func (c *apiClient) post(ctx context.Context, channel string, p seedPost) (string, error) {
 	var created struct{ ID string }
 	if err := c.call(ctx, "POST", contentkitPrefix+"/v1/contents", map[string]any{"kind": kindPost, "channel_id": channel,
-		"text": map[string]any{"en": map[string]string{"title": p.title, "body": p.body}}, "access": postRule(p.policy, channel)}, &created); err != nil {
+		"versions": []map[string]any{{"languages": []string{"en"}, "text": map[string]any{"en": map[string]string{"title": p.title, "body": p.body}}}}, "access": postRule(p.policy, channel)}, &created); err != nil {
 		return "", err
 	}
 	if p.price != "" {

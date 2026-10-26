@@ -380,7 +380,7 @@ func testPNG(t *testing.T, w, h int, c color.Color) []byte {
 // its content id and its one (hidden) version's id.
 func (p peer) post(channel, title, body string, rule map[string]any) (string, string) {
 	p.h.t.Helper()
-	in := map[string]any{"kind": kindPost, "channel_id": channel, "text": map[string]any{"en": map[string]string{"title": title, "body": body}}}
+	in := map[string]any{"kind": kindPost, "channel_id": channel, "versions": []map[string]any{{"languages": []string{"en"}, "text": map[string]any{"en": map[string]string{"title": title, "body": body}}}}}
 	if rule != nil {
 		in["access"] = rule
 	}
