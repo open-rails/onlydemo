@@ -185,7 +185,7 @@ func TestChannelsOnContentKit(t *testing.T) {
 
 	// Deleting the channel deletes its group and retires its AuthKit group.
 	fan.call("DELETE", contentkitPrefix+"/v1/channels/"+id, nil, "", 403)
-	owner.call("DELETE", contentkitPrefix+"/v1/channels/"+id, nil, "", 200)
+	owner.call("DELETE", contentkitPrefix+"/v1/channels/"+id, nil, "", 204)
 	fan.call("GET", contentkitPrefix+"/v1/channels/"+id, nil, "", 404)
 	eventually(t, "the channel's AuthKit group retired", func() bool {
 		g, err := h.srv.auth.client.Group(ctx, iam.GroupByID(id))

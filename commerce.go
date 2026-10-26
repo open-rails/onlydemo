@@ -93,13 +93,20 @@ func (s *server) saveProduct(c fiber.Ctx) error {
 			return fiber.ErrNotFound
 		}
 		channel, name = post.ChannelID, post.Title
-		if len(post.Versions) != 1 || post.Versions[0].Access == nil {
+		if len(post.Versions) != 1 {
 			return fiber.NewError(409, "A post purchase requires exactly one edition with an access rule")
 		}
 		version := post.Versions[0]
 		key, err = access.VersionKey(tenant, id, version.ID)
-		if version.Access.Level == access.ChannelPPV {
-			membership, e := access.ChannelKey(tenant, version.Access.ChannelID)
+		rule := version.Access
+		if post.ChannelID != "" {
+			rule = &post.Access
+		}
+		if rule == nil {
+			return fiber.NewError(409, "The post has no access rule")
+		}
+		if rule.Level == access.ChannelPPV {
+			membership, e := access.ChannelKey(tenant, rule.ChannelID)
 			if e != nil {
 				return e
 			}
