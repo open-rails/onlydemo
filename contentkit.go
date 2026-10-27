@@ -80,7 +80,7 @@ func mediaKinds(ck contentkit.Config) ([]media.Kind, error) {
 	if ck.Content.Channels == nil {
 		return nil, errors.New("contentkit.yaml: channels must be configured")
 	}
-	channel := media.ChannelKind(*ck.Content.Channels)
+	channel := media.EntityKind(kindChannel, ck.Content.StorageModel().EntityKinds[kindChannel])
 	for i := range channel.Public {
 		if channel.Public[i].Name == media.CoverPreset {
 			channel.Public[i].Widths = []int{640, 1280, 1920}

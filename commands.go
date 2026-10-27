@@ -36,21 +36,6 @@ func newRootCommand() *cobra.Command {
 		Use: "migrate", Short: "Initialize application and library storage", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return migrate(cmd.Context()) },
 	})
-	var notificationSnapshot string
-	notificationMigration := &cobra.Command{
-		Use: "migrate-notifications", Short: "Adopt existing account notices with all old writers stopped", Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			if strings.TrimSpace(notificationSnapshot) == "" {
-				return errors.New("--snapshot must name a new file")
-			}
-			return migrateNotifications(cmd.Context(), notificationSnapshot)
-		},
-	}
-	notificationMigration.Flags().StringVar(&notificationSnapshot, "snapshot", "", "new durable file for billing notification ordering and adoption")
-	if err := notificationMigration.MarkFlagRequired("snapshot"); err != nil {
-		panic(err)
-	}
-	root.AddCommand(notificationMigration)
 	admin := &cobra.Command{
 		Use: "admin", Short: "Manage a registered user's AuthKit admin role", Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {

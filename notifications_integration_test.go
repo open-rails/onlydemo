@@ -4,13 +4,12 @@ import (
 	"testing"
 
 	"github.com/open-rails/authkit/notify"
-	"github.com/open-rails/contentkit/signal"
 	"github.com/open-rails/openrails/billing"
 )
 
 // assertBillingNotices follows real sandbox billing facts into AuthKit's
 // authenticated inbox, then proves the local receipt survives replay and
-// reload, and that app-only erasure preserves account-owned billing notices.
+// reload.
 func (h *harness) assertBillingNotices(t *testing.T, buyer, other peer) {
 	t.Helper()
 	source, err := h.srv.billing.client.ListEvents(h.ctx, billing.EventQuery{Limit: 100})
@@ -77,11 +76,4 @@ func (h *harness) assertBillingNotices(t *testing.T, buyer, other peer) {
 	}
 	buyer.call("DELETE", path+"/dismiss", nil, "", 200)
 	buyer.call("DELETE", path+"/read", nil, "", 200)
-	if report, err := h.srv.content.EraseAppSubjects(h.ctx, []signal.Subject{{UserID: buyer.id}}); err != nil || !report.Complete() {
-		t.Fatalf("erasure: %+v %v", report, err)
-	}
-	// Erasing this app's content cannot erase the account's billing notices.
-	if _, err := h.srv.auth.client.GetNotification(h.ctx, buyer.id, actionable.ID); err != nil {
-		t.Fatalf("content erasure removed an account-owned billing notice: %v", err)
-	}
 }

@@ -18,7 +18,6 @@ import (
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/contentkit"
 	"github.com/open-rails/contentkit/access"
-	"github.com/open-rails/contentkit/signal"
 	"github.com/open-rails/openrails/billing"
 )
 
@@ -203,8 +202,8 @@ func (a *appAuth) cancelDeletedAccountBilling(ctx context.Context, userID string
 	}
 }
 
-// A purge also erases the account from ContentKit; AuthKit retries until
-// every plane is erased.
+// A purge also anonymizes the account in ContentKit; an error fails the
+// callback, so AuthKit retries until every plane is erased.
 func (a *appAuth) purgeDeletedAccount(ctx context.Context, deletion iam.UserDeletion) error {
 	if err := a.cancelDeletedAccountBilling(ctx, deletion.UserID); err != nil {
 		return err
@@ -212,11 +211,7 @@ func (a *appAuth) purgeDeletedAccount(ctx context.Context, deletion iam.UserDele
 	if a.content == nil {
 		return errors.New("content lifecycle has not been composed")
 	}
-	report, err := a.content.EraseSubjects(ctx, []signal.Subject{{UserID: deletion.UserID}})
-	if err == nil && !report.Complete() {
-		err = fmt.Errorf("content erasure pending: %v", report.Remaining)
-	}
-	return err
+	return a.content.AnonymizeAccount(ctx, deletion.UserID)
 }
 
 // grantAdmin is only called by the explicit, one-off admin:grant command.

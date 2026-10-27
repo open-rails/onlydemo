@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/contentkit/media"
 	"github.com/open-rails/contentkit/media/gateway"
 	"github.com/open-rails/contentkit/media/layout"
-	mediaS3 "github.com/open-rails/contentkit/media/s3"
 	"github.com/open-rails/contentkit/media/token"
 )
 
@@ -28,11 +27,7 @@ func TestMediaDefaults(t *testing.T) {
 	}
 	ctx := t.Context()
 	bucket := "demo-defaults-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
-	store, err := mediaS3.New(mediaS3.Config{Bucket: bucket, Endpoint: endpoint, AccessKeyID: access, SecretAccessKey: secret, UsePathStyle: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	h := &harness{t: t, s3: store.Client(), bucket: bucket}
+	h := &harness{t: t, s3: testS3Client(endpoint, access, secret), bucket: bucket}
 	if _, err := h.s3.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: &bucket}); err != nil {
 		t.Fatal(err)
 	}

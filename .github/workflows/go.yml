@@ -80,8 +80,8 @@ jobs:
         with:
           go-version: '1.26.10'
       - run: go vet ./...
-      - name: Account notification binding and retained receipts
-        run: go test -run 'TestBillingAccountsFailClosedBeforeBinding|TestNotificationAdoptionKeepsOnlyDemoOrigin|TestNotificationCutoverOnFreshInbox|TestAccountNotificationAdoption' -count=1 -v -p 2 .
+      - name: Account notification binding and purge
+        run: go test -run 'TestBillingAccountsFailClosedBeforeBinding|TestAccountNotifications' -count=1 -v -p 2 .
       # Needs only PostgreSQL: it runs before the S3-backed channel proof.
       - name: NMI billing end to end (nmimock)
         run: go test -run 'TestNMIBillingEndToEnd|TestProviderWritesReadOnly' -count=1 -v -p 2 .

@@ -16,13 +16,15 @@ require (
 )
 
 require (
+	github.com/aws/aws-sdk-go-v2 v1.42.1
+	github.com/aws/aws-sdk-go-v2/credentials v1.19.7
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.97.3
 	github.com/johannesboyne/gofakes3 v1.2.0
 	github.com/joho/godotenv v1.5.1
 	github.com/jonboulle/clockwork v0.5.0
-	github.com/open-rails/contentkit v0.131.0
-	github.com/open-rails/contentkit/adapters/authkit v0.14.0
-	github.com/open-rails/contentkit/adapters/openrails v0.10.2
+	github.com/open-rails/contentkit v0.132.1-0.20261027221804-a094747c6821
+	github.com/open-rails/contentkit/adapters/authkit v0.14.1-0.20261027221804-a094747c6821
+	github.com/open-rails/contentkit/adapters/openrails v0.10.3-0.20261027221804-a094747c6821
 	github.com/open-rails/helpers v1.18.0
 	github.com/open-rails/openrails/adapters/authkit v0.268.2
 	github.com/riverqueue/river/rivertype v0.49.0
@@ -34,9 +36,7 @@ require (
 	github.com/ClickHouse/ch-go v0.71.0 // indirect
 	github.com/ClickHouse/clickhouse-go/v2 v2.40.3 // indirect
 	github.com/andybalholm/brotli v1.2.2 // indirect
-	github.com/aws/aws-sdk-go-v2 v1.42.1 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.8 // indirect
-	github.com/aws/aws-sdk-go-v2/credentials v1.19.7 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.21 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.21 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.22 // indirect

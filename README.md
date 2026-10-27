@@ -204,28 +204,12 @@ billing-action links. ContentKit and OpenRails publish or withdraw exact notices
 in the same database transaction as the underlying change. No billing-inbox
 poller runs. Successful-charge receipts are not enabled by default.
 
-The existing inbox stays in `CONTENT_SCHEMA`, under `contentkit:onlydemo`.
-Its account tenant, merchant UUID, catalog identity, receipt IDs and local
-read/archive state are retained. OpenRails first resolves its declared merchant;
-AuthKit then binds that exact legacy notification origin. The directory and
-notification binding refuse calls until composition finishes, before any worker
-or HTTP handler starts. AuthKit's optional inbox migration precedes ContentKit's
-comment-receipt adoption. Creator channel roles and entitlements are unchanged.
-
-For an existing installation, stop the old API and workers, retain a restorable
-database backup, then run the explicit handoff before starting the new version:
-
-```sh
-onlydemo migrate-notifications --snapshot /durable/path/onlydemo-notifications.json
-```
-
-The snapshot path must be new. The command drains the existing selected billing
-notices once, saves OpenRails's ordering/adoption snapshot, preserves read/archive
-state through AuthKit's native adoption API, and retires only this demo's old
-inbox-sync jobs. Retain the snapshot with billing backups. Terminal job history
-and the general event log remain intact. Normal startup does not run this handoff.
-Full account purge fences delayed delivery; app-only content erasure cannot remove
-account-owned billing notices.
+The inbox lives in `CONTENT_SCHEMA` under `contentkit:onlydemo`, the scope
+ContentKit's account cleanup reads (`contentkit:` plus its account key, the
+`onlydemo` tenant). OpenRails first resolves its declared merchant; AuthKit then
+binds that producer origin. The directory and notification binding refuse calls
+until composition finishes, before any worker or HTTP handler starts. Full
+account purge fences delayed delivery.
 
 ## Buying and membership
 
@@ -267,7 +251,8 @@ access periods and permanent billing grants. Its cursor lives in the River
 schema's `onlydemo_auth_cursor` table and advances only after processing.
 Cancellation is idempotent across retries. An expired cursor fails explicitly
 and requires reconciliation with current account state before resetting it.
-AuthKit's required `OnPurge` hook separately erases ContentKit subjects.
+AuthKit's required `OnPurge` hook calls ContentKit's `AnonymizeAccount`; an
+error fails the hook and AuthKit retries.
 Restoring an account does not restart billing. Ordinary access tokens keep
 their fifteen-minute lifetime; permission checks read live role authority.
 

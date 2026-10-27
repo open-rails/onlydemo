@@ -29,6 +29,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/google/uuid"
@@ -39,7 +41,6 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/contentkit/media"
-	mediaS3 "github.com/open-rails/contentkit/media/s3"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/openrailstest/nmimock"
 )
@@ -118,11 +119,7 @@ func newHarness(t *testing.T, o harnessOptions) *harness {
 		endpoint, access, secret = fake.URL, "demo-test", "demo-test-secret"
 	}
 	h.bucket = "demo-" + suffix
-	store, err := mediaS3.New(mediaS3.Config{Bucket: h.bucket, Endpoint: endpoint, AccessKeyID: access, SecretAccessKey: secret, UsePathStyle: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	h.s3 = store.Client()
+	h.s3 = testS3Client(endpoint, access, secret)
 	if _, err = h.s3.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: &h.bucket}); err != nil {
 		t.Fatal(err)
 	}
@@ -145,6 +142,14 @@ func newHarness(t *testing.T, o harnessOptions) *harness {
 	go func() { _ = h.srv.app.Listener(listener) }()
 	t.Cleanup(func() { _ = h.srv.app.Shutdown() })
 	return h
+}
+
+// testS3Client administers the test bucket outside the media store.
+func testS3Client(endpoint, access, secret string) *s3.Client {
+	return s3.New(s3.Options{Region: "us-east-1", BaseEndpoint: aws.String(endpoint), UsePathStyle: true,
+		Credentials:                credentials.NewStaticCredentialsProvider(access, secret, ""),
+		RequestChecksumCalculation: aws.RequestChecksumCalculationWhenRequired,
+		ResponseChecksumValidation: aws.ResponseChecksumValidationWhenRequired})
 }
 
 // testPool connects to the test database and drops cfg's schemas afterwards.

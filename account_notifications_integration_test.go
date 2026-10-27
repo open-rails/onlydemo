@@ -1,11 +1,7 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -18,39 +14,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-func TestNotificationCutoverOnFreshInbox(t *testing.T) {
-	h := newHarness(t, harnessOptions{})
-	if err := stopJobs(h.ctx, h.srv.jobs); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(t.TempDir(), "notification-adoption.json")
-	if err := adoptBillingNotifications(h.ctx, h.pool, h.cfg, h.srv, path); err != nil {
-		t.Fatal(err)
-	}
-	encoded, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var snapshot billing.NotificationAdoption
-	if err := json.Unmarshal(encoded, &snapshot); err != nil {
-		t.Fatal(err)
-	}
-	if snapshot.MerchantID != h.srv.billing.client.MerchantID() {
-		t.Fatal("cutover snapshot does not identify the persisted merchant")
-	}
-	if err := adoptBillingNotifications(h.ctx, h.pool, h.cfg, h.srv, path); !errors.Is(err, os.ErrExist) {
-		t.Fatalf("cutover overwrote its retained snapshot: %v", err)
-	}
-	retained, err := os.ReadFile(path)
-	if err != nil || !bytes.Equal(retained, encoded) {
-		t.Fatalf("retained snapshot changed: %v", err)
-	}
-	if err := adoptBillingNotifications(h.ctx, h.pool, h.cfg, h.srv, filepath.Join(t.TempDir(), "retry.json")); err != nil {
-		t.Fatalf("repeat cutover failed: %v", err)
-	}
-}
-
-func TestAccountNotificationAdoption(t *testing.T) {
+func TestAccountNotifications(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
 	user := h.register("noticeowner", "127.0.0.21")
 	other := h.register("noticeother", "127.0.0.22")
@@ -80,59 +44,39 @@ func TestAccountNotificationAdoption(t *testing.T) {
 		t.Fatalf("native account directory unavailable after binding: %+v %v", directory, err)
 	}
 
-	// Keep the old producer's complete origin and old receipt state. Only its
-	// event-shaped source ID becomes the producer's current deterministic ID.
+	// The billing producer delivers into the ContentKit-scoped inbox.
 	store, err := notifypg.New(h.pool, notifypg.Config{Schema: contentSchema(h.cfg), Scope: "contentkit:" + tenant})
 	if err != nil {
 		t.Fatal(err)
 	}
-	old := notify.Input{Recipient: notify.Recipient{Audience: notify.AudienceUser, ID: user.id},
-		Origin: notify.Origin{System: "openrails:onlydemo", Scope: merchant.String(), ID: "ntf_previous"},
-		Kind:   "payment_method_failed", CreatedAt: time.Now().UTC(), ActionRequested: true}
-	receipt, err := store.Publish(h.ctx, old)
-	if err != nil {
+	publication := notify.Publication{RecipientID: user.id, ID: "payment:current", Revision: 1,
+		Kind: "payment_method_failed", CreatedAt: time.Now().UTC(), ActionRequested: true}
+	if err := accounts.Publish(h.ctx, []notify.Publication{publication}); err != nil {
 		t.Fatal(err)
 	}
+	recipient := notify.Recipient{Audience: notify.AudienceUser, ID: user.id}
+	page, err := store.List(h.ctx, recipient, notify.ListOptions{})
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("billing notice not delivered: %+v %v", page, err)
+	}
+	receipt := page.Items[0]
 	path := "/auth/v1/me/notifications/" + receipt.ID
 	var own notify.Item
 	decode(t, user.call("GET", path, nil, "", 200), &own)
-	if own.ID != receipt.ID || own.Recipient.ID != user.id {
+	if own.ID != receipt.ID || own.Recipient.ID != user.id || own.Origin.System != "openrails:onlydemo" || own.Origin.Scope != merchant.String() {
 		t.Fatalf("native route did not return the owner's receipt: %+v", own)
 	}
 	other.call("GET", path, nil, "", 404)
 	other.call("PUT", path+"/read", nil, "", 404)
 	h.anonymous("127.0.0.23").call("GET", "/auth/v1/me/notifications", nil, "", 401)
 	user.call("PUT", path+"/read", nil, "", 200)
-	var archived notify.Item
-	decode(t, user.call("PUT", path+"/dismiss", nil, "", 200), &archived)
-	current := notify.Mutation{Input: receipt.Input, Revision: 1}
-	current.Origin = notify.Origin{System: "openrails", Scope: merchant.String(), ID: "payment:current"}
-	current.Visibility = notify.VisibilityTenant
-	batch, err := onlyDemoAdoptions(billing.NotificationAdoption{MerchantID: merchant, Adoptions: []notify.Adoption{{
-		Previous: []notify.Origin{{System: "openrails", Scope: merchant.String(), ID: old.Origin.ID}}, Current: current,
-	}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for range 2 {
-		if err := h.srv.auth.client.AdoptNotifications(h.ctx, "openrails", batch); err != nil {
-			t.Fatal(err)
-		}
-	}
-	adopted, err := h.srv.auth.client.GetNotification(h.ctx, user.id, receipt.ID)
-	if err != nil || adopted.ID != receipt.ID || adopted.ReadAt == nil || adopted.DismissedAt == nil ||
-		!adopted.ReadAt.Equal(*archived.ReadAt) || !adopted.DismissedAt.Equal(*archived.DismissedAt) ||
-		adopted.Origin.System != old.Origin.System || adopted.Origin.Scope != old.Origin.Scope || adopted.Origin.ID != "payment:current" {
-		t.Fatalf("adoption changed receipt identity or local state: %+v %v", adopted, err)
-	}
-	publication := notify.Publication{RecipientID: user.id, ID: adopted.Origin.ID, Revision: adopted.ProducerRevision,
-		Kind: adopted.Kind, Data: adopted.Data, CreatedAt: adopted.CreatedAt, ActionRequested: adopted.ActionRequested, Severity: adopted.Severity}
+	user.call("PUT", path+"/dismiss", nil, "", 200)
 	if err := accounts.Publish(h.ctx, []notify.Publication{publication}); err != nil {
 		t.Fatal(err)
 	}
 	replayed, err := h.srv.auth.client.GetNotification(h.ctx, user.id, receipt.ID)
-	if err != nil || replayed.Revision != adopted.Revision || replayed.DismissedAt == nil {
-		t.Fatalf("producer replay changed the adopted receipt: %+v %v", replayed, err)
+	if err != nil || replayed.ReadAt == nil || replayed.DismissedAt == nil {
+		t.Fatalf("producer replay changed the receipt's local state: %+v %v", replayed, err)
 	}
 
 	foreignTenant := iam.NewTenantID()
@@ -152,7 +96,7 @@ func TestAccountNotificationAdoption(t *testing.T) {
 	if err := accounts.Publish(h.ctx, []notify.Publication{foreignPublication}); err != nil {
 		t.Fatal(err)
 	}
-	page, err := store.List(h.ctx, notify.Recipient{Audience: notify.AudienceUser, ID: foreignUser.ID}, notify.ListOptions{})
+	page, err = store.List(h.ctx, notify.Recipient{Audience: notify.AudienceUser, ID: foreignUser.ID}, notify.ListOptions{})
 	if err != nil || len(page.Items) != 0 {
 		t.Fatalf("another tenant's account received a notice: %+v %v", page, err)
 	}
@@ -168,11 +112,13 @@ func TestAccountNotificationAdoption(t *testing.T) {
 	if err := accounts.Publish(h.ctx, []notify.Publication{publication}); err != nil {
 		t.Fatal(err)
 	}
-	page, err = store.List(h.ctx, old.Recipient, notify.ListOptions{})
+	page, err = store.List(h.ctx, recipient, notify.ListOptions{})
 	if err != nil || len(page.Items) != 0 {
 		t.Fatalf("delayed publication revived a purged account receipt: %+v %v", page, err)
 	}
-	if _, err := store.Publish(h.ctx, old); !errors.Is(err, notify.ErrRecipientErased) {
-		t.Fatalf("legacy publisher bypassed account erasure fence: %v", err)
+	direct := notify.Input{Recipient: recipient, Origin: notify.Origin{System: "openrails:onlydemo", Scope: merchant.String(), ID: "payment:late"},
+		Kind: "payment_method_failed", CreatedAt: time.Now().UTC()}
+	if _, err := store.Publish(h.ctx, direct); !errors.Is(err, notify.ErrRecipientErased) {
+		t.Fatalf("direct publisher bypassed account erasure fence: %v", err)
 	}
 }
