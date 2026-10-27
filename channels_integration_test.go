@@ -108,8 +108,8 @@ func TestChannelsOnContentKit(t *testing.T) {
 	for _, card := range feed["contents"].([]any) {
 		card := card.(map[string]any)
 		locked[card["id"].(string)] = card["access"].(map[string]any)["allowed"] != true
-		if owner, _ := card["owner"].(map[string]any); owner["id"] != id || owner["name"] != "Studio" {
-			t.Fatalf("card owner: %v", card["owner"])
+		if channel, _ := card["channel"].(map[string]any); channel["id"] != id || channel["name"] != "Studio" {
+			t.Fatalf("card channel: %v", card["channel"])
 		}
 	}
 	if len(locked) != 4 || locked[public] || !locked[members] || !locked[paid] {
