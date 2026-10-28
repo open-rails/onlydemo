@@ -161,7 +161,7 @@ func testPool(t *testing.T, ctx context.Context, url string, cfg Config) *pgxpoo
 	t.Cleanup(func() {
 		cleanup, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
-		for _, s := range []string{cfg.AuthSchema, cfg.BillingSchema, cfg.RiverSchema, cfg.ContentSchema, mediaWorkerSchema(cfg)} {
+		for _, s := range []string{cfg.AuthSchema, cfg.BillingSchema, cfg.RiverSchema, cfg.ContentSchema, contentRiverSchema(cfg), mediaWorkerSchema(cfg)} {
 			if _, err := pool.Exec(cleanup, "DROP SCHEMA IF EXISTS "+pgx.Identifier{s}.Sanitize()+" CASCADE"); err != nil {
 				t.Errorf("drop schema %s: %v", s, err)
 			}

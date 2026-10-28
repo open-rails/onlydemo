@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/authkit"
 	authkitfiber "github.com/open-rails/authkit/adapters/fiber"
 	"github.com/open-rails/contentkit"
-	"github.com/open-rails/contentkit/access"
 	"github.com/open-rails/openrails/billing"
 	"github.com/riverqueue/river"
 )
@@ -183,7 +182,7 @@ func startServer(ctx context.Context, config Config, pool *pgxpool.Pool, opts bi
 			s.Close()
 		}
 	}()
-	if s.jobs, err = newJobs(ctx, pool, config, s.auth, s.billing, s.content); err != nil {
+	if s.jobs, err = newJobs(ctx, pool, config, s.auth, s.billing); err != nil {
 		return nil, fmt.Errorf("compose application jobs: %w", err)
 	}
 	s.closers = append(s.closers, func() {
@@ -199,7 +198,8 @@ func startServer(ctx context.Context, config Config, pool *pgxpool.Pool, opts bi
 	if err = s.billing.Start(ctx, s.jobs); err != nil {
 		return nil, fmt.Errorf("start OpenRails: %w", err)
 	}
-	if err = s.content.Start(ctx, contentkit.WithRiverClient(s.jobs)); err != nil {
+	// OnlyDemo is one process: it serves and also works ContentKit's jobs.
+	if err = s.content.StartJobs(ctx); err != nil {
 		return nil, fmt.Errorf("start ContentKit: %w", err)
 	}
 	if err = s.billing.requireReady(ctx); err != nil {
@@ -216,11 +216,6 @@ func startServer(ctx context.Context, config Config, pool *pgxpool.Pool, opts bi
 
 func newApp(pool *pgxpool.Pool, s *server, cfg Config) (*fiber.App, error) {
 	app := fiber.New()
-	// One entitlement read per request: the paywall gate memoizes it.
-	app.Use(func(c fiber.Ctx) error {
-		c.SetContext(access.WithMemo(c.Context()))
-		return c.Next()
-	})
 
 	app.Get("/dev/routes", homepage(app))
 

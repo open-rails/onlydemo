@@ -14,7 +14,8 @@ directory is `/dev/routes`. AuthKit protocol anchors stay at
 ## Run locally
 
 Prerequisites: Docker, Go 1.26.10, Node 24 with pnpm 11, libvips (`libvips-dev`;
-the media worker's image jobs are CGO) and ffmpeg with ffprobe (its video jobs). Copy
+ContentKit's stock media worker is CGO; the app links no codecs) and ffmpeg with
+ffprobe (its video jobs). Copy
 `.env.example` to `.env`, set a permanent `AUTH_TENANT_ID` (`uuidgen`), and set `MEDIA_TOKEN_KEY`
 (`echo "dev:$(openssl rand -base64 32)"`), copy `merchant.example.yaml` to
 `merchant.yaml` with your sandbox PSP, then:
@@ -28,7 +29,7 @@ task smoke    # walks a creator and a fan through the running server
 
 `task run` migrates (idempotent), then serves Go with Air, the frontend with
 Vite, the media gateway (`task media:gateway`) and the media worker
-(`task media:worker`, `onlydemo media-worker`), reloading on change; open http://localhost:5173.
+(`task media:worker`), reloading on change; open http://localhost:5173.
 The MinIO console is http://localhost:59001 (`onlydemo` / `onlydemo-dev-secret`). `task run:embedded` builds the frontend into
 the single Go binary and serves everything from http://localhost:3000.
 For payment flows while browsing Vite, start the backend with
@@ -92,7 +93,7 @@ results are synchronous and OpenRails reconciles from the gateway.
 | `AUTH_SCHEMA`, `BILLING_SCHEMA`, `RIVER_SCHEMA` | Optional independent schema names; shared `public` is supported |
 | `MERCHANT_FILE` | The merchant declaration (default `merchant.yaml`) |
 | `TRUSTED_COUNTRY_HEADER` | Edge header with the buyer's country (e.g. `CF-IPCountry`) to preselect the billing country; unset = never trusted, the browser locale is used |
-| `CONTENT_SCHEMA` | ContentKit's schema (default `contentkit`); its media worker queue is `<CONTENT_SCHEMA>_media_worker` |
+| `CONTENT_SCHEMA` | ContentKit's schema (default `contentkit`); its own River is `<CONTENT_SCHEMA>_river`, its media worker queue `<CONTENT_SCHEMA>_media_worker` |
 | `MEDIA_S3_*` | Media bucket: `ENDPOINT`, `PUBLIC_ENDPOINT` (browser presign host), `BUCKET`, `REGION`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY` |
 | `MEDIA_URL`, `MEDIA_DELIVERY`, `MEDIA_COOKIE_DOMAIN` | media-gateway origin; `cookie` (default) or `url` delivery |
 | `MEDIA_TOKEN_KEY`, `MEDIA_TOKEN_KEY_PREVIOUS` | `{kid}:{base64 32+ bytes}` signing keys shared with media-gateway |
@@ -101,8 +102,9 @@ There is no separate billing database URL or billing encryption key. Credentials
 are supplied as a host-owned snapshot (`merchant.yaml`). `onlydemo migrate`
 applies the shared River tables and the host account-event cursor; `authkit.New`,
 `openrails.New` and `contentkit.New` create or upgrade their own, there and
-when the server starts. OpenRails v1 and AuthKit v1 do not upgrade older baselines: use a new
-database, preserving old databases and receipts. Startup validates checksums and
+when the server starts. OpenRails v1 and AuthKit v1 do not upgrade older baselines, and
+ContentKit rebaselined its migrations (#465): recreate an existing ContentKit
+database rather than upgrading it, preserving old databases and receipts. Startup validates checksums and
 never rewrites them.
 
 ## Channels and reading
@@ -156,17 +158,21 @@ Browsers upload straight to the bucket with
 - **Channels.** ContentKit's channel image slots: covers (3:1) and avatars, uploaded
   by holders of `channel:media:write` (owners).
 - **Users.** Avatars, each uploaded by its person. Until then the gateway
-  serves a default: `onlydemo media-defaults` renders it into the bucket and
-  prints `MEDIA_GATEWAY_DEFAULTS` (`task media:gateway` runs it).
-- **Worker.** `onlydemo media-worker` (`task media:worker`) is ContentKit's
-  media worker with the engine's registry. Its two processing jobs ingest
-  committed uploads and generate required image/video derivatives from
+  serves a default: the stock worker's `media-worker publish-defaults` renders it
+  into the bucket and prints `MEDIA_GATEWAY_DEFAULTS` (`task media:gateway` runs it).
+- **Worker.** ContentKit's stock media worker runs on the engine's registry:
+  `onlydemo media-config` prints it for `MEDIA_KINDS_FILE`. Locally `task
+  media:worker` runs it as `go tool media-worker` at the `go.mod` version; deploy
+  `openrails/contentkit-media-worker` at the same release. Its two processing
+  jobs ingest committed uploads and generate required image/video derivatives from
   `<CONTENT_SCHEMA>_media_worker`. Processors append progress facts directly;
   the shared editor observes durable state through authenticated SSE and
-  recovers it when reopened. Uploading does not publish a post. The host fleet
-  runs metadata work, durable scheduled publication, and the existing content-purge
-  sweep. Env: `MEDIA_WORKER_*` and
-  `MEDIA_HOST_RIVER_SCHEMA` (default `RIVER_SCHEMA`).
+  recovers it when reopened. Uploading does not publish a post. The `serve`
+  process works ContentKit's own jobs (metadata work, durable scheduled
+  publication, the content-purge sweep) in `<CONTENT_SCHEMA>_river`. Env:
+  `DATABASE_URL`, `MEDIA_S3_*`, `MEDIA_KINDS_FILE`, `MEDIA_CONTENT_SCHEMA`,
+  `MEDIA_WORKER_SCHEMA`, `MEDIA_HOST_RIVER_SCHEMA` (`<CONTENT_SCHEMA>_river`) and
+  `MEDIA_WORKER_*`.
 - **Publication and access.** Uploads stage in `tmp`, originals are retained in
   `originals`, and prepared outputs wait in `future`. The durable publication
   job copies, verifies, and retires objects in the same operation. Only released
@@ -188,7 +194,7 @@ Browsers upload straight to the bucket with
   `MEDIA_COOKIE_DOMAIN=<domain>`.
 - `MEDIA_GATEWAY_HOSTS=media.<domain>=onlydemo`, `MEDIA_GATEWAY_BUCKETS=onlydemo=<bucket>`;
   `MEDIA_GATEWAY_CORS_ORIGINS` lists exactly the site origins;
-  `MEDIA_GATEWAY_DEFAULTS` is what `onlydemo media-defaults` prints on each deploy.
+  `MEDIA_GATEWAY_DEFAULTS` is what `media-worker publish-defaults` prints on each deploy.
 - Keep the bucket private. The gateway gets a read-only key limited to
   `*/private/*` and `*/public/*`.
 - A CDN may cache `public/`; never let a shared cache store `private/`.

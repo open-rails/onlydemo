@@ -47,23 +47,19 @@ func newRootCommand() *cobra.Command {
 		adminCommand("revoke", "Revoke the admin role", revokeAdmin),
 	)
 	root.AddCommand(&cobra.Command{
-		Use: "media-defaults", Short: "Render the default media images (avatars) into the bucket and print the gateway's MEDIA_GATEWAY_DEFAULTS (needs libvips)", Args: cobra.NoArgs,
+		Use: "media-config", Short: "Print the media registry JSON for the stock ContentKit media worker's MEDIA_KINDS_FILE", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := loadConfig()
 			if err != nil {
 				return err
 			}
-			value, err := publishMediaDefaults(cmd.Context(), cfg)
+			registry, err := mediaRegistry(cfg)
 			if err != nil {
 				return err
 			}
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), value)
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), string(registry))
 			return err
 		},
-	})
-	root.AddCommand(&cobra.Command{
-		Use: "media-worker", Short: "Run the media worker: upload placement, image renditions, video encodes (needs libvips and ffmpeg)", Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error { return runMediaWorker(cmd.Context()) },
 	})
 	root.AddCommand(admin, urlCommand("seed", "Create display channels and posts through a running server's routes", seed),
 		urlCommand("smoke", "Walk a running server through a creator's and a fan's journeys", smoke))

@@ -7,18 +7,16 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/open-rails/contentkit"
 	riverkit "github.com/open-rails/helpers/river"
 	"github.com/open-rails/openrails"
 	"github.com/riverqueue/river"
 )
 
 // Compose all contributors before constructing the one host-owned client.
-func newJobs(ctx context.Context, pool *pgxpool.Pool, cfg Config, auth *appAuth, billing *billingService, content *contentkit.Engine) (*river.Client[pgx.Tx], error) {
+func newJobs(ctx context.Context, pool *pgxpool.Pool, cfg Config, auth *appAuth, billing *billingService) (*river.Client[pgx.Tx], error) {
 	contributions := []riverkit.Contribution{
 		auth.client.RiverJobs(),
 		billing.RiverJobs(),
-		content.RiverJobs(),
 		accountEvents(auth, pool, cfg),
 	}
 	queues := map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 4}}

@@ -6,13 +6,11 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
-	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/contentkit"
 	ckauthkit "github.com/open-rails/contentkit/adapters/authkit"
 	ckopenrails "github.com/open-rails/contentkit/adapters/openrails"
-	"github.com/open-rails/contentkit/contentref"
 	"github.com/open-rails/contentkit/media"
 	"github.com/open-rails/contentkit/media/avatar"
 	"gopkg.in/yaml.v3"
@@ -27,6 +25,9 @@ const contentkitPrefix = "/contentkit"
 
 // mediaWorkerSchema holds the media worker's queue, beside ContentKit's schema.
 func mediaWorkerSchema(cfg Config) string { return contentSchema(cfg) + "_media_worker" }
+
+// contentRiverSchema is ContentKit's own River, apart from the host fleet's.
+func contentRiverSchema(cfg Config) string { return contentSchema(cfg) + "_river" }
 
 const (
 	kindPost    = "post"
@@ -58,7 +59,7 @@ func contentKitConfig(cfg Config) (contentkit.Config, error) {
 	if err := dec.Decode(&ck); err != nil {
 		return ck, fmt.Errorf("contentkit.yaml: %w", err)
 	}
-	ck.Database = contentkit.DatabaseConfig{Schema: contentSchema(cfg), RiverSchema: riverSchema(cfg)}
+	ck.Database = contentkit.DatabaseConfig{Schema: contentSchema(cfg), RiverSchema: contentRiverSchema(cfg)}
 	mc := cfg.Media
 	kinds, err := mediaKinds(ck)
 	if err != nil {
@@ -104,29 +105,14 @@ func mediaKinds(ck contentkit.Config) ([]media.Kind, error) {
 	}, nil
 }
 
-// workerRegistry is the engine's media registry, for the media worker.
-func workerRegistry(cfg Config) (*media.Registry, error) {
+// mediaRegistry is the engine's media registry as JSON: the stock media
+// worker's MEDIA_KINDS_FILE.
+func mediaRegistry(cfg Config) ([]byte, error) {
 	ck, err := contentKitConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
-	mc, err := ck.MediaKinds()
-	if err != nil {
-		return nil, err
-	}
-	mc.Namespace = tenant
-	mc.Hooks = media.Hooks{Failed: mediaFailed}
-	return media.NewRegistry(mc)
-}
-
-// mediaFailed is the worker's Hooks.Failed: a refused upload is shown to its
-// editor, a processing fault is logged.
-func mediaFailed(_ context.Context, ref contentref.ContentRef, file string, err error) {
-	if ie := media.AsImageError(err); ie != nil {
-		slog.Info("media file refused", "ref", ref.String(), "file", file, "code", ie.Code, "reason", ie.Message)
-		return
-	}
-	slog.Warn("media file cannot be derived", "ref", ref.String(), "file", file, "err", err)
+	return ck.MediaRegistry()
 }
 
 // newContentKit runs ContentKit in this process; New migrates its schemas.

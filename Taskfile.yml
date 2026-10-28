@@ -26,12 +26,24 @@ tasks:
     cmds:
       - docker compose down -v
 
-  media:gateway:
-    desc: Run the media gateway (ContentKit cmd/media-gateway at the go.mod version), serving the default avatars media-defaults renders
+  media:config:
+    desc: Write the engine's media registry for the stock media worker (.runtime/media-kinds.json)
     cmds:
       - |
         set -e
-        defaults=$(go run . media-defaults)
+        mkdir -p .runtime
+        tmp=$(mktemp .runtime/media-kinds.XXXXXX)
+        go run . media-config > "$tmp"
+        mv "$tmp" .runtime/media-kinds.json
+
+  media:gateway:
+    desc: Run ContentKit's stock media gateway (go.mod version), serving the default avatars the stock worker's publish-defaults renders
+    deps: [media:config]
+    cmds:
+      - |
+        set -e
+        defaults=$(MEDIA_KINDS_FILE=.runtime/media-kinds.json go tool media-worker publish-defaults | sed -n 's/^MEDIA_GATEWAY_DEFAULTS=//p')
+        test -n "$defaults"
         MEDIA_GATEWAY_DEFAULTS="$defaults" \
         MEDIA_GATEWAY_LISTEN="${MEDIA_GATEWAY_LISTEN:-127.0.0.1:8090}" \
         MEDIA_GATEWAY_S3_ENDPOINT="$MEDIA_S3_ENDPOINT" \
@@ -42,15 +54,21 @@ tasks:
         MEDIA_GATEWAY_TOKEN_KEY_PREVIOUS="${MEDIA_TOKEN_KEY_PREVIOUS:-}" \
         MEDIA_GATEWAY_CORS_ORIGINS="${MEDIA_GATEWAY_CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}" \
         MEDIA_GATEWAY_HOSTS="${MEDIA_GATEWAY_HOSTS:-localhost=onlydemo; 127.0.0.1=onlydemo}" \
-        go run github.com/open-rails/contentkit/cmd/media-gateway
+        go tool media-gateway
 
   media:worker:
-    desc: Run durable ingest and image/video derivative processing (`onlydemo media-worker`; needs libvips and ffmpeg); editor progress survives restarts
+    desc: Run ContentKit's stock media worker (go.mod version) on the engine's registry; needs libvips and ffmpeg
+    deps: [media:config]
     cmds:
       - |
+        content="${CONTENT_SCHEMA:-contentkit}"
+        MEDIA_KINDS_FILE=.runtime/media-kinds.json \
+        MEDIA_CONTENT_SCHEMA="$content" \
+        MEDIA_WORKER_SCHEMA="${content}_media_worker" \
+        MEDIA_HOST_RIVER_SCHEMA="${content}_river" \
+        MEDIA_METRICS_ADDR="${MEDIA_METRICS_ADDR:-127.0.0.1:9090}" \
         MEDIA_WORKER_THREADS="${MEDIA_WORKER_THREADS:-2}" \
-        MEDIA_HOST_RIVER_SCHEMA="${RIVER_SCHEMA:-public}" \
-        go run . media-worker
+        go tool media-worker
 
   run:
     desc: Migrate, then run Go with Air, Vite, the media gateway and the media worker (task dev:up first)

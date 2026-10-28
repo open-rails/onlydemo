@@ -22,9 +22,9 @@ require (
 	github.com/johannesboyne/gofakes3 v1.2.0
 	github.com/joho/godotenv v1.5.1
 	github.com/jonboulle/clockwork v0.5.0
-	github.com/open-rails/contentkit v0.132.1-0.20261027221804-a094747c6821
-	github.com/open-rails/contentkit/adapters/authkit v0.14.1-0.20261027221804-a094747c6821
-	github.com/open-rails/contentkit/adapters/openrails v0.10.3-0.20261027221804-a094747c6821
+	github.com/open-rails/contentkit v0.134.1-0.20261028031128-2789d3df872f
+	github.com/open-rails/contentkit/adapters/authkit v0.14.1-0.20261028031128-2789d3df872f
+	github.com/open-rails/contentkit/adapters/openrails v0.11.1-0.20261028031128-2789d3df872f
 	github.com/open-rails/helpers v1.18.0
 	github.com/open-rails/openrails/adapters/authkit v0.268.2
 	github.com/riverqueue/river/rivertype v0.49.0
@@ -161,4 +161,9 @@ require (
 	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.51.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
+)
+
+tool (
+	github.com/open-rails/contentkit/cmd/media-gateway
+	github.com/open-rails/contentkit/cmd/media-worker
 )
