@@ -90,7 +90,7 @@ func newHarness(t *testing.T, o harnessOptions) *harness {
 	t.Cleanup(h.nmi.Close)
 
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
-	h.cfg = Config{AuthTenantID: iam.NewTenantID(), AuthSchema: "od_auth_" + suffix, BillingSchema: "od_bill_" + suffix,
+	h.cfg = Config{AuthTenantID: iam.NewTenantID(), AuthTenantSlug: "onlydemo", AuthSchema: "od_auth_" + suffix, BillingSchema: "od_bill_" + suffix,
 		RiverSchema: "od_river_" + suffix, ContentSchema: "od_ck_" + suffix, AuthKeysPath: "", AuthAudience: "demo-test",
 		Merchant: testMerchant(openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: nmiTestAccount, SecurityKey: "nmimock-security-key",
 			WebhookSigningSecret: "nmimock-webhook-secret", TokenizationKey: "nmimock-tokenization"}.PSPConfig())}

@@ -21,10 +21,12 @@ type Config struct {
 	Port         int
 	DatabaseURL  string
 	AuthTenantID iam.TenantID
-	AuthIssuer   string
-	AuthAudience string
-	AuthKeysPath string
-	PublicURL    string
+	// AuthTenantSlug is the tenant's AuthKit name (AUTH_TENANT_SLUG, default onlydemo).
+	AuthTenantSlug string
+	AuthIssuer     string
+	AuthAudience   string
+	AuthKeysPath   string
+	PublicURL      string
 	// ReturnOrigins are the exact origins checkout and billing-portal return
 	// URLs may name: PUBLIC_URL plus RETURN_ORIGINS.
 	ReturnOrigins []string
@@ -57,7 +59,7 @@ func loadConfig() (Config, error) {
 				return strings.ToLower(key), value
 			case "DATABASE_URL":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
-			case "AUTH_TENANT_ID", "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_KEYS_PATH", "AUTH_SCHEMA", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA":
+			case "AUTH_TENANT_ID", "AUTH_TENANT_SLUG", "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_KEYS_PATH", "AUTH_SCHEMA", "PUBLIC_URL", "BILLING_SCHEMA", "RIVER_SCHEMA":
 				return strings.ToLower(strings.ReplaceAll(key, "_", ".")), value
 			default:
 				if key == "CONTENT_SCHEMA" || key == "MERCHANT_FILE" || key == "PROVIDER_WRITE_MODE" || key == "TRUSTED_COUNTRY_HEADER" || key == "RETURN_ORIGINS" || strings.HasPrefix(key, "MEDIA_") {
@@ -83,6 +85,13 @@ func loadConfig() (Config, error) {
 	tenantID, err := iam.ParseTenantID(k.String("auth.tenant.id"))
 	if err != nil {
 		return Config{}, fmt.Errorf("AUTH_TENANT_ID must be the persisted account tenant UUID: %w", err)
+	}
+	tenantSlug := iam.NormalizeTenantSlug(k.String("auth.tenant.slug"))
+	if tenantSlug == "" {
+		tenantSlug = "onlydemo"
+	}
+	if err := iam.ValidateTenantSlug(tenantSlug); err != nil {
+		return Config{}, fmt.Errorf("AUTH_TENANT_SLUG %q: %w", tenantSlug, err)
 	}
 	authIssuer := k.String("auth.issuer")
 	if authIssuer == "" {
@@ -138,6 +147,7 @@ func loadConfig() (Config, error) {
 
 	cfg := Config{
 		AuthTenantID:      tenantID,
+		AuthTenantSlug:    tenantSlug,
 		Port:              port,
 		DatabaseURL:       databaseURL,
 		AuthIssuer:        authIssuer,

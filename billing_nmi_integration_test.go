@@ -94,14 +94,18 @@ func TestNMIBillingEndToEnd(t *testing.T) {
 		t.Fatalf("after the post and the membership NMI holds %d sales, want 2", n)
 	}
 
-	// Deleting the final version removes publication; billing access/history stays.
+	// Deleting the final version closes the post to everyone, its buyer
+	// included; the entitlement stays, and a restore reopens it to that purchase.
 	owner.removePost(paid)
-	if post := buyer.call("GET", contentkitPrefix+"/v1/contents/"+paid, nil, "", 200); post["state"] != "deleted" {
-		t.Fatal("buyer lost the retained deleted post")
-	}
+	buyer.call("GET", contentkitPrefix+"/v1/contents/"+paid, nil, "", 404)
 	stranger.call("GET", contentkitPrefix+"/v1/contents/"+paid, nil, "", 404)
 	if len(library()) != 1 {
 		t.Fatal("deleting content erased the billing entitlement")
+	}
+	owner.call("PATCH", contentkitPrefix+"/v1/contents/"+paid+"/versions/"+paidVersion, map[string]any{"state": "published"}, "", 200)
+	eventually(t, "the restore reopening the post to its purchase", func() bool { return buyer.opens(paid) })
+	if buyer.body(paid) != "Paid content" || len(library()) != 1 {
+		t.Fatal("the restored post did not reopen to the original purchase")
 	}
 
 	// Renewal: step the shared clock past the period; the due pass charges.

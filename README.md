@@ -88,6 +88,7 @@ results are synchronous and OpenRails reconciles from the gateway.
 | `PORT`, `PUBLIC_URL` | API listener and browser return origin |
 | `RETURN_ORIGINS` | Comma-separated extra origins checkout/portal return URLs may name besides `PUBLIC_URL` (e.g. the Vite dev origin); any other return URL is refused |
 | `AUTH_TENANT_ID` | Persisted account tenant UUID; retain it with the database and backups |
+| `AUTH_TENANT_SLUG` | The tenant's AuthKit name (default `onlydemo`); startup renames the tenant to it |
 | `AUTH_ISSUER`, `AUTH_AUDIENCE` | Token issuer/audience; origin issuer matches root discovery |
 | `AUTH_KEYS_PATH` | Dev signing and TOTP key directory (default `.runtime/auth`), so sessions and authenticator apps survive restarts |
 | `AUTH_SCHEMA`, `BILLING_SCHEMA`, `RIVER_SCHEMA` | Optional independent schema names; shared `public` is supported |

@@ -60,8 +60,8 @@ It does not convert historical upload folders. Keep old content storage isolated
 from the new gateway, and preserve account/billing records independently.
 Create new posts and upload media through the normal UI; prepared bytes stay
 in `future` until their durable publication job moves them into `public` or
-`private`. The host River fleet runs publication jobs, including schedules and
-retries. The media worker retains ingest and image/video derivative processing ownership.
+`private`. ContentKit's own River (`<CONTENT_SCHEMA>_river`) runs publication
+jobs (`contentkit_publication`), including schedules and retries. The media worker retains ingest and image/video derivative processing ownership.
 
 Stop every old application, AuthKit, OpenRails, ContentKit and media worker
 writer before migration. Retain a restorable PostgreSQL backup and media

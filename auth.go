@@ -108,12 +108,25 @@ func newAuth(ctx context.Context, config Config, pool *pgxpool.Pool, merchant bi
 	if err != nil {
 		return nil, err
 	}
-	if err := client.CreateTenant(ctx, iam.Tenant{ID: config.AuthTenantID}); err != nil {
+	if err := ensureTenant(ctx, client, config.AuthTenantID, config.AuthTenantSlug); err != nil {
 		_ = client.Close(ctx)
 		return nil, err
 	}
 	a.client = client
 	return a, nil
+}
+
+// ensureTenant names the tenant, creating it if missing. AuthKit migration
+// 0026 named existing tenants tenant-<hex>, and CreateTenant refuses the same
+// ID under another name, so rename first.
+func ensureTenant(ctx context.Context, client *authkit.Client, id iam.TenantID, slug string) error {
+	if _, err := client.RenameTenant(ctx, id, slug); err != nil && !errors.Is(err, iam.ErrTenantNotFound) {
+		return fmt.Errorf("name tenant %q: %w", slug, err)
+	}
+	if err := client.CreateTenant(ctx, iam.Tenant{ID: id, Slug: slug}); err != nil {
+		return fmt.Errorf("create tenant %q: %w", slug, err)
+	}
+	return nil
 }
 
 // riverSchema is the host fleet's schema, which AuthKit and OpenRails share.

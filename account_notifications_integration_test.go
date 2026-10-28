@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,9 +80,21 @@ func TestAccountNotifications(t *testing.T) {
 		t.Fatalf("producer replay changed the receipt's local state: %+v %v", replayed, err)
 	}
 
+	// A tenant AuthKit migration 0026 named tenant-<hex>: startup renames it,
+	// and a restart changes nothing.
 	foreignTenant := iam.NewTenantID()
-	if err := h.srv.auth.client.CreateTenant(h.ctx, iam.Tenant{ID: foreignTenant}); err != nil {
+	placeholder := "tenant-" + strings.ReplaceAll(foreignTenant.String(), "-", "")
+	if err := h.srv.auth.client.CreateTenant(h.ctx, iam.Tenant{ID: foreignTenant, Slug: placeholder}); err != nil {
 		t.Fatal(err)
+	}
+	foreignSlug := "foreign-" + foreignTenant.String()
+	for range 2 {
+		if err := ensureTenant(h.ctx, h.srv.auth.client, foreignTenant, foreignSlug); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if named, err := h.srv.auth.client.Tenant(h.ctx, foreignTenant); err != nil || named.Slug != foreignSlug {
+		t.Fatalf("adopted tenant not renamed: %+v %v", named, err)
 	}
 	foreignAccounts, err := h.srv.auth.client.ForTenant(h.ctx, foreignTenant)
 	if err != nil {

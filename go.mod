@@ -8,9 +8,9 @@ require (
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/knadh/koanf/providers/env/v2 v2.0.1
 	github.com/knadh/koanf/v2 v2.3.6
-	github.com/open-rails/authkit v1.42.0
+	github.com/open-rails/authkit v1.43.0
 	github.com/open-rails/migratekit v1.11.2 // indirect
-	github.com/open-rails/openrails v0.268.2
+	github.com/open-rails/openrails v0.268.3
 	github.com/riverqueue/river v0.49.0
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.49.0 // indirect
 )
@@ -22,11 +22,11 @@ require (
 	github.com/johannesboyne/gofakes3 v1.2.0
 	github.com/joho/godotenv v1.5.1
 	github.com/jonboulle/clockwork v0.5.0
-	github.com/open-rails/contentkit v0.134.1-0.20261028031128-2789d3df872f
-	github.com/open-rails/contentkit/adapters/authkit v0.14.1-0.20261028031128-2789d3df872f
-	github.com/open-rails/contentkit/adapters/openrails v0.11.1-0.20261028031128-2789d3df872f
+	github.com/open-rails/contentkit v0.135.0
+	github.com/open-rails/contentkit/adapters/authkit v0.14.0
+	github.com/open-rails/contentkit/adapters/openrails v0.11.0
 	github.com/open-rails/helpers v1.18.0
-	github.com/open-rails/openrails/adapters/authkit v0.268.2
+	github.com/open-rails/openrails/adapters/authkit v0.268.3
 	github.com/riverqueue/river/rivertype v0.49.0
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1
@@ -61,7 +61,7 @@ require (
 	github.com/gagliardetto/treeout v0.1.4 // indirect
 	github.com/go-faster/city v1.0.1 // indirect
 	github.com/go-faster/errors v0.7.1 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.6 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
@@ -152,7 +152,7 @@ require (
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/image v0.46.0 // indirect
-	golang.org/x/net v0.61.0 // indirect
+	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/oauth2 v0.37.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
